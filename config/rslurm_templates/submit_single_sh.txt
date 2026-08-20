@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# rslurm sh_template for slurm_call (single job, no array)
+#
+# No native --container SBATCH directive here -- see
+# config/rslurm_templates/submit_sh.txt's matching comment: the container
+# is invoked explicitly as part of the rscript variable substituted into
+# the final line below.
+#
+# Whisker variables injected by rslurm:
+#   {{{jobname}}}   {{{rscript}}}
+#   {{#flags}}--{{{name}}}{{/flags}}
+#   {{#options}}--{{{name}}}={{{value}}}{{/options}}
+
+#SBATCH --job-name={{{jobname}}}
+#SBATCH --output=slurm_0.out
+#SBATCH --ntasks=1
+{{#flags}}
+#SBATCH --{{{name}}}
+{{/flags}}
+{{#options}}
+#SBATCH --{{{name}}}={{{value}}}
+{{/options}}
+
+set -euo pipefail
+
+eval $(spack load --sh apptainer)
+
+{{{rscript}}} slurm_run.R

@@ -1,0 +1,92 @@
+# Example dataset_metadata.yml.
+#
+# Describes ONE dataset run against ONE input matrix, resolved one of three
+# ways (first match wins -- see R/README.md's "Preparing your input matrix"):
+#   1. dataset.matrix_path is set               -> read that RDS matrix as-is.
+#   2. dataset.preprocessing_script is set      -> run your script against
+#                                                   the raw parquet trio.
+#   3. neither is set                           -> pivot dataset.expression_path
+#                                                   (long format) wide, no
+#                                                   other transformation.
+#
+# There's no post-hoc sample/feature filtering step: if a matrix needs
+# restricting to a subset, do it inside a preprocessing_script (mode 2) or
+# bake it into the matrix itself (mode 1).
+#
+# If you want to run several subsets separately (e.g. per timepoint, per
+# tissue), write one dataset_metadata.yml per matrix/script and run the
+# setup scripts once per file -- there's no built-in "multiple matrices in
+# one config" concept.
+
+dataset:
+  id: sepsis_day0                                    # unique per matrix/run
+  description: >
+    Whole-blood RNA-seq, Day 0 samples only, from a sepsis cohort deposited
+    as a HuggingFace collection (long-format expression + sample metadata +
+    feature metadata parquet trio).
+  hf_collection: "org/sepsis-timecourse-rnaseq"       # documentation only
+
+  # Mode 1: uncomment to use an already-built matrix directly, skipping
+  # both the raw parquet trio and any preprocessing_script.
+  # matrix_path: results/matrices/sepsis_day0.rds
+
+  # Raw parquet trio -- always recorded for provenance. Required for
+  # resolution mode 3 (default pivot); passed through to your script
+  # unchanged for mode 2 (preprocessing_script).
+  expression_path: data/raw/expression.parquet
+  sample_metadata_path: data/raw/sample_metadata.parquet
+  feature_metadata_path: data/raw/feature_metadata.parquet
+  sample_id_col: sample_id
+  feature_id_col: feature_id
+  value_col: value
+  ensembl_col: ensembl
+
+  # Mode 2: uncomment to run your own script instead of the default pivot.
+  # The script must write file.path(tmp_dir, "matrix.rds"); see R/README.md's
+  # "Preprocessing script contract" for the full contract (available
+  # variables). Any sample/feature filtering belongs in the script, not as
+  # a separate post-hoc id list.
+  # preprocessing_script: R/preprocess_sepsis_day0.R
+
+methods:
+  pca:
+    enabled: true
+    rank_range: [2, 20]
+    masking_cv:
+      enabled: true
+      mask_frac: 0.01
+      mask_seed: 2024
+
+  nmf:
+    enabled: true
+    rank_range: [5, 20]
+    seeds: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    masking_cv:
+      enabled: true
+      mask_frac: 0.01
+      mask_seed: 2024
+
+  cogaps:
+    enabled: true
+    rank_range: [5, 10]
+    seeds: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    n_iterations: 15000
+    masking_cv:
+      enabled: true
+      mask_frac: 0.01
+      mask_seed: 2024
+      maskcv_seed: 42
+      alpha_range: [0, 0.001, 0.01, 0.05, 0.1, 0.15, 0.2]
+
+  network:
+    wto:
+      enabled: true
+      n_range: [500, 1000, 2000]   # bootstrap replicate counts swept as the "structural" grid
+      delta: 0.2
+      seeds: [42, 123, 456]         # optional: outer seed controlling the bootstrap RNG stream
+    wgcna:
+      enabled: true
+      power_grid: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]
+      min_module_size: 30
+      merge_cut_height: 0.25
+      network_type: signed

@@ -1,0 +1,67 @@
+# Example cluster_config.yml -- SLURM resource settings, kept separate from
+# dataset_metadata.yml so the same dataset can be pointed at a different
+# cluster (different libPaths/container registry/partition) without
+# touching the dataset/basis/parameter-grid metadata.
+#
+# Keyed by method (network methods are keyed by backend). All job families
+# within a method share these settings today (seed-sweep vs masking-CV don't
+# currently need different resources); pass `slurm_options_extra` to
+# submit_job_family() if a family ever needs an override.
+#
+# sh_template is rslurm's whisker template for array jobs (slurm_apply --
+# every job family in this framework today). sh_template_single is only
+# used if a family ever has no parameter grid at all and dispatches to
+# slurm_call (see R/lib/submit.R) -- falls back to sh_template if omitted.
+# Copying both templates into the project (e.g. config/rslurm_templates/)
+# rather than referencing ~/.rslurm/ keeps the whole setup self-contained
+# and versioned alongside the configs that use it.
+
+pca:
+  mem: 4G
+  cpus_per_task: 1
+  time: "00:30:00"
+  container: "docker://rocker/tidyverse:latest"
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "Rscript"
+
+nmf:
+  mem: 8G
+  cpus_per_task: 1
+  time: "01:00:00"
+  container: "docker://rocker/tidyverse:latest"
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "Rscript"
+
+cogaps:
+  mem: 30G
+  cpus_per_task: 10   # also passed through as CoGAPS's distributed nSets
+  time: "12:00:00"   # at nIterations = 15000 (see methods$cogaps$n_iterations), 06:00:00 wasn't enough for some rank/alpha combinations and produced secondary worker-teardown crashes when hit -- widen further if you still see "reached CPU time limit" in job logs
+  container: "docker://ghcr.io/fertiglab/cogaps:sha-3b3e002"
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "Rscript"
+
+network:
+  wto:
+    mem: 16G
+    cpus_per_task: 10   # also passed through as wTO's internal PSOCK cluster size
+    time: "08:00:00"
+    container: "docker://rocker/tidyverse:latest"
+    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+    sh_template: "config/rslurm_templates/submit_sh.txt"
+    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+    rscript_path: "Rscript"
+  wgcna:
+    mem: 16G
+    cpus_per_task: 8
+    time: "04:00:00"
+    container: "oras://community.wave.seqera.io/library/r-wgcna:1.74--5149c638df2976dd"
+    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+    sh_template: "config/rslurm_templates/submit_sh.txt"
+    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+    rscript_path: "/opt/conda/bin/Rscript"   # this Wave-built image's R lives in an unactivated conda env, not on PATH -- check with `apptainer exec <image> bash -lc 'command -v Rscript'` if you pull a different image and hit "Rscript: command not found"

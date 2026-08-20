@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+# In the rslurm cmd, provide a path to a persistent dir
+# on the host system to add to the libpath, eg
+# libPaths       = "/ref/mblab/software/chasem/R/4.6.0"
+#
+# No native --container SBATCH directive here -- the container is instead
+# invoked explicitly as part of the rscript variable substituted into the
+# final line below (constructed by R/lib/submit.R::submit_job_family() as
+# a full `apptainer run ...` command, including this family's image and,
+# since this job's bundle lives in a squashfs archive, a
+# `-B "$SQUASHFS_PATH":...:image-src=/` bind of it -- see R/README.md's
+# squashfs section). `spack load` makes `apptainer` itself available on
+# PATH before that line runs.
+#
+# Whisker variables injected by rslurm:
+#   {{{jobname}}}   {{{max_node}}}   {{{rscript}}}
+#   {{#flags}}--{{{name}}}{{/flags}}
+#   {{#options}}--{{{name}}}={{{value}}}{{/options}}
+
+#SBATCH --array=0-{{{max_node}}}
+#SBATCH --job-name={{{jobname}}}
+#SBATCH --output=logs/{{{jobname}}}-%a.out
+{{#flags}}
+#SBATCH --{{{name}}}
+{{/flags}}
+{{#options}}
+#SBATCH --{{{name}}}={{{value}}}
+{{/options}}
+
+set -euo pipefail
+
+eval $(spack load --sh apptainer)
+
+{{{rscript}}} slurm_run.R

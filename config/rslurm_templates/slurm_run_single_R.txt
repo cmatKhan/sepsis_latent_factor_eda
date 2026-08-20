@@ -1,0 +1,20 @@
+{{#libPaths}}.libPaths(c(.libPaths(), '{{.}}'))
+{{/libPaths}}
+{{#pkgs}}library({{.}}, quietly = TRUE)
+{{/pkgs}}
+
+{{#add_obj}}
+load('add_objects.RData')
+{{/add_obj}}
+
+# See config/rslurm_templates/slurm_run_R.txt's matching comment -- same
+# writable-tempdir graphics device pre-open, for the same reason.
+grDevices::pdf(file.path(tempdir(), "Rplots.pdf"))
+
+.rslurm_func <- readRDS('f.RDS')
+.rslurm_params <- readRDS('params.RDS')
+.rslurm_result <- do.call(.rslurm_func, .rslurm_params)
+               
+.rslurm_output_dir <- Sys.getenv("RSLURM_OUTPUT_DIR", unset = ".")
+dir.create(.rslurm_output_dir, recursive = TRUE, showWarnings = FALSE)
+saveRDS(.rslurm_result, file = file.path(.rslurm_output_dir, 'results_0.RDS'))
