@@ -19,33 +19,33 @@
 # one config" concept.
 
 dataset:
-  id: GSE110487
+  id: GSE273700
   description: >
-    All samples and features from GSE110487
+    All samples and features from GSE273700
   hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
 
   # Raw parquet trio -- always recorded for provenance. Required for
   # resolution mode 3 (default pivot); passed through to your script
   # unchanged for mode 2 (preprocessing_script).
-  expression_path: /home/chase/projects/hf_sepsis_collection/GSE110487/expression.parquet
-  sample_metadata_path: /home/chase/projects/hf_sepsis_collection/GSE110487/sample_metadata.parquet
-  feature_metadata_path: /home/chase/projects/hf_sepsis_collection/GSE110487/feature_metadata.parquet
+  expression_path: /home/chase/projects/hf_sepsis_collection/GSE273700/expression.parquet
+  sample_metadata_path: /home/chase/projects/hf_sepsis_collection/GSE273700/sample_metadata.parquet
+  feature_metadata_path: /home/chase/projects/hf_sepsis_collection/GSE273700/feature_metadata.parquet
   sample_id_col: sample_id
   # feature_metadata.parquet's key column is GeneID (Entrez), which is also
-  # what R/gse110487_preprocessing.R uses as the matrix's rownames -- there
+  # what R/GSE273700_preprocessing.R uses as the matrix's rownames -- there
   # is no column literally named "feature_id" in this dataset's metadata.
   # Confirmed by ingest-time join coverage: GeneID matches 100% of loadings
   # row names, "feature_id" matches 0% (doesn't exist as a column at all).
-  feature_id_col: GeneID
+  feature_id_col: feature_id
   value_col: value
-  ensembl_col: EnsemblGeneID
+  ensembl_col: feature_id
 
   # Mode 2: uncomment to run your own script instead of the default pivot.
   # The script must write file.path(tmp_dir, "matrix.rds"); see R/README.md's
   # "Preprocessing script contract" for the full contract (available
   # variables). Any sample/feature filtering belongs in the script, not as
   # a separate post-hoc id list.
-  preprocessing_script: R/gse110487_preprocessing.R
+  preprocessing_script: R/gse273700_preprocessing.R
 
 methods:
   pca:

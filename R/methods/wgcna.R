@@ -37,5 +37,6 @@ run_wgcna_param_job <- function(power, min_module_size, merge_cut_height,
     nThreads = wgcna_cpu_per_task, verbose = 0
   )
 
-  list(power = power, net = net, genes = colnames(datExpr))
+  list(power = power, net = net, genes = colnames(datExpr),
+       samples = rownames(datExpr))
 }

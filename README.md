@@ -44,10 +44,19 @@ Rscript R/ingest_results.R config/GSE110487_config.yml GSE110487_results results
 - A new dataset (different `dataset.id` in the config) is ingested
   alongside any existing datasets in the same DB file -- point multiple
   configs at the same `<db_path>` to build up a multi-dataset DB.
-- Large artifacts (loading matrices, wTO edge tables) are written under
-  `<db_dir>/stability_artifacts/<dataset_id>/` and referenced by path from
-  the DB; everything the app filters/aggregates on lives in the SQLite
-  tables themselves.
+- Large artifacts (loading matrices, sample/module scores, wTO edge tables)
+  are written under `<db_dir>/stability_artifacts/<dataset_id>/` and
+  referenced by path from the DB; everything the app filters/aggregates on
+  lives in the SQLite tables themselves.
+- The dataset config's `sample_metadata_path`/`sample_id_col` and
+  `feature_metadata_path`/`feature_id_col` are registered in the DB as
+  **pointers** (path + id column), not copied in -- refreshed on every
+  ingest run regardless of which job families changed. The app always
+  re-reads the pointed-to file live, so editing the metadata file itself
+  (e.g. adding a clinical variable) needs no re-ingest. Get `feature_id_col`
+  right: it must match the column in `feature_metadata_path` whose values
+  equal the fitted matrix's row names (verify with a quick join-coverage
+  check by hand -- ingest doesn't validate this for you).
 
 Run interactively instead of via `Rscript` by setting `ingest_config_path`,
 `ingest_results_dir`, `ingest_db_path` (and optionally `ingest_overwrite`)

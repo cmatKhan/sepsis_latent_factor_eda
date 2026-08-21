@@ -13,9 +13,9 @@ library(DESeq2)
 framework_run <- exists("tmp_dir", inherits = FALSE)
 
 if (!framework_run) {
-    expression_path <- "~/projects/hf_sepsis_collection/GSE110487/expression.parquet"
-    sample_metadata_path <- "~/projects/hf_sepsis_collection/GSE110487/sample_metadata.parquet"
-    feature_metadata_path <- "~/projects/hf_sepsis_collection/GSE110487/feature_metadata.parquet"
+    expression_path <- "~/projects/hf_sepsis_collection/GSE273700/expression.parquet"
+    sample_metadata_path <- "~/projects/hf_sepsis_collection/GSE273700/sample_metadata.parquet"
+    feature_metadata_path <- "~/projects/hf_sepsis_collection/GSE273700/feature_metadata.parquet"
 }
 
 raw <- list(
@@ -24,17 +24,19 @@ raw <- list(
     feature = arrow::read_parquet(feature_metadata_path)
 )
 
+
+
 mat <- raw$ex |>
     mutate(value = as.integer(value)) |>
-    pivot_wider(id_cols = GeneID, names_from = sample_id, values_from = value) |>
-    dplyr::select(GeneID, all_of(raw$meta$sample_id)) |>
-    column_to_rownames(var = "GeneID") |>
+    pivot_wider(id_cols = feature_id, names_from = sample_id, values_from = value) |>
+    dplyr::select(feature_id, all_of(raw$meta$sample_id)) |>
+    column_to_rownames(var = "feature_id") |>
     as.matrix()
 
-mat <- mat[as.character(raw$feature$GeneID), ]
+mat <- mat[raw$feature$feature_id, ]
 
 stopifnot(identical(colnames(mat), raw$meta$sample_id))
-stopifnot(identical(rownames(mat), as.character(raw$feature$GeneID)))
+stopifnot(identical(rownames(mat), raw$feature$feature_id))
 
 dds <- DESeqDataSetFromMatrix(
     countData = mat,
@@ -44,29 +46,14 @@ dds <- DESeqDataSetFromMatrix(
 )
 
 # remove hemoglobin genes
-hb_entrez_ids <- c(
-    HBA1 = "3039",
-    HBA2 = "3040",
-    HBB = "3043",
-    HBG1 = "3047",
-    HBBP1 = "3044",
-    HBD = "3045",
-    HBG2 = "3048"
-)
-
-# remove ribosomal RNA loci -- residual rRNA depletion carryover shows up as
-# a handful of very-high-mean, very-high-dispersion genes that break
-# DESeq2's parametric dispersion fit (see conversation history / dispersion
-# diagnostics: these were among the top-15 highest-dispersion genes despite
-# high mean expression, the opposite of the technical-noise trend the
-# parametric fit assumes)
-rrna_entrez_ids <- c(
-    RNA18SN1 = "106631781",
-    RNA18SN2 = "109864280",
-    RNA18SN4 = "109864273",
-    `RNA5-8SN3` = "109910381",
-    `RNA5-8SN4` = "109864274",
-    RNA28SN5 = "100008589"
+hb_ids <- c(
+    HBA2  = "ENSG00000188536",
+    HBG2  = "ENSG00000196565",
+    HBA1  = "ENSG00000206172",
+    HBG1  = "ENSG00000213934",
+    HBD   = "ENSG00000223609",
+    HBBP1 = "ENSG00000229988",
+    HBB   = "ENSG00000244734"
 )
 
 
@@ -74,13 +61,14 @@ rrna_entrez_ids <- c(
 # AND remove hemoglobin genes and ribosomal RNA loci
 smallest_group_size <- 62
 keep <- rowSums(counts(dds) >= 10) >= smallest_group_size &
-    !rownames(dds) %in% hb_entrez_ids &
-    !rownames(dds) %in% rrna_entrez_ids
+    !rownames(dds) %in% hb_ids
 
 # Subset the dds object
 dds_filt <- dds[keep, ]
 
-vsd <- vst(dds_filt, blind = TRUE, fitType = "local")
+# plotDispEsts(dds_filt)
+
+vsd <- vst(dds_filt, blind = TRUE)
 vst_mat <- assay(vsd)
 
 vst_mat <- assay(vsd)

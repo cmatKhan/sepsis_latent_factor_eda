@@ -132,10 +132,52 @@ ensure_schema <- function(con) {
        direction TEXT NOT NULL DEFAULT 'pos',
        queried_at TEXT,
        UNIQUE(factor_id, query_type, direction)
+     )",
+    "CREATE TABLE IF NOT EXISTS dataset_metadata_sources (
+       dataset_id TEXT NOT NULL,
+       kind TEXT NOT NULL CHECK (kind IN ('sample','feature')),
+       path TEXT NOT NULL,
+       id_col TEXT NOT NULL,
+       registered_at TEXT,
+       UNIQUE(dataset_id, kind)
      )"
   )
   for (s in statements) DBI::dbExecute(con, s)
+  # additive column migrations for DBs created before this column existed --
+  # sample-level scores/eigengenes artifact, same relative-to-DB-dir
+  # convention as loadings_file (see resolve_artifact())
+  ensure_column(con, "fits", "scores_file", "TEXT")
+  # query_size lets the app compute gene-ratio dot plots (intersection_size /
+  # query_size) without re-querying g:Profiler
+  ensure_column(con, "enrichment_cache", "query_size", "INTEGER")
   invisible(con)
+}
+
+#' Add a column to an existing table if it isn't already there -- lets DBs
+#' created by an earlier schema version upgrade in place, since
+#' `CREATE TABLE IF NOT EXISTS` alone never adds columns to a table that
+#' already exists.
+ensure_column <- function(con, table, col, decl) {
+  info <- DBI::dbGetQuery(con, sprintf("PRAGMA table_info(%s)", table))
+  if (!(col %in% info$name)) {
+    DBI::dbExecute(con, sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, col, decl))
+  }
+  invisible(NULL)
+}
+
+#' Register (or refresh) the sample/feature metadata pointers for a dataset,
+#' straight from its config -- pure bookkeeping, no metadata content is
+#' copied in. Silently no-ops for a kind whose path/id_col isn't set in the
+#' config (e.g. matrix_path-mode datasets with no parquet trio).
+register_metadata_source <- function(con, dataset_id, kind, path, id_col) {
+  if (is.null(path) || is.null(id_col) || !nzchar(path) || !nzchar(id_col)) return(invisible(NULL))
+  DBI::dbExecute(con,
+    "INSERT INTO dataset_metadata_sources (dataset_id, kind, path, id_col, registered_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(dataset_id, kind) DO UPDATE SET
+       path = excluded.path, id_col = excluded.id_col, registered_at = excluded.registered_at",
+    params = list(dataset_id, kind, path, id_col))
+  invisible(NULL)
 }
 
 ensure_dataset <- function(con, dataset_id, description = NA_character_) {

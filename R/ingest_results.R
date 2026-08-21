@@ -86,6 +86,19 @@ ensure_dataset(con, dataset_id, description)
 art_dir <- artifacts_dir(ingest_db_path, dataset_id)
 dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
 
+# Pointer-only bookkeeping (see R/lib/ingest/db.R) -- refreshed every
+# ingest run regardless of which job families were (re)ingested, since
+# this is pure config metadata, not derived from results. No-ops per kind
+# if the config doesn't set that path/id_col (e.g. matrix_path-mode
+# datasets with no parquet trio).
+ds_cfg <- dataset_yaml$dataset
+register_metadata_source(con, dataset_id, "sample",
+                          ds_cfg$sample_metadata_path, ds_cfg$sample_id_col)
+register_metadata_source(con, dataset_id, "feature",
+                          ds_cfg$feature_metadata_path, ds_cfg$feature_id_col)
+message("sample metadata:  ", ds_cfg$sample_metadata_path %||% "(not set in config)")
+message("feature metadata: ", ds_cfg$feature_metadata_path %||% "(not set in config)")
+
 overwrite_requested <- function(jobname) {
   isTRUE(ingest_overwrite) ||
     (is.character(ingest_overwrite) && jobname %in% ingest_overwrite)
@@ -124,7 +137,7 @@ for (k in seq_along(jobnames)) {
   result_files <- list.files(fam_dir, pattern = "^results_\\d+\\.RDS$", full.names = TRUE)
   task_ids <- as.integer(sub("^results_(\\d+)\\.RDS$", "\\1", basename(result_files)))
 
-  n_ok <- 0L; n_failed <- 0L; n_missing <- 0L
+  n_ok <- 0L; n_failed <- 0L; n_missing <- 0L; n_scores <- 0L
   new_ids <- integer(0)
 
   DBI::dbExecute(con, "BEGIN")
@@ -156,17 +169,25 @@ for (k in seq_along(jobnames)) {
       loadings_file <- file.path("stability_artifacts", dataset_id, fname)
     }
 
+    scores_file <- NA_character_
+    if (!is.null(ext$scores)) {
+      fname <- sprintf("%s_task%03d_scores.rds", jobname, task)
+      saveRDS(ext$scores, file.path(art_dir, fname))
+      scores_file <- file.path("stability_artifacts", dataset_id, fname)
+    }
+
     DBI::dbExecute(con,
       "INSERT INTO fits (dataset_id, method, family, jobname, rank, seed, alpha,
-                         power, n_boot, delta, mse, n_factors, status, loadings_file)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         power, n_boot, delta, mse, n_factors, status, loadings_file, scores_file)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       params = list(dataset_id, ext$method, ext$family, jobname,
                     fit$rank, fit$seed, fit$alpha, fit$power, fit$n_boot, fit$delta,
-                    fit$mse, fit$n_factors, fit$status, loadings_file))
+                    fit$mse, fit$n_factors, fit$status, loadings_file, scores_file))
     fit_id <- DBI::dbGetQuery(con, "SELECT last_insert_rowid() AS id")$id
 
     if (fit$status == "ok") {
       n_ok <- n_ok + 1L
+      if (!is.na(scores_file)) n_scores <- n_scores + 1L
       new_ids <- c(new_ids, fit_id)
       if (!is.null(ext$loadings)) {
         DBI::dbWriteTable(con, "factors", data.frame(
@@ -200,8 +221,17 @@ for (k in seq_along(jobnames)) {
     key <- cls$method
     new_fits_by_method[[key]] <- c(new_fits_by_method[[key]], new_ids)
   }
-  report[[jobname]] <- sprintf("ingested (%d ok, %d failed, %d missing of %d tasks)",
-                                n_ok, n_failed, n_missing, nrow(params))
+  scores_note <- if (cls$method %in% c("pca", "nmf", "cogaps", "wgcna") && n_ok > 0) {
+    if (n_scores == n_ok) {
+      ", scores/eigengenes: all ok fits"
+    } else if (n_scores == 0 && cls$method == "wgcna") {
+      ", scores/eigengenes: none -- re-run this job with the current R/methods/wgcna.R (records sample ids) and re-ingest with --overwrite to enable metadata-association views"
+    } else {
+      sprintf(", scores/eigengenes: %d/%d ok fits", n_scores, n_ok)
+    }
+  } else ""
+  report[[jobname]] <- sprintf("ingested (%d ok, %d failed, %d missing of %d tasks)%s",
+                                n_ok, n_failed, n_missing, nrow(params), scores_note)
   message("[", jobname, "] ", report[[jobname]])
 }
 

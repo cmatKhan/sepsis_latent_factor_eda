@@ -16,6 +16,11 @@ library(ggplot2)
 library(DT)
 
 source(file.path("R", "db_helpers.R"), local = TRUE)
+source(file.path("R", "metadata_helpers.R"), local = TRUE)
+source(file.path("R", "comparison_helpers.R"), local = TRUE)
+# prepare_loadings()/pair_similarities() -- reused unmodified for the
+# cross-method "Compare to PCA" views (see app/R/comparison_helpers.R)
+source(file.path("..", "R", "lib", "ingest", "similarity.R"), local = TRUE)
 
 db_path <- Sys.getenv("STABILITY_DB", unset = "")
 if (!nzchar(db_path)) {
@@ -29,7 +34,40 @@ con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
 options(stability.db_dir = normalizePath(dirname(db_path)))
 onStop(function() DBI::dbDisconnect(con))
 
-FACTORIZATION_METHODS <- c("pca", "nmf", "cogaps")
+# In-app additive schema upgrade for DBs built by an older ingest version --
+# mirrors the columns ensure_schema() in R/lib/ingest/db.R adds, so the app
+# works against a DB that hasn't been re-ingested yet.
+local({
+  ensure_column <- function(con, table, col, decl) {
+    info <- DBI::dbGetQuery(con, sprintf("PRAGMA table_info(%s)", table))
+    if (!(col %in% info$name)) DBI::dbExecute(con, sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, col, decl))
+  }
+  DBI::dbExecute(con,
+    "CREATE TABLE IF NOT EXISTS dataset_metadata_sources (
+       dataset_id TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('sample','feature')),
+       path TEXT NOT NULL, id_col TEXT NOT NULL, registered_at TEXT,
+       UNIQUE(dataset_id, kind))")
+  ensure_column(con, "fits", "scores_file", "TEXT")
+  ensure_column(con, "enrichment_cache", "query_size", "INTEGER")
+})
+
+#' Larger, darker text for the per-factor (Level 3) plots -- gene/term
+#' labels in particular tend to be numerous and easy to lose at the
+#' default ggplot text size/color.
+readable_factor_theme <- function(base_size = 15) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      axis.text   = element_text(size = base_size, color = "black"),
+      axis.title  = element_text(size = base_size + 1, color = "black", face = "bold"),
+      plot.title  = element_text(size = base_size + 2, color = "black", face = "bold"),
+      strip.text  = element_text(size = base_size - 1, color = "black", face = "bold"),
+      legend.text = element_text(size = base_size - 1, color = "black")
+    )
+}
+
+FACTORIZATION_METHODS <- c("pca", "nmf", "cogaps")   # loadings/scores-capable (single-fit views)
+STABILITY_METHODS     <- c("nmf", "cogaps")          # multi-seed -- stability views apply
+COMPARE_TO_PCA_METHODS <- c("nmf", "cogaps")         # gene-loadings space comparable to PCA
 
 ## ---- ui -----------------------------------------------------------------------
 
@@ -108,6 +146,13 @@ server <- function(input, output, session) {
         if (nrow(ov$wgcna) > 0 && !is.na(ov$wgcna$ari)) sprintf("mean ARI %.2f", ov$wgcna$ari) else "--"
       } else if (m == "wto") {
         if (nrow(ov$wto) > 0 && !is.na(ov$wto$pearson)) sprintf("mean edge r %.2f", ov$wto$pearson) else "--"
+      } else if (m == "pca") {
+        # PCA is deterministic (one fit per rank) -- no stability metric
+        # applies; masking-CV rank selection is what's still meaningful
+        mc <- maskcv_curve(con, ds(), "pca")
+        if (nrow(mc) > 0 && any(!is.na(mc$mse))) {
+          sprintf("best rank (masking-CV): %d", mc$rank[which.min(mc$mse)])
+        } else "--"
       } else {
         s <- ov$stability[ov$stability$method == m, metric()]
         if (length(s) == 1 && !is.na(s)) sprintf("mean matched %s %.2f", metric(), s) else "--"
@@ -123,6 +168,20 @@ server <- function(input, output, session) {
       )
     })
     tagList(
+      card(
+        class = "mb-3",
+        card_body(
+          style = "background-color: #f4f8fb;",
+          tags$b("How to explore this app: "),
+          "click ", tags$b("Explore"), " on a method card below to see its stability ",
+          "overview (Level 1). From there, click a point on a plot (e.g. a rank in the ",
+          "seed-stability plot, a power in the WGCNA ARI heatmap) -- or use a rank/power ",
+          "selector where there's no plot to click -- to drill into that specific fit ",
+          "(Level 2). Within a fit, click a factor in the per-factor stability plot to ",
+          "see its top genes and run functional enrichment (Level 3). Use the ",
+          tags$b("breadcrumb"), " at the top of the page to navigate back up at any level."
+        )
+      ),
       h4("Method overview -- cross-seed stability at a glance"),
       layout_column_wrap(width = 1 / max(length(cards), 1), !!!cards),
       h5("Ingested job families"),
@@ -149,7 +208,19 @@ server <- function(input, output, session) {
 
   level1_ui <- function() {
     m <- nav$method
-    if (m %in% FACTORIZATION_METHODS) {
+    if (m == "pca") {
+      # PCA is deterministic (one fit per rank) -- no seed-stability or
+      # cross-rank views apply; masking-CV rank selection still does, plus
+      # a plain rank-select (no click-through plot left to drill via)
+      navset_card_tab(
+        nav_panel("Rank selection (masking-CV)",
+          plotOutput("l1_maskcv", height = "420px"),
+          layout_columns(col_widths = c(6, 6),
+            selectInput("l1_pca_rank", "Explore rank:", choices = NULL),
+            actionButton("l1_pca_go", "Explore this rank", class = "btn-primary btn-sm",
+                         style = "margin-top: 24px;")))
+      )
+    } else if (m %in% STABILITY_METHODS) {
       navset_card_tab(
         nav_panel("Seed stability vs rank",
           p("Distribution of matched factor similarity across all seed pairs, per rank. Click a rank to drill in."),
@@ -188,7 +259,7 @@ server <- function(input, output, session) {
   }
 
   l1_stab_data <- reactive({
-    req(nav$method %in% FACTORIZATION_METHODS)
+    req(nav$method %in% STABILITY_METHODS)
     seed_stability_by_rank(con, ds(), nav$method)
   })
 
@@ -196,8 +267,7 @@ server <- function(input, output, session) {
     d <- l1_stab_data()
     validate(need(nrow(d) > 0,
       paste0("No same-rank seed pairs for ", toupper(nav$method),
-             " -- PCA is deterministic (one fit per rank), so cross-seed stability ",
-             "doesn't apply; see the masking-CV and cross-rank tabs instead.")))
+             " at any rank -- see the masking-CV and cross-rank tabs instead.")))
     d$sim <- d[[metric()]]
     ggplot(d, aes(x = factor(rank), y = sim)) +
       geom_boxplot(outlier.size = 0.6, fill = "grey85") +
@@ -234,7 +304,7 @@ server <- function(input, output, session) {
   })
 
   l1_crossrank_data <- reactive({
-    req(nav$method %in% FACTORIZATION_METHODS)
+    req(nav$method %in% STABILITY_METHODS)
     crossrank_matrix(con, ds(), nav$method)
   })
   output$l1_crossrank <- renderPlot({
@@ -252,10 +322,25 @@ server <- function(input, output, session) {
   })
 
   observe({
-    req(nav$level == 1, nav$method %in% FACTORIZATION_METHODS)
+    req(nav$level == 1, nav$method %in% STABILITY_METHODS)
     d <- l1_crossrank_data()
     ranks <- sort(unique(c(d$rank_a, d$rank_b)))
     updateSelectInput(session, "l1_ref_rank", choices = ranks)
+  })
+
+  # PCA's reduced Level 1: plain rank-select + button (no click-through
+  # plot left to drill via, since the stability tabs are gone)
+  observe({
+    req(nav$level == 1, nav$method == "pca")
+    mc <- maskcv_curve(con, ds(), "pca")
+    ranks <- sort(unique(mc$rank))
+    if (length(ranks) == 0) ranks <- distinct_ranks(con, ds(), "pca")
+    updateSelectInput(session, "l1_pca_rank", choices = ranks)
+  })
+  observeEvent(input$l1_pca_go, {
+    req(input$l1_pca_rank)
+    nav$rank <- as.integer(input$l1_pca_rank)
+    nav$level <- 2
   })
 
   output$l1_trajectory <- renderPlot({
@@ -355,34 +440,93 @@ server <- function(input, output, session) {
     if (m %in% FACTORIZATION_METHODS) {
       f <- fits_at_rank(con, ds(), m, nav$rank)
       seed_choices <- setNames(f$fit_id, paste0("seed ", f$seed))
-      navset_card_tab(
-        nav_panel("Seed-pair matrix",
-          p("Mean matched factor similarity for every seed pair at this rank."),
-          plotOutput("l2_seedpair", height = "420px")),
-        nav_panel("Per-factor stability",
+      panels <- list()
+      if (m %in% STABILITY_METHODS) {
+        panels <- c(panels, list(
+          nav_panel("Seed-pair matrix",
+            p("Mean matched factor similarity for every seed pair at this rank."),
+            plotOutput("l2_seedpair", height = "420px")),
+          nav_panel("Per-factor stability",
+            layout_columns(col_widths = c(3, 9),
+              selectInput("l2_ref_fit", "Reference seed:", choices = seed_choices),
+              p("Each factor's matched similarity to every other seed. Click a factor to drill in.")),
+            plotOutput("l2_factor_stability", click = "l2_factor_click", height = "400px")),
+          nav_panel("Factor x factor heatmap",
+            layout_columns(col_widths = c(3, 3, 6),
+              selectInput("l2_fit_a", "Fit A (seed):", choices = seed_choices),
+              selectInput("l2_fit_b", "Fit B (seed):", choices = seed_choices,
+                          selected = if (length(seed_choices) > 1) seed_choices[[2]] else seed_choices[[1]]),
+              p("All factor-pair similarities; Hungarian matches outlined.")),
+            plotOutput("l2_ff_heatmap", height = "440px"))
+        ))
+      }
+      panels <- c(panels, list(
+        nav_panel("Sample scores",
           layout_columns(col_widths = c(3, 9),
-            selectInput("l2_ref_fit", "Reference seed:", choices = seed_choices),
-            p("Each factor's matched similarity to every other seed. Click a factor to drill in.")),
-          plotOutput("l2_factor_stability", click = "l2_factor_click", height = "400px")),
-        nav_panel("Factor x factor heatmap",
-          layout_columns(col_widths = c(3, 3, 6),
-            selectInput("l2_fit_a", "Fit A (seed):", choices = seed_choices),
-            selectInput("l2_fit_b", "Fit B (seed):", choices = seed_choices,
-                        selected = if (length(seed_choices) > 1) seed_choices[[2]] else seed_choices[[1]]),
-            p("All factor-pair similarities; Hungarian matches outlined.")),
-          plotOutput("l2_ff_heatmap", height = "440px"))
-      )
+            selectInput("l2_scores_fit", "Fit (seed):", choices = seed_choices),
+            selectInput("l2_scores_sort", "Sort/group by metadata field:", choices = NULL)),
+          DTOutput("l2_scores_table")),
+        nav_panel("Factor correlation (this fit)",
+          p("How redundant are this fit's own factors with each other, at the sample-score level?"),
+          selectInput("l2_corr_fit", "Fit (seed):", choices = seed_choices),
+          plotOutput("l2_factor_corr", height = "420px")),
+        nav_panel("Metadata associations",
+          p("Spearman correlation (numeric fields) / Kruskal-Wallis (categorical fields) between each factor's sample scores and every sample-metadata column. p-values BH-adjusted across the whole grid shown."),
+          selectInput("l2_assoc_fit", "Fit (seed):", choices = seed_choices),
+          plotOutput("l2_assoc_heatmap", height = "440px"))
+      ))
+      if (m %in% COMPARE_TO_PCA_METHODS) {
+        panels <- c(panels, list(
+          nav_panel("Compare to PCA",
+            p("Is ", toupper(m), " estimating latent factors better than PCA at this rank, and how do its factors relate to PCA's?"),
+            selectInput("l2_cmp_fit", "Fit (seed):", choices = seed_choices),
+            h6("Reconstruction quality (masking-CV, held-out MSE)"),
+            p(em("One fixed mask draw per rank -- these are point estimates, not a tested difference.")),
+            tableOutput("l2_cmp_mse"),
+            h6("Factor similarity (signed cosine; negative = matches PCA's opposite-signed side)"),
+            plotOutput("l2_cmp_heatmap", height = "380px"),
+            DTOutput("l2_cmp_table"),
+            layout_columns(col_widths = c(6, 6),
+              actionButton("l2_cmp_view_this", "View selected factor (this method)", class = "btn-outline-primary btn-sm"),
+              actionButton("l2_cmp_view_pca", "View matched PCA factor", class = "btn-outline-primary btn-sm")),
+            h6("Biological interpretability -- already-queried enrichment (Level 3), side by side"),
+            p("Reflects only what's already been run via Level 3's Enrichment tab; nothing is queried automatically here."),
+            layout_columns(col_widths = c(6, 6),
+              tagList(strong(toupper(m)), DTOutput("l2_cmp_enrich_this")),
+              tagList(strong("PCA"), DTOutput("l2_cmp_enrich_pca"))))
+        ))
+      }
+      do.call(navset_card_tab, panels)
     } else if (m == "wgcna") {
       f <- wgcna_fits(con, ds())
+      power_choices <- setNames(f$fit_id, paste0("power ", f$power))
+      pca_fits_all <- DBI::dbGetQuery(con,
+        "SELECT fit_id, rank FROM fits WHERE dataset_id = ? AND method = 'pca' AND status = 'ok' ORDER BY rank",
+        params = list(ds()))
+      pca_choices <- setNames(pca_fits_all$fit_id, paste0("PCA rank ", pca_fits_all$rank))
       navset_card_tab(
         nav_panel("Modules at this power",
           tableOutput("l2_wgcna_sizes"),
           h6("Best Hungarian-matched module at every other power (Jaccard):"),
           DTOutput("l2_wgcna_matches")),
         nav_panel("Module overlap vs another power",
-          selectInput("l2_wgcna_other", "Compare with power:",
-                      choices = setNames(f$fit_id, paste0("power ", f$power))),
-          plotOutput("l2_wgcna_jaccard", height = "440px"))
+          selectInput("l2_wgcna_other", "Compare with power:", choices = power_choices),
+          plotOutput("l2_wgcna_jaccard", height = "440px")),
+        nav_panel("Module eigengenes",
+          p("Eigengene scores require re-running wgcna_grid with the current R/methods/wgcna.R (records sample ids) and re-ingesting with --overwrite; older fits show no data here."),
+          layout_columns(col_widths = c(3, 9),
+            selectInput("l2_wgcna_scores_fit", "Power:", choices = power_choices),
+            selectInput("l2_wgcna_scores_sort", "Sort/group by metadata field:", choices = NULL)),
+          DTOutput("l2_wgcna_scores_table")),
+        nav_panel("Metadata associations",
+          selectInput("l2_wgcna_assoc_fit", "Power:", choices = power_choices),
+          plotOutput("l2_wgcna_assoc_heatmap", height = "440px")),
+        nav_panel("Compare to PCA",
+          p("Similarity only -- WGCNA has no masking-CV-style reconstruction MSE (ARI-based module stability isn't the same kind of quantity), and there's no existing per-module enrichment feature yet to compare biological interpretability against."),
+          layout_columns(col_widths = c(6, 6),
+            selectInput("l2_wgcna_cmp_fit", "Power:", choices = power_choices),
+            selectInput("l2_wgcna_cmp_pca", "Compare with:", choices = pca_choices)),
+          plotOutput("l2_wgcna_cmp_heatmap", height = "420px"))
       )
     } else if (m == "wto") {
       navset_card_tab(
@@ -448,6 +592,179 @@ server <- function(input, output, session) {
       theme_minimal(base_size = 14)
   })
 
+  # ---- generic sample-scores / metadata-association helpers, shared by
+  # factorization methods (factor scores) and WGCNA (module eigengenes) ----
+
+  sample_meta_reactive <- reactive({
+    req(input$dataset)
+    dataset_metadata(con, ds(), "sample")
+  })
+
+  #' Populate a metadata-field selectInput generically from whatever
+  #' columns the dataset's sample metadata table has (none if unregistered).
+  update_meta_field_choices <- function(session, input_id) {
+    m <- sample_meta_reactive()
+    choices <- if (is.null(m)) character(0) else setdiff(names(m), "sample_id")
+    updateSelectInput(session, input_id, choices = choices)
+  }
+
+  scores_table_output <- function(fit_id, sort_field) {
+    L <- load_scores(con, fit_id)
+    validate(need(!is.null(L), "No sample scores available for this fit (older WGCNA fits predate eigengene capture -- re-run and re-ingest with --overwrite)."))
+    d <- as.data.frame(L)
+    d <- cbind(sample_id = rownames(L), d)
+    m <- sample_meta_reactive()
+    if (!is.null(m) && nzchar(sort_field %||% "") && sort_field %in% names(m)) {
+      d <- merge(d, m[, c("sample_id", sort_field)], by = "sample_id", all.x = TRUE)
+      d <- d[order(d[[sort_field]]), ]
+    }
+    datatable(d, rownames = FALSE, options = list(pageLength = 15)) |>
+      formatRound(setdiff(names(d), c("sample_id", sort_field)), 3)
+  }
+
+  assoc_heatmap_plot <- function(fit_id, title_prefix) {
+    L <- load_scores(con, fit_id)
+    validate(need(!is.null(L), "No sample scores available for this fit."))
+    m <- sample_meta_reactive()
+    validate(need(!is.null(m), "No sample metadata registered for this dataset (see dataset config sample_metadata_path/sample_id_col)."))
+    d <- generic_association_scan(L, m, "sample_id")
+    validate(need(nrow(d) > 0, "Not enough overlap between sample scores and sample metadata to test."))
+    d$neg_log10_padj <- -log10(pmax(d$padj, 1e-300))
+    ggplot(d, aes(field, factor(component), fill = neg_log10_padj)) +
+      geom_tile() +
+      geom_text(aes(label = ifelse(padj < 0.05, "*", "")), size = 5) +
+      scale_fill_gradient(low = "white", high = "firebrick", name = "-log10(BH p)") +
+      labs(x = NULL, y = NULL,
+           title = paste(title_prefix, "-- factor x metadata association (* padj < 0.05)")) +
+      theme_minimal(base_size = 13) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  }
+
+  # factorization methods
+  observe({
+    req(nav$level == 2, nav$method %in% FACTORIZATION_METHODS)
+    update_meta_field_choices(session, "l2_scores_sort")
+  })
+  output$l2_scores_table <- renderDT({
+    req(input$l2_scores_fit)
+    scores_table_output(as.integer(input$l2_scores_fit), input$l2_scores_sort)
+  })
+  output$l2_factor_corr <- renderPlot({
+    req(input$l2_corr_fit)
+    L <- load_scores(con, as.integer(input$l2_corr_fit))
+    validate(need(!is.null(L), "No sample scores available for this fit."))
+    cm <- cor(L)
+    d <- as.data.frame(as.table(cm))
+    names(d) <- c("factor_a", "factor_b", "cor")
+    ggplot(d, aes(factor_a, factor_b, fill = cor)) +
+      geom_tile() + geom_text(aes(label = sprintf("%.2f", cor)), size = 3) +
+      scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick", limits = c(-1, 1)) +
+      labs(x = NULL, y = NULL, title = "Within-fit factor correlation (sample scores)") +
+      theme_minimal(base_size = 14)
+  })
+  output$l2_assoc_heatmap <- renderPlot({
+    req(input$l2_assoc_fit)
+    assoc_heatmap_plot(as.integer(input$l2_assoc_fit), toupper(nav$method))
+  })
+
+  # ---- "Compare to PCA" (nmf/cogaps) ----
+
+  l2_cmp_data <- reactive({
+    req(input$l2_cmp_fit, nav$rank)
+    compare_loadings_to_pca(con, ds(), as.integer(input$l2_cmp_fit), nav$rank)
+  })
+  output$l2_cmp_mse <- renderTable({
+    req(input$l2_cmp_fit, nav$rank)
+    this_mse <- maskcv_best_mse(con, ds(), nav$method, nav$rank)
+    pca_mse  <- maskcv_best_mse(con, ds(), "pca", nav$rank)
+    data.frame(
+      method = c(toupper(nav$method), "PCA"),
+      `held-out MSE` = c(this_mse, pca_mse),
+      check.names = FALSE
+    )
+  })
+  output$l2_cmp_heatmap <- renderPlot({
+    d <- l2_cmp_data()
+    validate(need(!is.null(d), sprintf("No PCA fit at rank %s to compare against.", nav$rank)))
+    pca_fit_id <- attr(d, "pca_fit_id")
+    L <- load_loadings(con, as.integer(input$l2_cmp_fit))
+    Lp <- load_loadings(con, pca_fit_id)
+    prep_a <- prepare_loadings(L); prep_b <- prepare_loadings(Lp)
+    sims <- pair_similarities(prep_a, prep_b)
+    grid <- expand.grid(component = seq_len(nrow(sims$cosine)), pca_component = seq_len(ncol(sims$cosine)))
+    grid$cosine <- as.vector(sims$cosine)
+    grid$matched <- as.integer(mapply(function(a, b) any(d$component == a & d$pca_component == b),
+                                       grid$component, grid$pca_component))
+    ggplot(grid, aes(factor(component), factor(pca_component), fill = cosine)) +
+      geom_tile() +
+      geom_tile(data = grid[grid$matched == 1, ], color = "red", linewidth = 1, fill = NA) +
+      geom_text(aes(label = sprintf("%.2f", cosine)), size = 3) +
+      scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick", limits = c(-1, 1)) +
+      labs(x = paste(toupper(nav$method), "factor"), y = "PCA component", fill = "cosine",
+           title = "Signed factor similarity (red outline = best |match|, negative = opposite-signed side)") +
+      theme_minimal(base_size = 13)
+  })
+  output$l2_cmp_table <- renderDT({
+    d <- l2_cmp_data()
+    validate(need(!is.null(d), "No PCA fit at this rank."))
+    datatable(d, rownames = FALSE, selection = "single", options = list(pageLength = 10)) |>
+      formatRound(c("cosine", "pearson", "spearman"), 3)
+  })
+  observeEvent(input$l2_cmp_view_this, {
+    d <- l2_cmp_data(); sel <- input$l2_cmp_table_rows_selected
+    req(!is.null(d), length(sel) == 1)
+    nav$fit <- as.integer(input$l2_cmp_fit)
+    nav$factor_index <- d$component[sel]
+    nav$level <- 3
+  })
+  observeEvent(input$l2_cmp_view_pca, {
+    d <- l2_cmp_data(); sel <- input$l2_cmp_table_rows_selected
+    req(!is.null(d), length(sel) == 1)
+    pca_fit_id <- attr(d, "pca_fit_id")
+    nav$method <- "pca"
+    nav$fit <- pca_fit_id
+    nav$factor_index <- d$pca_component[sel]
+    nav$level <- 3
+  })
+  output$l2_cmp_enrich_this <- renderDT({
+    req(input$l2_cmp_fit)
+    d <- cached_enrichment_summary(con, as.integer(input$l2_cmp_fit))
+    if (nrow(d) == 0) return(datatable(data.frame(note = "Nothing queried yet"), rownames = FALSE))
+    datatable(d, rownames = FALSE, options = list(pageLength = 5, dom = "tp")) |> formatSignif("min_p_value", 3)
+  })
+  output$l2_cmp_enrich_pca <- renderDT({
+    d <- l2_cmp_data()
+    validate(need(!is.null(d), ""))
+    pca_fit_id <- attr(d, "pca_fit_id")
+    dd <- cached_enrichment_summary(con, pca_fit_id)
+    if (nrow(dd) == 0) return(datatable(data.frame(note = "Nothing queried yet"), rownames = FALSE))
+    datatable(dd, rownames = FALSE, options = list(pageLength = 5, dom = "tp")) |> formatSignif("min_p_value", 3)
+  })
+
+  # ---- "Compare to PCA" (wgcna) ----
+
+  output$l2_wgcna_cmp_heatmap <- renderPlot({
+    req(input$l2_wgcna_cmp_fit, input$l2_wgcna_cmp_pca)
+    d <- compare_scores_to_pca(con, as.integer(input$l2_wgcna_cmp_fit), as.integer(input$l2_wgcna_cmp_pca))
+    validate(need(!is.null(d), "Eigengenes unavailable for this power (see note above) or no PCA fit selected."))
+    Lo <- load_scores(con, as.integer(input$l2_wgcna_cmp_fit))
+    Lp <- load_scores(con, as.integer(input$l2_wgcna_cmp_pca))
+    shared <- intersect(rownames(Lo), rownames(Lp))
+    cm <- suppressWarnings(cor(Lo[shared, , drop = FALSE], Lp[shared, , drop = FALSE], method = "pearson"))
+    grid <- expand.grid(module = seq_len(nrow(cm)), pca_component = seq_len(ncol(cm)))
+    grid$cor <- as.vector(cm)
+    grid$matched <- as.integer(mapply(function(a, b) any(d$component == a & d$pca_component == b),
+                                       grid$module, grid$pca_component))
+    ggplot(grid, aes(factor(module), factor(pca_component), fill = cor)) +
+      geom_tile() +
+      geom_tile(data = grid[grid$matched == 1, ], color = "red", linewidth = 1, fill = NA) +
+      geom_text(aes(label = sprintf("%.2f", cor)), size = 3) +
+      scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick", limits = c(-1, 1)) +
+      labs(x = "WGCNA module (eigengene)", y = "PCA component (score)", fill = "pearson r",
+           title = "Module eigengene vs PCA score correlation (red outline = best |match|)") +
+      theme_minimal(base_size = 13)
+  })
+
   # WGCNA level 2
   output$l2_wgcna_sizes <- renderTable({
     req(nav$wgcna_fit)
@@ -472,6 +789,18 @@ server <- function(input, output, session) {
       labs(x = "module (this power)", y = "module (other power)",
            title = "Module membership Jaccard (red outline = Hungarian match)") +
       theme_minimal(base_size = 14)
+  })
+  observe({
+    req(nav$level == 2, nav$method == "wgcna")
+    update_meta_field_choices(session, "l2_wgcna_scores_sort")
+  })
+  output$l2_wgcna_scores_table <- renderDT({
+    req(input$l2_wgcna_scores_fit)
+    scores_table_output(as.integer(input$l2_wgcna_scores_fit), input$l2_wgcna_scores_sort)
+  })
+  output$l2_wgcna_assoc_heatmap <- renderPlot({
+    req(input$l2_wgcna_assoc_fit)
+    assoc_heatmap_plot(as.integer(input$l2_wgcna_assoc_fit), "WGCNA")
   })
 
   # wTO level 2
@@ -505,7 +834,9 @@ server <- function(input, output, session) {
   level3_ui <- function() {
     navset_card_tab(
       nav_panel("Loadings",
-        sliderInput("l3_topn", "Top genes:", min = 10, max = 100, value = 25, step = 5),
+        layout_columns(col_widths = c(6, 6),
+          sliderInput("l3_topn", "Top genes:", min = 10, max = 100, value = 25, step = 5),
+          selectInput("l3_label_col", "Label genes by:", choices = "feature_id")),
         plotOutput("l3_loadings", height = "420px")),
       nav_panel("Matches everywhere",
         p("This factor's Hungarian-matched partner in every other fit (all seeds and ranks)."),
@@ -518,7 +849,13 @@ server <- function(input, output, session) {
           sliderInput("l3_enrich_topn", "Top genes (ORA):", min = 50, max = 300, value = 100, step = 50),
           actionButton("l3_enrich_go", "Run / load enrichment", class = "btn-primary",
                        style = "margin-top: 24px;")),
-        DTOutput("l3_enrichment"))
+        navset_card_tab(
+          nav_panel("Table", DTOutput("l3_enrichment")),
+          nav_panel("Mirror bar",
+            p("Both the positive- and negative-loading direction must be run/loaded (via the button above) for a full mirror; PCA only -- NMF/CoGAPS weights are non-negative, so this shows the single positive side."),
+            plotOutput("l3_enrich_mirror", height = "560px")),
+          nav_panel("Dot plot", plotOutput("l3_enrich_dot", height = "500px"))
+        ))
     )
   }
 
@@ -528,19 +865,41 @@ server <- function(input, output, session) {
     L[, nav$factor_index]
   })
 
+  feature_meta_reactive <- reactive({
+    req(input$dataset)
+    dataset_metadata(con, ds(), "feature")
+  })
+  observe({
+    req(nav$level == 3)
+    m <- feature_meta_reactive()
+    choices <- if (is.null(m)) "feature_id" else c("feature_id", setdiff(names(m), "feature_id"))
+    updateSelectInput(session, "l3_label_col", choices = choices)
+  })
+
   output$l3_loadings <- renderPlot({
     v <- l3_loadings()
     topn <- input$l3_topn %||% 25
     ord <- order(abs(v), decreasing = TRUE)[seq_len(min(topn, length(v)))]
-    d <- data.frame(gene = names(v)[ord], loading = v[ord])
-    d$gene <- factor(d$gene, levels = rev(d$gene))
-    ggplot(d, aes(loading, gene)) +
+    d <- data.frame(feature_id = names(v)[ord], loading = v[ord], stringsAsFactors = FALSE)
+
+    label_col <- input$l3_label_col %||% "feature_id"
+    m <- feature_meta_reactive()
+    if (!is.null(m) && label_col %in% names(m) && label_col != "feature_id") {
+      d <- merge(d, m[, c("feature_id", label_col)], by = "feature_id", all.x = TRUE)
+      d$label <- ifelse(is.na(d[[label_col]]) | !nzchar(as.character(d[[label_col]])),
+                        d$feature_id, as.character(d[[label_col]]))
+    } else {
+      d$label <- d$feature_id
+    }
+    d <- d[order(abs(d$loading), decreasing = TRUE), ]
+    d$label <- factor(d$label, levels = rev(d$label))
+    ggplot(d, aes(loading, label)) +
       geom_col(fill = "grey40") +
       labs(title = sprintf("%s rank %s seed %s -- factor %d: top %d loadings",
                            toupper(nav$method), nav$rank,
                            get_fit(con, nav$fit)$seed, nav$factor_index, nrow(d)),
            y = NULL) +
-      theme_minimal(base_size = 13)
+      readable_factor_theme(15)
   })
 
   l3_matches <- reactive({
@@ -570,7 +929,7 @@ server <- function(input, output, session) {
            y = sprintf("matched factor %d (rank %d, seed %s)",
                        row$other_factor, row$other_rank, row$other_seed),
            title = sprintf("Loading agreement (%s = %.3f)", metric(), row[[metric()]])) +
-      theme_minimal(base_size = 13)
+      readable_factor_theme(15)
   })
 
   enrich_result <- eventReactive(input$l3_enrich_go, {
@@ -611,6 +970,74 @@ server <- function(input, output, session) {
     }
     datatable(d, rownames = FALSE, options = list(pageLength = 15)) |>
       formatSignif("p_value", 3)
+  })
+
+  # combines whatever's cached for BOTH loading directions (PCA only has a
+  # meaningful negative side; NMF/CoGAPS weights are non-negative so this
+  # degenerates to just "pos") -- independent of which single direction the
+  # radio button currently has selected, so a mirror plot can show both
+  # sides once each has been run at least once
+  enrich_both <- reactive({
+    input$l3_enrich_go  # re-check cache whenever a run/load happens
+    req(nav$fit, nav$factor_index)
+    factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
+    qtype <- input$l3_enrich_type
+    dirs <- if (nav$method == "pca") c("pos", "neg") else "pos"
+    res <- lapply(dirs, function(dir) {
+      cc <- enrichment_cached(con, factor_id, qtype, dir)
+      if (is.null(cc) || nrow(cc) == 0) return(NULL)
+      cc$direction <- dir
+      cc
+    })
+    res <- Filter(Negate(is.null), res)
+    if (length(res) == 0) return(NULL)
+    do.call(rbind, res)
+  })
+
+  output$l3_enrich_mirror <- renderPlot({
+    d <- enrich_both()
+    validate(need(!is.null(d) && nrow(d) > 0,
+      "No cached enrichment yet -- click 'Run / load enrichment' for each direction you want to see."))
+    d$log10p <- -log10(pmax(d$p_value, 1e-300))
+    d$log10p <- ifelse(d$direction == "neg", -d$log10p, d$log10p)
+    d <- do.call(rbind, lapply(split(d, d$source), function(s) {
+      s[order(-abs(s$log10p)), ][seq_len(min(20, nrow(s))), , drop = FALSE]
+    }))
+    # a term can appear in both the positive- and negative-loading rows
+    # (mirror bar) -- dedupe before building factor levels, or factor()
+    # errors on the duplicate ("factor level [...] is duplicated")
+    d$term_name <- factor(d$term_name, levels = unique(d$term_name[order(d$log10p)]))
+    ggplot(d, aes(log10p, term_name, fill = direction)) +
+      geom_col() +
+      geom_vline(xintercept = 0, linewidth = 0.3) +
+      scale_fill_manual(values = c(pos = "#d73027", neg = "#4575b4")) +
+      facet_wrap(~source, scales = "free_y") +
+      labs(x = "-log10(p)  [negative direction flipped]", y = NULL, fill = "loadings",
+           title = sprintf("%s factor %d -- %s (mirror bar)",
+                           toupper(nav$method), nav$factor_index, toupper(input$l3_enrich_type))) +
+      readable_factor_theme(14)
+  })
+
+  output$l3_enrich_dot <- renderPlot({
+    d <- enrich_both()
+    validate(need(!is.null(d) && nrow(d) > 0,
+      "No cached enrichment yet -- click 'Run / load enrichment' first."))
+    d <- d[!is.na(d$query_size) & d$query_size > 0, , drop = FALSE]
+    validate(need(nrow(d) > 0,
+      "Gene-ratio dot plot needs query_size, which pre-existing cached rows (from before this feature) don't have -- click 'Run / load enrichment' again to refresh."))
+    d$gene_ratio <- d$intersection_size / d$query_size
+    d$log10p <- -log10(pmax(d$p_value, 1e-300))
+    d <- do.call(rbind, lapply(split(d, interaction(d$source, d$direction, drop = TRUE)), function(s) {
+      s[order(-s$log10p), ][seq_len(min(20, nrow(s))), , drop = FALSE]
+    }))
+    ggplot(d, aes(gene_ratio, reorder(term_name, gene_ratio), color = log10p, size = intersection_size)) +
+      geom_point() +
+      scale_color_viridis_c(name = "-log10(p)") +
+      facet_wrap(~source + direction, scales = "free_y") +
+      labs(x = "Gene ratio", y = NULL,
+           title = sprintf("%s factor %d -- %s (dot plot)",
+                           toupper(nav$method), nav$factor_index, toupper(input$l3_enrich_type))) +
+      readable_factor_theme(14)
   })
 }
 

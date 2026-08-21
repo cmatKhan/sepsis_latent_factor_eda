@@ -99,6 +99,17 @@ seedpair_matrix <- function(con, dataset_id, method, rank) {
     params = list(dataset_id, method, rank))
 }
 
+#' Distinct ranks with at least one ok seed_sweep fit for a method --
+#' used by PCA's reduced Level 1 rank-select (falls back to this when a
+#' method has no masking-CV family at all).
+distinct_ranks <- function(con, dataset_id, method) {
+  DBI::dbGetQuery(con,
+    "SELECT DISTINCT rank FROM fits
+     WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok'
+     ORDER BY rank",
+    params = list(dataset_id, method))$rank
+}
+
 fits_at_rank <- function(con, dataset_id, method, rank) {
   DBI::dbGetQuery(con,
     "SELECT fit_id, seed, mse, n_factors, loadings_file FROM fits
@@ -256,7 +267,7 @@ enrichment_cached <- function(con, factor_id, query_type, direction) {
     params = list(factor_id, query_type, direction))$n > 0
   if (!hit) return(NULL)
   DBI::dbGetQuery(con,
-    "SELECT source, term_id, term_name, p_value, intersection_size, term_size
+    "SELECT source, term_id, term_name, p_value, intersection_size, term_size, query_size
      FROM enrichment_cache
      WHERE factor_id = ? AND query_type = ? AND direction = ?
      ORDER BY p_value",
@@ -275,6 +286,7 @@ enrichment_store <- function(con, factor_id, query_type, direction, gost_result)
       source = r$source, term_id = r$term_id, term_name = r$term_name,
       p_value = r$p_value, intersection_size = r$intersection_size,
       term_size = r$term_size,
+      query_size = if (!is.null(r$query_size)) r$query_size else NA_integer_,
       genes = if (!is.null(r$intersection)) as.character(r$intersection) else NA_character_,
       queried_at = as.character(Sys.time())
     ), append = TRUE)

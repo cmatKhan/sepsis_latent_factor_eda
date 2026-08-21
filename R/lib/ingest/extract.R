@@ -9,8 +9,18 @@
 #   nmf_maskcv:    list(rank, mse)
 #   cogaps_grid:   list(rank, seed, mse, result = CogapsResult | NULL)
 #   cogaps_maskcv: list(rank, alpha, mse)   -- mse NA when the fit failed
-#   wgcna_grid:    list(power, net = blockwiseModules output, genes)
+#   wgcna_grid:    list(power, net = blockwiseModules output, genes,
+#                       samples)   -- `samples` added alongside the
+#                       feature/sample-metadata drill-down work; results
+#                       ingested before that change lack it, so eigengene
+#                       scores are simply NULL for those fits (see below)
 #   wto_grid:      list(n, delta, seed, result = wTO.Complete output)
+#
+# In addition to the feature-loadings matrix (rows = features), pca/nmf/
+# cogaps/wgcna results also yield a sample-level "scores" matrix (rows =
+# samples, columns = factor_index for pca/nmf/cogaps or module number for
+# wgcna) used for the sample/metadata drill-down views. Always oriented
+# samples x columns regardless of the underlying method's native shape.
 
 #' jobname -> (method, family) mapping. Generalizes by suffix so new
 #' methods following the same naming convention need no change here.
@@ -84,11 +94,12 @@ extract_result <- function(jobname, result, params_row) {
   loadings <- NULL
   modules  <- NULL
   edges    <- NULL
+  scores   <- NULL
 
   if (is.null(result)) {
     fit$status <- "missing"
     return(list(fit = fit, method = method, family = family,
-                loadings = NULL, modules = NULL, edges = NULL))
+                loadings = NULL, modules = NULL, edges = NULL, scores = NULL))
   }
 
   if (!is.null(result$mse)) fit$mse <- as.numeric(result$mse)
@@ -96,18 +107,21 @@ extract_result <- function(jobname, result, params_row) {
   if (family == "maskcv") {
     if (is.na(fit$mse)) fit$status <- "failed"
     return(list(fit = fit, method = method, family = family,
-                loadings = NULL, modules = NULL, edges = NULL))
+                loadings = NULL, modules = NULL, edges = NULL, scores = NULL))
   }
 
   if (method == "pca") {
     loadings <- result$rotation
+    scores   <- result$scores
   } else if (method == "nmf") {
     loadings <- result$W
+    if (!is.null(result$H)) scores <- t(result$H)  # patterns x samples -> samples x patterns
   } else if (method == "cogaps") {
     if (is.null(result$result)) {
       fit$status <- "failed"
     } else {
       loadings <- result$result@featureLoadings
+      scores   <- result$result@sampleFactors
     }
   } else if (method == "wgcna") {
     if (is.null(result$net) || is.null(result$net$colors)) {
@@ -119,6 +133,13 @@ extract_result <- function(jobname, result, params_row) {
                             module = as.integer(cols),
                             stringsAsFactors = FALSE)
       fit$n_factors <- length(setdiff(unique(modules$module), 0L))  # module 0 = WGCNA's "unassigned"
+      # module eigengenes: only available for results produced after
+      # R/methods/wgcna.R started returning `samples` (see comment above)
+      if (!is.null(result$net$MEs) && !is.null(result$samples)) {
+        me <- as.matrix(result$net$MEs)
+        rownames(me) <- result$samples
+        scores <- me
+      }
     }
   } else if (method == "wto") {
     if (is.null(result$result)) {
@@ -135,11 +156,21 @@ extract_result <- function(jobname, result, params_row) {
     if (is.null(rownames(loadings))) {
       fit$status <- "failed"
       loadings <- NULL
+      scores <- NULL
     } else {
       fit$n_factors <- ncol(loadings)
     }
   }
 
+  # scores must be a proper samples x columns matrix with sample-id
+  # rownames, or it's not usable for the metadata drill-down views --
+  # dropped silently (never fails the fit; loadings/modules are what
+  # determine fit status) rather than stored malformed
+  if (!is.null(scores)) {
+    scores <- as.matrix(scores)
+    if (is.null(rownames(scores))) scores <- NULL
+  }
+
   list(fit = fit, method = method, family = family,
-       loadings = loadings, modules = modules, edges = edges)
+       loadings = loadings, modules = modules, edges = edges, scores = scores)
 }
