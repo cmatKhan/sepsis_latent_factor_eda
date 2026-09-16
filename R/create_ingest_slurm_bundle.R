@@ -47,16 +47,22 @@ source(here("R/ingest_jobs/driver_job.R"))
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
-# Every function defined by the sourced lib/job files above -- baked into
-# EVERY submit_job_family() call below as `global_objects`, since none of
-# these compute-node jobs can `source()` project files by path (only
+# EVERY object (functions AND plain data constants, e.g. extract.R's
+# PARAM_GRID_METHODS) defined by the sourced lib/job files above -- baked
+# into EVERY submit_job_family() call below as `global_objects`, since none
+# of these compute-node jobs can `source()` project files by path (only
 # slurm_bundles/ingest/ is bind-mounted inside the container -- see
 # R/ingest_jobs/ingest_core_job.R's header). Over-including per job is
-# harmless (plain function objects are cheap to serialize); hand-
-# maintaining a separate minimal list per job family is not worth the
-# fragility. Captured here, before `opt`/`targets`/etc. exist, so it's
-# exactly "everything sourced above" and nothing else.
-FRAMEWORK_FUNCS <- Filter(function(n) is.function(get(n, envir = .GlobalEnv)), ls(envir = .GlobalEnv))
+# harmless (these are all cheap to serialize); hand-maintaining a separate
+# minimal list per job family is not worth the fragility. Captured here,
+# before `opt`/`targets`/etc. exist, so it's exactly "everything sourced
+# above" and nothing else -- deliberately NOT filtered down to
+# is.function() only (an earlier version did that and silently dropped
+# PARAM_GRID_METHODS, breaking classify_jobname() -> ingest_one_dataset()
+# inside run_ingest_core_job() with "object 'PARAM_GRID_METHODS' not
+# found" -- any future non-function constant added to these lib files
+# would hit the same gap if this were re-narrowed).
+FRAMEWORK_FUNCS <- ls(envir = .GlobalEnv)
 
 # Bind-mounted (read-write, same absolute path in and out of the
 # container) + set as --pwd for every job family below, so
