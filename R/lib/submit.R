@@ -187,7 +187,18 @@ submit_job_family <- function(f, jobs_df, jobname, global_objects = character(0)
   on.exit(setwd(old_wd), add = TRUE)
 
   if (is_single_job) {
-    do.call(slurm_call, c(common_args, list(params = list())))
+    # Deliberately NOT passing params = list() here: rslurm::slurm_call()'s
+    # own validation (`is.null(names(params))`) fires unconditionally for
+    # ANY unnamed/empty list -- including list() itself, since
+    # names(list()) is NULL -- regardless of whether f actually takes
+    # arguments. That check is gated behind `if (!missing(params))`, so
+    # omitting the argument entirely (letting slurm_call() fall back to its
+    # own default) skips the buggy check altogether. Confirmed against the
+    # installed rslurm 0.6.2. f's real arguments (targets/db_path/etc.) are
+    # supplied via `global_objects`, not `params`, for every job this
+    # dispatches to (see run_ingest_core_job()'s header) -- params was never
+    # actually used for anything here.
+    do.call(slurm_call, common_args)
   } else {
     do.call(slurm_apply, c(common_args, list(
       params        = jobs_df,
