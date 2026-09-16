@@ -150,6 +150,18 @@ if (opt$stage == "core") {
   assign("targets", targets, envir = .GlobalEnv)
   assign("db_path", normalizePath(opt$db, mustWork = FALSE), envir = .GlobalEnv)
   assign("recompute_redundancy", recompute_redundancy, envir = .GlobalEnv)
+  # ingest_one_dataset() also list.dirs()/reads results_*.RDS straight out
+  # of each targets$results_dir -- these commonly live OUTSIDE PROJECT_ROOT
+  # entirely (e.g. as sibling directories of the project checkout, not
+  # nested under it: /scratch/.../GSE110487_T2_results next to /scratch/
+  # .../sepsis_latent_factor_eda/), so binding PROJECT_ROOT alone leaves
+  # them invisible inside the container -- list.dirs(results_dir) silently
+  # returns character(0) there even though the same path is populated on
+  # the login node, surfacing as "no job family subdirectories ... --
+  # skipping" for every single dataset. Bind each results_dir's PARENT
+  # (deduplicated -- typically just one shared parent covering everything)
+  # in addition to PROJECT_ROOT.
+  results_parents <- unique(dirname(targets$results_dir))
   submit_job_family(
     f = run_ingest_core_job, jobs_df = NULL, jobname = "ingest_core",
     global_objects = c(FRAMEWORK_FUNCS, "targets", "db_path", "recompute_redundancy"),
@@ -159,7 +171,7 @@ if (opt$stage == "core") {
     # driver_grid job family during --stage enrichment instead.
     pkgs = c("DBI", "RSQLite", "arrow", "yaml", "CoGAPS", "clue", "matrixStats"),
     cluster_cfg = slurm_cfg$ingest_core, output_dir = opt$output,
-    extra_binds = PROJECT_ROOT
+    extra_binds = unique(c(PROJECT_ROOT, results_parents))
   )
   message("Staged ingest_core -- run this FIRST, wait for it to finish, then re-run with --stage enrichment")
 
