@@ -92,8 +92,18 @@ targets <- data.frame(
   dataset_id  = sub("_results$", "", basename(result_dirs)),
   stringsAsFactors = FALSE
 )
-targets$config_path <- file.path("config", paste0(targets$dataset_id, "_config.yml"))
-missing_cfg <- !file.exists(targets$config_path)
+# Case-insensitive match against actual config/ filenames: config file
+# names lowercase their day/timepoint suffix (e.g. "GSE110487_t2_config.yml",
+# "CORTICUS_pre_config.yml") while dataset_id here -- derived from the
+# results directory basename -- keeps whatever casing that directory (and
+# the config's own internal `dataset: id:` field, which DOES match
+# dataset_id exactly) uses, e.g. "GSE110487_T2", "CORTICUS_PRE". Matching
+# file.exists() directly against paste0(dataset_id, "_config.yml") is
+# case-SENSITIVE on Linux and fails for every such dataset.
+available_cfg <- list.files("config", pattern = "_config\\.yml$")
+cfg_match <- match(tolower(paste0(targets$dataset_id, "_config.yml")), tolower(available_cfg))
+targets$config_path <- ifelse(is.na(cfg_match), NA_character_, file.path("config", available_cfg[cfg_match]))
+missing_cfg <- is.na(targets$config_path)
 if (any(missing_cfg)) stop("No config found for: ", paste(targets$dataset_id[missing_cfg], collapse = ", "))
 
 parse_flag_list <- function(x) {
