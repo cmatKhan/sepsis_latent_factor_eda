@@ -105,6 +105,10 @@ cfg_match <- match(tolower(paste0(targets$dataset_id, "_config.yml")), tolower(a
 targets$config_path <- ifelse(is.na(cfg_match), NA_character_, file.path("config", available_cfg[cfg_match]))
 missing_cfg <- is.na(targets$config_path)
 if (any(missing_cfg)) stop("No config found for: ", paste(targets$dataset_id[missing_cfg], collapse = ", "))
+# Absolute from here on: run_ingest_core_job() (inside the ingest_core
+# container) reads this back -- see the --stage core block below for why
+# it must NOT be project-relative there.
+targets$config_path <- normalizePath(targets$config_path, mustWork = TRUE)
 
 parse_flag_list <- function(x) {
   if (is.null(x)) return(FALSE)
@@ -126,13 +130,24 @@ if (opt$stage == "core") {
   }
   DBI::dbDisconnect(con_cache)
 
-  # ingest_one_dataset() reads targets$config_path/results_dir (project-
-  # relative, e.g. "config/EARLI_config.yml", "results/EARLI_results/")
-  # and slurm_bundles/<dataset_id>/_rslurm_<jobname>/params.RDS for every
-  # dataset being ingested -- resolved via the PROJECT_ROOT bind +
-  # pwd_override above, not via global_objects.
+  # ingest_one_dataset() reads targets$config_path/results_dir and
+  # slurm_bundles/<dataset_id>/_rslurm_<jobname>/params.RDS for every
+  # dataset being ingested. These must be ABSOLUTE, not project-relative:
+  # rslurm's own slurm_run.R (see config/rslurm_templates/
+  # slurm_run_single_R.txt) loads f.RDS/params.RDS/add_objects.RData via
+  # relative paths from its own _rslurm_ingest_core/ directory BEFORE
+  # calling run_ingest_core_job() -- so the container's cwd at that point
+  # must stay the default `$RSLURM_BUNDLE_DIR/_rslurm_ingest_core` (never
+  # override it via pwd_override, which breaks that load with "cannot open
+  # file 'slurm_run.R'"). extra_binds (below) is still what makes
+  # PROJECT_ROOT reachable/writable inside the container at its ordinary
+  # absolute path; run_ingest_core_job() just needs paths that already
+  # point there regardless of its own cwd, which is what
+  # normalizePath()-ing config_path (above) and db_path (below) achieves
+  # -- results_dir is already absolute, since datasets.txt itself lists
+  # absolute cluster paths.
   assign("targets", targets, envir = .GlobalEnv)
-  assign("db_path", opt$db, envir = .GlobalEnv)
+  assign("db_path", normalizePath(opt$db, mustWork = FALSE), envir = .GlobalEnv)
   assign("recompute_redundancy", recompute_redundancy, envir = .GlobalEnv)
   submit_job_family(
     f = run_ingest_core_job, jobs_df = NULL, jobname = "ingest_core",
@@ -142,7 +157,7 @@ if (opt$stage == "core") {
     # projectR::projectionDriveR() for the differential-features pass.
     pkgs = c("DBI", "RSQLite", "arrow", "yaml", "CoGAPS", "clue", "matrixStats", "projectR"),
     cluster_cfg = slurm_cfg$ingest_core, output_dir = opt$output,
-    extra_binds = PROJECT_ROOT, pwd_override = PROJECT_ROOT
+    extra_binds = PROJECT_ROOT
   )
   message("Staged ingest_core -- run this FIRST, wait for it to finish, then re-run with --stage enrichment")
 
@@ -201,7 +216,7 @@ if (opt$stage == "core") {
       jobname = "fgsea_grid", global_objects = c(FRAMEWORK_FUNCS, "pathways"),
       pkgs = c("CoGAPS", "BiocParallel", "arrow"),
       cluster_cfg = slurm_cfg$fgsea, output_dir = opt$output,
-      extra_binds = PROJECT_ROOT, pwd_override = PROJECT_ROOT
+      extra_binds = PROJECT_ROOT
     )
 
     gprofiler_targets <- do.call(rbind, lapply(seq_len(nrow(rep_rows)), function(i) {
@@ -217,7 +232,7 @@ if (opt$stage == "core") {
       f = run_gprofiler_job, jobs_df = NULL, jobname = "gprofiler_grid",
       global_objects = c(FRAMEWORK_FUNCS, "gprofiler_targets", "symbol_maps"), pkgs = c("gprofiler2", "arrow"),
       cluster_cfg = slurm_cfg$gprofiler, output_dir = opt$output,
-      extra_binds = PROJECT_ROOT, pwd_override = PROJECT_ROOT
+      extra_binds = PROJECT_ROOT
     )
   } else {
     message("No representative fits found for fgsea/gprofiler -- skipping both")
@@ -254,7 +269,7 @@ if (opt$stage == "core") {
       jobname = paste0("projectr_", sub("_dataset$", "", ptype), "_grid"),
       global_objects = c(FRAMEWORK_FUNCS, "symbol_maps"), pkgs = c("projectR", "arrow"),
       cluster_cfg = slurm_cfg$projectr, output_dir = opt$output,
-      extra_binds = PROJECT_ROOT, pwd_override = PROJECT_ROOT
+      extra_binds = PROJECT_ROOT
     )
   }
   DBI::dbDisconnect(con)
