@@ -84,8 +84,19 @@ cache_dataset_matrix <- function(con, dataset_id, dataset_yaml, db_path, force =
 #'   jobnames to replace.
 #' @param recompute_redundancy passed straight through to
 #'   run_all_redundancy()'s `force` argument.
+#' @param run_pattern_drivers whether to also run the
+#'   projectR::projectionDriveR()-based pattern-driver pass (see
+#'   R/lib/ingest/driver.R) inline. Default TRUE for R/ingest_results.R's
+#'   direct (non-slurm) CLI use, where projectR is just whatever's in that
+#'   R session. FALSE for run_ingest_core_job() specifically -- ingest_core
+#'   runs inside a container that does NOT have projectR installed (a
+#'   different image than the one it needs -- see config/
+#'   ingest_slurm_config.yml's `driver:` entry); the pattern-driver pass is
+#'   staged as its own `driver_grid` job family instead, during
+#'   --stage enrichment (see R/ingest_jobs/driver_job.R).
 ingest_one_dataset <- function(con, config_path, results_dir, db_path,
-                                overwrite = FALSE, recompute_redundancy = FALSE) {
+                                overwrite = FALSE, recompute_redundancy = FALSE,
+                                run_pattern_drivers = TRUE) {
   dataset_yaml <- yaml::read_yaml(config_path)
   dataset_id <- dataset_yaml$dataset$id
   stopifnot(!is.null(dataset_id))
@@ -272,9 +283,13 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
   # 2-4-level categorical sample-metadata columns. Silently no-ops if the
   # dataset's matrix isn't cached yet (cache_dataset_matrix() is
   # login-node-only) or has no small categorical columns -- never blocks
-  # the rest of ingest.
-  tryCatch(run_all_pattern_drivers(con, db_path, dataset_id),
-           error = function(e) message("  pattern-driver pass failed for ", dataset_id, ": ", conditionMessage(e)))
+  # the rest of ingest. Skipped entirely when run_pattern_drivers = FALSE
+  # (see this function's @param doc) -- staged as its own driver_grid job
+  # family instead in that case.
+  if (run_pattern_drivers) {
+    tryCatch(run_all_pattern_drivers(con, db_path, dataset_id),
+             error = function(e) message("  pattern-driver pass failed for ", dataset_id, ": ", conditionMessage(e)))
+  }
 
   invisible(dataset_id)
 }

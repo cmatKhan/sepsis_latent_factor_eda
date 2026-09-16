@@ -43,6 +43,7 @@ source(here("R/ingest_jobs/ingest_core_job.R"))
 source(here("R/ingest_jobs/fgsea_job.R"))
 source(here("R/ingest_jobs/gprofiler_job.R"))
 source(here("R/ingest_jobs/projectr_job.R"))
+source(here("R/ingest_jobs/driver_job.R"))
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
@@ -152,10 +153,11 @@ if (opt$stage == "core") {
   submit_job_family(
     f = run_ingest_core_job, jobs_df = NULL, jobname = "ingest_core",
     global_objects = c(FRAMEWORK_FUNCS, "targets", "db_path", "recompute_redundancy"),
-    # projectR added here (not just the projectr container) -- run_all_pattern_drivers()
-    # (R/lib/ingest/driver.R) now runs inside ingest_core itself, calling
-    # projectR::projectionDriveR() for the differential-features pass.
-    pkgs = c("DBI", "RSQLite", "arrow", "yaml", "CoGAPS", "clue", "matrixStats", "projectR"),
+    # NOTE: no projectR here -- ingest_core's image doesn't have it (a
+    # different image than driver_grid needs, see run_ingest_core_job()'s
+    # header); run_pattern_drivers = FALSE there, staged as its own
+    # driver_grid job family during --stage enrichment instead.
+    pkgs = c("DBI", "RSQLite", "arrow", "yaml", "CoGAPS", "clue", "matrixStats"),
     cluster_cfg = slurm_cfg$ingest_core, output_dir = opt$output,
     extra_binds = PROJECT_ROOT
   )
@@ -166,6 +168,21 @@ if (opt$stage == "core") {
   con <- open_stability_db(opt$db)
   all_dataset_ids <- DBI::dbGetQuery(con, "SELECT DISTINCT dataset_id FROM fits")$dataset_id
   if (length(all_dataset_ids) == 0) stop("No fits in the DB yet -- run --stage core first")
+
+  # ---- driver_grid: projectR::projectionDriveR() pattern-driver pass ----
+  # Split out of ingest_core (see R/ingest_jobs/driver_job.R's header) --
+  # needs the projectr image, not ingest_core's. One single (non-array) job,
+  # looping every dataset sequentially against the SAME db (one writer),
+  # same rationale as ingest_core itself.
+  assign("all_dataset_ids", all_dataset_ids, envir = .GlobalEnv)
+  assign("db_path", normalizePath(opt$db, mustWork = FALSE), envir = .GlobalEnv)
+  submit_job_family(
+    f = run_driver_job, jobs_df = NULL, jobname = "driver_grid",
+    global_objects = c(FRAMEWORK_FUNCS, "all_dataset_ids", "db_path"),
+    pkgs = c("DBI", "RSQLite", "arrow", "projectR"),
+    cluster_cfg = slurm_cfg$driver, output_dir = opt$output,
+    extra_binds = PROJECT_ROOT
+  )
 
   # symbol maps + dataset matrix file lookups, built once on the login node
   symbol_maps <- setNames(lapply(all_dataset_ids, function(ds) {

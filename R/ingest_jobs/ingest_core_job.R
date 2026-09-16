@@ -17,8 +17,13 @@ run_ingest_core_job <- function(targets, db_path, recompute_redundancy = FALSE) 
     force_redundancy <- isTRUE(recompute_redundancy) ||
       (is.character(recompute_redundancy) && targets$dataset_id[i] %in% recompute_redundancy)
     tryCatch(
+      # run_pattern_drivers = FALSE -- this container doesn't have projectR
+      # installed (a different image -- see R/ingest_jobs/driver_job.R's
+      # header and config/ingest_slurm_config.yml's `driver:` entry); that
+      # pass is staged as its own driver_grid job family during
+      # --stage enrichment instead.
       ingest_one_dataset(con, targets$config_path[i], targets$results_dir[i], db_path,
-                          recompute_redundancy = force_redundancy),
+                          recompute_redundancy = force_redundancy, run_pattern_drivers = FALSE),
       error = function(e) message("  FAILED (", targets$dataset_id[i], "): ", conditionMessage(e))
     )
   }

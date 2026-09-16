@@ -2,9 +2,17 @@
 # R/create_ingest_slurm_bundle.R. Two containers: ingest_core/fgsea share
 # one image (CoGAPS transitively pulls in fgsea, so listing CoGAPS in
 # `pkgs` is enough for both); gprofiler is separate (needs network egress
-# to g:Profiler's API, unlike everything else here). projectr needs the
-# user's local projectR fork installed (devtools::install_local()), not a
-# Bioconductor/CRAN release -- see R/README.md's container notes.
+# to g:Profiler's API, unlike everything else here). projectr/driver need
+# the user's local projectR fork installed (devtools::install_local()), not
+# a Bioconductor/CRAN release -- see R/README.md's container notes -- and
+# both point at sepsis_timecourse_factors_eda.sif, built from this repo's
+# own Dockerfile (see its header). That image is actually a superset
+# covering every job family's packages here (DBI/RSQLite/arrow/yaml/
+# CoGAPS/clue/matrixStats/fgsea/BiocParallel/gprofiler2/msigdbr/projectR
+# all in one), so it could replace ingest_core/fgsea/gprofiler's images
+# too if you'd rather manage one image than three -- not done here since
+# those three were separately verified working (see ingest_core's own
+# comment below) and switching them isn't necessary just for projectR.
 
 ingest_core:
   mem: 16G
@@ -55,7 +63,29 @@ projectr:
   mem: 4G
   cpus_per_task: 1
   time: "01:00:00"
-  container: "/ref/mblab/containers/chasem/r-projectr.sif"   # TODO: build from /home/chase/projects/projectR
+  # Built from this repo's Dockerfile (rocker/tidyverse base + projectR
+  # installed from the local fork via BuildKit's --build-context -- see
+  # Dockerfile's own header) -- superset image covering every ingest job
+  # family's packages, including DBI/RSQLite/arrow/projectR needed here.
+  container: "/ref/mblab/containers/chasem/sepsis_timecourse_factors_eda.sif"
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "Rscript"
+
+driver:
+  mem: 8G
+  cpus_per_task: 1
+  # Split out of ingest_core (see R/ingest_jobs/driver_job.R's header) --
+  # projectR::projectionDriveR() needs the same image as
+  # projectr_within/cross_grid above, not ingest_core's
+  # bioconductor-cogaps/fgsea/deseq2 image (which has no projectR). One
+  # single (non-array) job looping every dataset x representative fit x
+  # small-categorical-column combination sequentially -- generous time
+  # budget since the combinatorial pass (see run_all_pattern_drivers())
+  # scales with dataset count and categorical-column cardinality.
+  time: "04:00:00"
+  container: "/ref/mblab/containers/chasem/sepsis_timecourse_factors_eda.sif"
   libPaths: "/ref/mblab/software/chasem/R/4.6.0"
   sh_template: "config/rslurm_templates/submit_sh.txt"
   sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
