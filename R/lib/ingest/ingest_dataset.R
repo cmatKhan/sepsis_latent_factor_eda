@@ -52,6 +52,15 @@ cache_dataset_matrix <- function(con, dataset_id, dataset_yaml, db_path, force =
   dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
   saveRDS(mat, file.path(art_dir, "matrix.rds"))
   rel_path <- file.path("stability_artifacts", dataset_id, "matrix.rds")
+  # ensure_dataset() first: a plain UPDATE silently affects 0 rows (and
+  # never errors) for a dataset_id with no `datasets` row yet -- true for
+  # any dataset that hasn't gone through ingest_one_dataset() before, which
+  # is exactly the case the FIRST time this function ever runs for it. Without
+  # this, matrix.rds gets written to disk but matrix_file is never actually
+  # recorded, so every subsequent call sees "not cached" and rebuilds from
+  # raw parquet again -- including on a machine (e.g. the cluster) that
+  # doesn't have that parquet at all.
+  ensure_dataset(con, dataset_id, ds$description %||% NA_character_)
   DBI::dbExecute(con, "UPDATE datasets SET matrix_file = ? WHERE dataset_id = ?",
                  params = list(rel_path, dataset_id))
   invisible(rel_path)
