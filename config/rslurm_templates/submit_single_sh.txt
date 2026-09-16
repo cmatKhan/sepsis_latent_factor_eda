@@ -26,4 +26,10 @@ set -euo pipefail
 
 eval $(spack load --sh apptainer)
 
+# See config/rslurm_templates/submit_sh.txt's matching comment -- strips
+# R library-path env vars specifically (not a blanket --cleanenv) to
+# prevent an inherited R_LIBS_USER/R_HOME from shadowing the container's
+# own R library.
+unset R_LIBS_USER R_LIBS_SITE R_LIBS R_HOME
+
 {{{rscript}}} slurm_run.R

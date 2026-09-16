@@ -97,15 +97,29 @@ load_input_matrix <- function(dataset_meta) {
   }
 }
 
+#' Read `dataset.sample_metadata_path` as a plain data.frame (parquet or
+#' csv/tsv, by extension) -- used by R/lib/tensors.R::build_tensor() to
+#' look up each sample's subject/timepoint (for cp/tucker). Deliberately
+#' minimal (no URL support, no id-column renaming) unlike the app's
+#' `app/R/metadata_helpers.R::read_metadata_table()`, which serves a
+#' different purpose (live, on-demand reads in a running Shiny session);
+#' this one just needs a one-time read at job-setup time.
+read_sample_metadata <- function(path) {
+  ext <- tolower(tools::file_ext(path))
+  if (ext == "parquet") {
+    if (!requireNamespace("arrow", quietly = TRUE)) {
+      stop("Package 'arrow' is required to read parquet sample metadata")
+    }
+    as.data.frame(arrow::read_parquet(path))
+  } else if (ext == "tsv") {
+    utils::read.delim(path, stringsAsFactors = FALSE, check.names = FALSE)
+  } else {
+    utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
+  }
+}
+
 #' Shift a matrix's rows so every entry is non-negative -- required by
 #' NMF/CoGAPS, not a dataset-specific normalization choice, so this stays a
 #' generic transform applied inside the method's setup script rather than
 #' baked into your input matrix.
 shift_nonneg <- function(mat) mat - matrixStats::rowMins(mat)
-
-#' Draw one fixed held-out mask (linear indices) for masking-CV, shared
-#' across every parameter value scored so the comparison is fair.
-make_mask_index <- function(mat, mask_frac, mask_seed) {
-  set.seed(mask_seed)
-  sample(length(mat), round(mask_frac * length(mat)))
-}

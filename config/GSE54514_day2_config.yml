@@ -1,0 +1,112 @@
+# See config/dataset_metadata.example.yml for the full field-by-field
+# explanation of every section below (dataset/slurm/methods) and
+# R/README.md for the config reference.
+#
+# Single-timepoint slice of GSE54514 (design: timecourse, see
+# sepsis_collection_description.agent). Built from the SAME raw parquet
+# trio as config/GSE54514_config.yml, filtered to
+# day == "2" (31 samples) inside
+# R/preprocessing/gse54514_day2_preprocessing.R. See R/README.md's "There's no bases concept" note
+# (in R/lib/metadata.R's header) for why this is a separate config/matrix
+# rather than a flag on the parent -- one dataset_metadata.yml per matrix.
+#
+# NOTE: GSE54514 has no base (non-timepoint) preprocessing script yet -- see
+# config/GSE54514_config.yml's TODO. This script was written fresh (not
+# adapted from an existing base script) following the same array-platform
+# pattern used elsewhere in this project (see R/README.md).
+dataset:
+  id: GSE54514_DAY2
+  description: >
+    All samples from single timepoint (day) from GSE54514, array platform, timecourse design -- day == "2" (31 samples).
+
+  hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
+
+  expression_path: /home/chase/projects/hf_sepsis_collection/GSE54514/expression.parquet
+  sample_metadata_path: /home/chase/projects/hf_sepsis_collection/GSE54514/sample_metadata.parquet
+  feature_metadata_path: /home/chase/projects/hf_sepsis_collection/GSE54514/feature_metadata.parquet
+  sample_id_col: sample_id
+  feature_id_col: IlluminaID
+  value_col: value
+  ensembl_col: ENSEMBL
+
+  preprocessing_script: R/preprocessing/gse54514_day2_preprocessing.R
+  # No subject_id_col/timepoint_col -- this is a single-timepoint matrix
+  # (no time dimension left), so cp/tucker (the only methods that read
+  # those fields) are deliberately not configured below.
+
+slurm:
+  # IMPORTANT: every entry is written out IN FULL -- no YAML anchors/merge
+  # keys (`&name`/`<<: *name`). R's `yaml` package (2.3.12) does NOT apply
+  # override keys that follow a `<<:` merge key in the same mapping -- an
+  # earlier version of this file used anchors here and every method
+  # silently got PCA's settings, container included. Verify with
+  # `yaml::read_yaml()` directly if you're ever unsure a value is real.
+  pca:
+    mem: 4G
+    cpus_per_task: 1
+    time: "00:30:00"
+    container: "/ref/mblab/containers/chasem/tidyverse_latest.sif"
+    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+    sh_template: "config/rslurm_templates/submit_sh.txt"
+    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+    rscript_path: "Rscript"
+  # nmf/cogaps: NOT added -- array platform (log-intensity data, not
+  # count-like), which NMF/CoGAPS's non-negativity assumptions aren't
+  # appropriate for.
+  spca:
+    mem: 4G
+    cpus_per_task: 1
+    time: "02:00:00"
+    container: "/ref/mblab/containers/chasem/r-elasticnet_1.3--81dc98c2fe6e7ac6.sif"
+    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+    sh_template: "config/rslurm_templates/submit_sh.txt"
+    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+    rscript_path: "/opt/conda/bin/Rscript"
+  ica:
+    mem: 4G
+    cpus_per_task: 1
+    time: "02:00:00"
+    container: "/ref/mblab/containers/chasem/r-fastica_1.2_8--5dbdb92af2e4386b.sif"
+    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+    sh_template: "config/rslurm_templates/submit_sh.txt"
+    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+    rscript_path: "/opt/conda/bin/Rscript"
+  network:
+    wgcna:
+      mem: 19G
+      cpus_per_task: 8   # also passed through as blockwiseModules()'s nThreads
+      time: "04:00:00"
+      container: "/ref/mblab/containers/chasem/r-wgcna_1.74--aa9d6f2e8e081486.sif"
+      libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+      sh_template: "config/rslurm_templates/submit_sh.txt"
+      sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+      rscript_path: "/opt/conda/bin/Rscript"
+
+
+# See config/dataset_metadata.example.yml for the full field-by-field
+# explanation of the config schema.
+#
+# cp/tucker deliberately NOT included here -- this config is a single
+# timepoint slice (no time dimension left to decompose). See the parent
+# dataset's config/GSE54514_config.yml for the full-timecourse tensor run.
+methods:
+  pca:
+    rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+
+  spca:
+    K: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+    para: [0.05, 0.1, 0.2]   # crossed with K -- see R/methods/spca.R's header
+    sparse: penalty
+
+  ica:
+    n.comp: [5, 7, 10, 15, 20]
+    seed: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    # alpha: uses R/methods/ica.R's own default (1); must stay static -- see its header
+
+  network:
+    wgcna:
+      power: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]
+      minModuleSize: 30
+      mergeCutHeight: 0.25
+      networkType: signed
+

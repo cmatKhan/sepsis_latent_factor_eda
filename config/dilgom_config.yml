@@ -1,0 +1,104 @@
+# See config/dataset_metadata.example.yml for the full field-by-field
+# explanation of every section below (dataset/slurm/methods) and
+# R/README.md for the config reference.
+
+dataset:
+  id: dilgom
+  description: >
+    Samples and features from "dilgom" (E-TABM-1036). Array platform,
+    healthy-patient reference cohort. Sample metadata now available:
+    sample_id, accession (single value, E-TABM-1036), age_band, sex --
+    no timepoint/subject columns (still cross-sectional).
+  hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
+
+  # NOTE: the HF repo used to only have a partitioned expression file
+  # (accession=E-TABM-1036/part-0.parquet) and no sample_metadata.parquet
+  # at all -- both are now fixed upstream (single expression.parquet,
+  # 518-row sample_metadata.parquet), confirmed directly against the
+  # parquet files.
+  expression_path: /home/chase/projects/hf_sepsis_collection/dilgom/expression.parquet
+  sample_metadata_path: /home/chase/projects/hf_sepsis_collection/dilgom/sample_metadata.parquet
+  feature_metadata_path: /home/chase/projects/hf_sepsis_collection/dilgom/feature_metadata.parquet
+  sample_id_col: sample_id   # matches sample_metadata.parquet's own sample_id column directly
+  feature_id_col: IlluminaID
+  value_col: value
+  ensembl_col: ENSEMBL
+
+  preprocessing_script: R/preprocessing/dilgom_preprocessing.R
+  # NOTE: cp/tucker (rTensor methods) still NOT added -- sample_metadata
+  # has no timepoint column (age_band/sex are demographic covariates, not
+  # a repeated-measures time axis); this is a cross-sectional cohort.
+  # age_band/sex will show up automatically in the app's generic
+  # sample-metadata association views (Spearman/Kruskal-Wallis) once this
+  # dataset is ingested -- no further config needed for that.
+
+slurm:
+  # IMPORTANT: every entry is written out IN FULL -- no YAML anchors/merge
+  # keys (`&name`/`<<: *name`). R's `yaml` package (2.3.12) does NOT apply
+  # override keys that follow a `<<:` merge key in the same mapping -- an
+  # earlier version of this file used anchors here and every method
+  # silently got PCA's settings, container included. Verify with
+  # `yaml::read_yaml()` directly if you're ever unsure a value is real.
+  pca:
+    mem: 4G
+    cpus_per_task: 1
+    time: "00:30:00"
+    container: "/ref/mblab/containers/chasem/tidyverse_latest.sif"
+    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+    sh_template: "config/rslurm_templates/submit_sh.txt"
+    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+    rscript_path: "Rscript"
+  # nmf/cogaps: NOT added -- array platform (log-intensity data, not
+  # count-like), which NMF/CoGAPS's non-negativity assumptions aren't
+  # appropriate for.
+  spca:
+    mem: 4G
+    cpus_per_task: 1
+    time: "02:00:00"
+    container: "/ref/mblab/containers/chasem/r-elasticnet_1.3--81dc98c2fe6e7ac6.sif"
+    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+    sh_template: "config/rslurm_templates/submit_sh.txt"
+    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+    rscript_path: "/opt/conda/bin/Rscript"
+  ica:
+    mem: 4G
+    cpus_per_task: 1
+    time: "02:00:00"
+    container: "/ref/mblab/containers/chasem/r-fastica_1.2_8--5dbdb92af2e4386b.sif"
+    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+    sh_template: "config/rslurm_templates/submit_sh.txt"
+    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+    rscript_path: "/opt/conda/bin/Rscript"
+  network:
+    wgcna:
+      mem: 19G
+      cpus_per_task: 8   # also passed through as blockwiseModules()'s nThreads
+      time: "04:00:00"
+      container: "/ref/mblab/containers/chasem/r-wgcna_1.74--aa9d6f2e8e081486.sif"
+      libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+      sh_template: "config/rslurm_templates/submit_sh.txt"
+      sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+      rscript_path: "/opt/conda/bin/Rscript"
+
+# See config/dataset_metadata.example.yml for the full field-by-field
+# explanation of the config schema.
+methods:
+  pca:
+    rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+
+  spca:
+    K: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+    para: [0.05, 0.1, 0.2]   # crossed with K -- see R/methods/spca.R's header
+    sparse: penalty
+
+  ica:
+    n.comp: [5, 7, 10, 15, 20]
+    seed: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    # alpha: uses R/methods/ica.R's own default (1); must stay static -- see its header
+
+  network:
+    wgcna:
+      power: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]
+      minModuleSize: 30
+      mergeCutHeight: 0.25
+      networkType: signed

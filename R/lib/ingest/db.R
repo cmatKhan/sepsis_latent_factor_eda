@@ -111,12 +111,6 @@ ensure_schema <- function(con) {
        jaccard REAL, matched INTEGER NOT NULL DEFAULT 0
      )",
     "CREATE INDEX IF NOT EXISTS idx_wgcna_mp ON wgcna_module_pairs(fit_a, fit_b)",
-    "CREATE TABLE IF NOT EXISTS wto_fit_pairs (
-       fit_a INTEGER NOT NULL REFERENCES fits(fit_id),
-       fit_b INTEGER NOT NULL REFERENCES fits(fit_id),
-       pearson REAL, spearman REAL,
-       jaccard_sig REAL, padj_cutoff REAL, n_edges_common INTEGER
-     )",
     "CREATE TABLE IF NOT EXISTS enrichment_cache (
        factor_id INTEGER NOT NULL REFERENCES factors(factor_id),
        query_type TEXT NOT NULL,
@@ -140,7 +134,64 @@ ensure_schema <- function(con) {
        id_col TEXT NOT NULL,
        registered_at TEXT,
        UNIQUE(dataset_id, kind)
-     )"
+     )",
+    # "Are we discovering too many patterns?" diagnostic (see
+    # R/lib/ingest/redundancy.R) -- computed on ONE representative fit per
+    # rank (representative_fit_ids()), never across seeds.
+    "CREATE TABLE IF NOT EXISTS pattern_markers (
+       fit_id INTEGER NOT NULL REFERENCES fits(fit_id),
+       factor_index INTEGER NOT NULL,
+       gene TEXT NOT NULL,
+       score REAL
+     )",
+    "CREATE INDEX IF NOT EXISTS idx_pattern_markers_fit ON pattern_markers(fit_id)",
+    "CREATE TABLE IF NOT EXISTS fit_redundancy (
+       fit_id INTEGER PRIMARY KEY REFERENCES fits(fit_id),
+       max_offdiag_cosine REAL,
+       median_offdiag_cosine REAL,
+       n_factors_with_no_markers INTEGER,
+       redundancy_file TEXT
+     )",
+    # projectR results (see R/ingest_jobs/projectr_job.R) -- fits' loadings
+    # projected onto OTHER datasets'/timepoints' matrices. projection_type/
+    # include_intercept are stored as real columns (not re-derived from the
+    # jobname string) even though they're also implied by which of
+    # projectr_within_grid/projectr_cross_grid produced the row.
+    "CREATE TABLE IF NOT EXISTS projections (
+       projection_id INTEGER PRIMARY KEY,
+       source_fit_id INTEGER NOT NULL REFERENCES fits(fit_id),
+       source_dataset_id TEXT NOT NULL,
+       target_dataset_id TEXT NOT NULL,
+       method TEXT NOT NULL,
+       projection_type TEXT NOT NULL CHECK (projection_type IN ('within_dataset','cross_dataset')),
+       include_intercept INTEGER NOT NULL,
+       n_genes_matched INTEGER, n_samples INTEGER,
+       mean_r_squared REAL, median_r_squared REAL,
+       projection_file TEXT
+     )",
+    "CREATE INDEX IF NOT EXISTS idx_projections_source ON projections(source_fit_id)",
+    "CREATE INDEX IF NOT EXISTS idx_projections_type ON projections(projection_type)",
+    # Differential feature identification (projectR::projectionDriveR(),
+    # vignette section 7 -- see R/lib/ingest/driver.R) -- for a given
+    # fit's single pattern, which genes are significantly differentially
+    # weighted between two sample groups WITHIN that same dataset (e.g.
+    # timepoint, disease status) -- a distinct analysis from projections
+    # (which compares across datasets/timepoints via the whole pattern).
+    "CREATE TABLE IF NOT EXISTS pattern_drivers (
+       driver_id INTEGER PRIMARY KEY,
+       fit_id INTEGER NOT NULL REFERENCES fits(fit_id),
+       factor_index INTEGER NOT NULL,
+       grouping_col TEXT NOT NULL,
+       group1_level TEXT NOT NULL,
+       group2_level TEXT NOT NULL,
+       mode TEXT NOT NULL CHECK (mode IN ('CI','PV')),
+       n_genes_considered INTEGER,
+       n_significant_shared INTEGER,
+       result_file TEXT,
+       computed_at TEXT,
+       UNIQUE(fit_id, factor_index, grouping_col, group1_level, group2_level, mode)
+     )",
+    "CREATE INDEX IF NOT EXISTS idx_pattern_drivers_fit ON pattern_drivers(fit_id)"
   )
   for (s in statements) DBI::dbExecute(con, s)
   # additive column migrations for DBs created before this column existed --
@@ -150,7 +201,54 @@ ensure_schema <- function(con) {
   # query_size lets the app compute gene-ratio dot plots (intersection_size /
   # query_size) without re-querying g:Profiler
   ensure_column(con, "enrichment_cache", "query_size", "INTEGER")
+  # cp/tucker (tensor methods): Tucker's per-mode ranks (CP reuses the
+  # existing single `rank` column, like every other rank-1-per-fit
+  # method) + the third (time) mode's artifact, same relative-to-DB-dir
+  # convention as loadings_file/scores_file
+  ensure_column(con, "fits", "rank_genes", "INTEGER")
+  ensure_column(con, "fits", "rank_subjects", "INTEGER")
+  ensure_column(con, "fits", "rank_time", "INTEGER")
+  ensure_column(con, "fits", "time_loadings_file", "TEXT")
+  # CoGAPS-only: the FULL raw CogapsResult S4 object, saved as its own
+  # artifact at ingest time (from the still-in-scope task result, before
+  # extract_result() narrows it down to featureLoadings/sampleFactors) --
+  # needed later by R/lib/ingest/redundancy.R's cogaps_pattern_markers()
+  # (CoGAPS::patternMarkers() requires the real object, not just loadings).
+  ensure_column(con, "fits", "raw_result_file", "TEXT")
+  # Cached, dataset-level (not per-family) input matrix artifact -- see
+  # R/lib/ingest/ingest_dataset.R::cache_dataset_matrix(). Used by
+  # projectr_grid so target-matrix lookups don't re-run preprocessing_script
+  # per task.
+  ensure_column(con, "datasets", "matrix_file", "TEXT")
+
+  # wTO removed entirely (never had any ingested fits in practice) --
+  # drop its table/columns outright rather than leaving dead schema
+  # around. Safe/no-op if already dropped or on a DB that never had them.
+  drop_table_if_exists(con, "wto_fit_pairs")
+  drop_column_if_exists(con, "fits", "n_boot")
+  drop_column_if_exists(con, "fits", "delta")
+
   invisible(con)
+}
+
+drop_table_if_exists <- function(con, table) {
+  DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", table))
+  invisible(NULL)
+}
+
+#' DROP COLUMN requires SQLite >= 3.35 (bundled RSQLite here: 3.53.3) --
+#' guarded so it silently no-ops on older SQLite rather than erroring.
+drop_column_if_exists <- function(con, table, col) {
+  info <- DBI::dbGetQuery(con, sprintf("PRAGMA table_info(%s)", table))
+  if (!(col %in% info$name)) return(invisible(NULL))
+  ver <- DBI::dbGetQuery(con, "SELECT sqlite_version() AS v")$v
+  if (utils::compareVersion(ver, "3.35.0") < 0) {
+    warning("SQLite ", ver, " is older than 3.35 -- can't DROP COLUMN ", table, ".", col,
+             "; it will remain as a harmless unused column.", call. = FALSE)
+    return(invisible(NULL))
+  }
+  DBI::dbExecute(con, sprintf("ALTER TABLE %s DROP COLUMN %s", table, col))
+  invisible(NULL)
 }
 
 #' Add a column to an existing table if it isn't already there -- lets DBs
@@ -208,11 +306,12 @@ record_ingest <- function(con, dataset_id, jobname, family, method, n_results, r
 #' family -- the overwrite primitive. Plain replacement, no updating.
 delete_family <- function(con, db_path, dataset_id, jobname) {
   fit_ids <- DBI::dbGetQuery(con,
-    "SELECT fit_id, loadings_file FROM fits WHERE dataset_id = ? AND jobname = ?",
+    "SELECT fit_id, loadings_file, scores_file, time_loadings_file, raw_result_file FROM fits
+     WHERE dataset_id = ? AND jobname = ?",
     params = list(dataset_id, jobname))
 
   if (nrow(fit_ids) > 0) {
-    for (f in fit_ids$loadings_file) {
+    for (f in c(fit_ids$loadings_file, fit_ids$scores_file, fit_ids$time_loadings_file, fit_ids$raw_result_file)) {
       fa <- resolve_artifact(f, db_path)
       if (!is.na(fa) && file.exists(fa)) unlink(fa)
     }
@@ -229,9 +328,37 @@ delete_family <- function(con, db_path, dataset_id, jobname) {
       "DELETE FROM wgcna_module_pairs WHERE fit_a IN (%s) OR fit_b IN (%s)", ids_sql, ids_sql))
     DBI::dbExecute(con, sprintf(
       "DELETE FROM wgcna_fit_pairs WHERE fit_a IN (%s) OR fit_b IN (%s)", ids_sql, ids_sql))
-    DBI::dbExecute(con, sprintf(
-      "DELETE FROM wto_fit_pairs WHERE fit_a IN (%s) OR fit_b IN (%s)", ids_sql, ids_sql))
     DBI::dbExecute(con, sprintf("DELETE FROM wgcna_modules WHERE fit_id IN (%s)", ids_sql))
+
+    # redundancy artifacts (see R/lib/ingest/redundancy.R) unlinked + rows
+    # dropped -- same "plain replacement" treatment as loadings_file etc.
+    red_files <- DBI::dbGetQuery(con, sprintf(
+      "SELECT redundancy_file FROM fit_redundancy WHERE fit_id IN (%s)", ids_sql))$redundancy_file
+    for (f in red_files) {
+      fa <- resolve_artifact(f, db_path)
+      if (!is.na(fa) && file.exists(fa)) unlink(fa)
+    }
+    DBI::dbExecute(con, sprintf("DELETE FROM pattern_markers WHERE fit_id IN (%s)", ids_sql))
+    DBI::dbExecute(con, sprintf("DELETE FROM fit_redundancy WHERE fit_id IN (%s)", ids_sql))
+
+    # projections sourced from these fits are stale too -- their source
+    # loadings no longer exist
+    proj_files <- DBI::dbGetQuery(con, sprintf(
+      "SELECT projection_file FROM projections WHERE source_fit_id IN (%s)", ids_sql))$projection_file
+    for (f in proj_files) {
+      fa <- resolve_artifact(f, db_path)
+      if (!is.na(fa) && file.exists(fa)) unlink(fa)
+    }
+    DBI::dbExecute(con, sprintf("DELETE FROM projections WHERE source_fit_id IN (%s)", ids_sql))
+
+    driver_files <- DBI::dbGetQuery(con, sprintf(
+      "SELECT result_file FROM pattern_drivers WHERE fit_id IN (%s)", ids_sql))$result_file
+    for (f in driver_files) {
+      fa <- resolve_artifact(f, db_path)
+      if (!is.na(fa) && file.exists(fa)) unlink(fa)
+    }
+    DBI::dbExecute(con, sprintf("DELETE FROM pattern_drivers WHERE fit_id IN (%s)", ids_sql))
+
     DBI::dbExecute(con, sprintf("DELETE FROM factors WHERE fit_id IN (%s)", ids_sql))
     DBI::dbExecute(con, sprintf("DELETE FROM fits WHERE fit_id IN (%s)", ids_sql))
   }

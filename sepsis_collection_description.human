@@ -1,0 +1,114 @@
+{
+  "slug": "cmatkhan/sepsis-transcriptomics-6a7a412da9a0c9fa16699858",
+  "title": "Sepsis transcriptomics",
+  "owner": {
+    "_id": "66a26c5a0f6741ea58965ee8",
+    "avatarUrl": "https://cdn-avatars.huggingface.co/v1/production/uploads/noauth/6Wp0NdBq75GefSpSKre9I.png",
+    "fullname": "chase mateusiak",
+    "name": "cmatkhan",
+    "type": "user",
+    "isPro": false,
+    "isHf": false,
+    "isHfAdmin": false,
+    "isMod": false,
+    "isUserFollowing": false
+  },
+  "items": [
+    {
+      "item_object_id": "6a7a418656816ba9457f0b74",
+      "item_id": "cmatkhan/gains",
+      "item_type": "dataset",
+      "position": 0,
+      "note": "sepsis datasets (4 accessions) used for sepsistratifier (SRS) inference\nplatform: array"
+    },
+    {
+      "item_object_id": "6a7a6e6ee49d74eca32c2a32",
+      "item_id": "cmatkhan/dilgom",
+      "item_type": "dataset",
+      "position": 1,
+      "note": "healthy patients used in sepsistratifier\nplatform: array"
+    },
+    {
+      "item_object_id": "6a7ca6b88f93892b948f2bd6",
+      "item_id": "cmatkhan/SHIP-TREND",
+      "item_type": "dataset",
+      "position": 2,
+      "note": "healthy patients used in sepsistratifier\nplatform: array"
+    },
+    {
+      "item_object_id": "6a7cd2f142b06700c411f3d0",
+      "item_id": "cmatkhan/hfgp-500fg",
+      "item_type": "dataset",
+      "position": 3,
+      "note": "healthy individuals\nplatform: RNA-seq"
+    },
+    {
+      "item_object_id": "6a7cd9fe89dfd8b2c1da7a26",
+      "item_id": "cmatkhan/GSE54514",
+      "item_type": "dataset",
+      "position": 4,
+      "note": "design: timecourse\nplatform: array"
+    },
+    {
+      "item_object_id": "6a7e0dcf493b7da1382ceb78",
+      "item_id": "cmatkhan/MARS",
+      "item_type": "dataset",
+      "position": 5,
+      "note": "platform: array"
+    },
+    {
+      "item_object_id": "6a7e2c8e8d3ed62e155d1c2c",
+      "item_id": "cmatkhan/GSE13904",
+      "item_type": "dataset",
+      "position": 6,
+      "note": "design: timecourse\nplatform: array"
+    },
+    {
+      "item_object_id": "6a7f55585ff26cff627891ea",
+      "item_id": "cmatkhan/GSE110487",
+      "item_type": "dataset",
+      "position": 7,
+      "note": "Timecourse\nplatform: rnaseq"
+    },
+    {
+      "item_object_id": "6a7f658f8fd8779fae28529b",
+      "item_id": "cmatkhan/ANEMONES",
+      "item_type": "dataset",
+      "position": 8,
+      "note": "design: timecourse\nplatform: array"
+    },
+    {
+      "item_object_id": "6a7f7c45dec2241021a3938e",
+      "item_id": "cmatkhan/GSE273700",
+      "item_type": "dataset",
+      "position": 9,
+      "note": "design: timecourse\nplatform: rnaseq"
+    },
+    {
+      "item_object_id": "6a7f83ffbfab0eca43054ae9",
+      "item_id": "cmatkhan/GSE95233",
+      "item_type": "dataset",
+      "position": 10,
+      "note": "design: timecourse\nplatform: array"
+    },
+    {
+      "item_object_id": "6a8394e70d8b7583ade48e9e",
+      "item_id": "cmatkhan/CORTICUS",
+      "item_type": "dataset",
+      "position": 11,
+      "note": "design: timecourse\nplatform: array"
+    },
+    {
+      "item_object_id": "6a8dfad38873950c3b165210",
+      "item_id": "cmatkhan/EARLI",
+      "item_type": "dataset",
+      "position": 12
+    }
+  ],
+  "last_updated": "2026-08-25T20:28:03.697000+00:00",
+  "position": 0,
+  "private": false,
+  "theme": "pink",
+  "upvotes": 0,
+  "description": "This is a collection of publicly available high throughput transcriptomics datasets"
+}

@@ -1,0 +1,62 @@
+# Resource specs for the ingest slurm pipeline's job families -- see
+# R/create_ingest_slurm_bundle.R. Two containers: ingest_core/fgsea share
+# one image (CoGAPS transitively pulls in fgsea, so listing CoGAPS in
+# `pkgs` is enough for both); gprofiler is separate (needs network egress
+# to g:Profiler's API, unlike everything else here). projectr needs the
+# user's local projectR fork installed (devtools::install_local()), not a
+# Bioconductor/CRAN release -- see R/README.md's container notes.
+
+ingest_core:
+  mem: 16G
+  cpus_per_task: 1        # single SQLite writer -- no benefit from more
+  time: "04:00:00"
+  # verified 2026-09-15: DBI/RSQLite/arrow/yaml/CoGAPS/clue/matrixStats/
+  # BiocParallel/fgsea/DESeq2/msigdbr all import cleanly inside this image
+  # (see config/rslurm_templates/submit_sh.txt's env-leak fix -- without
+  # it, everything but DBI/matrixStats/BiocParallel falsely appeared
+  # missing due to a leaked host R_LIBS_USER).
+  # NOT YET VERIFIED in this image: `projectR` (the user's local fork) --
+  # added as a NEW requirement 2026-09-16 when run_all_pattern_drivers()
+  # (R/lib/ingest/driver.R, projectionDriveR()-based differential-feature
+  # identification) was wired into ingest_one_dataset(), which now runs
+  # inside ingest_core itself. Rebuild/re-verify this image before relying
+  # on it for a real ingest_core run.
+  container: "/ref/mblab/containers/chasem/bioconductor-biocparallel_bioconductor-cogaps_bioconductor-deseq2_bioconductor-fgsea_pruned_e7b1731bd8833692.sif"
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "/opt/conda/bin/Rscript"
+
+fgsea:
+  mem: 8G
+  cpus_per_task: 8         # BiocParallel workers within each array task
+  time: "02:00:00"
+  container: "/ref/mblab/containers/chasem/bioconductor-biocparallel_bioconductor-cogaps_bioconductor-deseq2_bioconductor-fgsea_pruned_e7b1731bd8833692.sif"
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "/opt/conda/bin/Rscript"
+
+gprofiler:
+  mem: 4G
+  cpus_per_task: 1          # deliberately serial -- g:Profiler API, not compute-bound
+  time: "08:00:00"
+  # verified 2026-09-15: arrow/gprofiler2 import cleanly, and a live
+  # gost() call succeeded (network egress confirmed) -- see
+  # config/rslurm_templates/submit_sh.txt's env-leak fix, same as
+  # ingest_core/fgsea's image
+  container: "/ref/mblab/containers/chasem/r-arrow_r-gprofiler2_b4673b4475a66970.sif"
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "/opt/conda/bin/Rscript"
+
+projectr:
+  mem: 4G
+  cpus_per_task: 1
+  time: "01:00:00"
+  container: "/ref/mblab/containers/chasem/r-projectr.sif"   # TODO: build from /home/chase/projects/projectR
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "Rscript"

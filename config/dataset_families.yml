@@ -1,0 +1,18 @@
+# Explicit dataset-family membership, used ONLY by
+# R/lib/ingest/projectr_pairs.R to decide include_intercept for a
+# projectr pair (within-family = FALSE, cross-family = TRUE). NOT inferred
+# from naming convention on purpose -- see build_projectr_pairs().
+ANEMONES:  [ANEMONES, ANEMONES_DAY1, ANEMONES_DAY2, ANEMONES_DAY5, ANEMONES_DISCHARGE]
+CORTICUS:  [CORTICUS, CORTICUS_PRE, CORTICUS_POST24H]
+GSE13904:  [GSE13904, GSE13904_DAY1, GSE13904_DAY3]
+GSE54514:  [GSE54514, GSE54514_DAY1, GSE54514_DAY2, GSE54514_DAY3, GSE54514_DAY4, GSE54514_DAY5]
+GSE95233:  [GSE95233, GSE95233_D01, GSE95233_D02, GSE95233_D03]
+GSE110487: [GSE110487, GSE110487_T1, GSE110487_T2]
+GSE273700: [GSE273700, GSE273700_DAY1, GSE273700_DAY8]
+dilgom: [dilgom]
+gains: [gains]
+EARLI: [EARLI]
+MARS: [MARS]
+ROSE: [ROSE, ROSE_DAY0, ROSE_DAY2]
+"SHIP-TREND": ["SHIP-TREND"]
+"hfgp-500fg": ["hfgp-500fg"]

@@ -11,20 +11,24 @@ source(here::here("R/lib/submit_all_script.R"))
 
 # Path each job's bundle is bind-mounted to inside its container, once
 # apptainer performs the bind (see `build_apptainer_rscript_path()` and
-# R/README.md's squashfs section) -- arbitrary but must agree with nothing
-# else, since nothing outside this function needs to know it.
-.rslurm_squashfs_mount <- "/mnt/rslurm_bundle"
+# R/README.md's "Packaging a bundle for the cluster" section) -- arbitrary
+# but must agree with nothing else, since nothing outside this function
+# needs to know it.
+.rslurm_bundle_mount <- "/mnt/rslurm_bundle"
 
 #' Build the `rscript_path` passed to slurm_apply()/slurm_call(): a full
 #' `apptainer run ...` invocation (not just "Rscript") that runs
 #' `rscript_cmd` inside `container`, with its working directory set to
-#' this job family's directory inside the squashfs archive bind-mounted
-#' via `$SQUASHFS_PATH` (a plain shell-variable reference, left
+#' this job family's directory inside the bundle directory bind-mounted
+#' via `$RSLURM_BUNDLE_DIR` (a plain shell-variable reference, left
 #' unexpanded here -- it's resolved when the generated submit.sh actually
 #' runs, using whatever `submit_all_<dataset_id>.sh` exported at
-#' submission time; see R/lib/submit_all_script.R). `apptainer` itself
-#' must already be on PATH by the time this line runs -- submit_sh.txt/
-#' submit_single_sh.txt take care of that via `spack load`.
+#' submission time; see R/lib/submit_all_script.R). No squashfs packaging
+#' involved -- `$RSLURM_BUNDLE_DIR` is just the plain `slurm_bundles/
+#' <dataset_id>/` directory, copied (e.g. via `rsync`/`scp`) to wherever
+#' it's submitted from, bind-mounted as an ordinary directory. `apptainer`
+#' itself must already be on PATH by the time this line runs --
+#' submit_sh.txt/submit_single_sh.txt take care of that via `spack load`.
 #'
 #' `lib_paths` (typically `cluster_cfg$libPaths`) is ALSO explicitly
 #' bind-mounted here (source == destination, so paths match exactly what
@@ -51,14 +55,34 @@ source(here::here("R/lib/submit_all_script.R"))
 #' argument`). Don't reintroduce `--cleanenv` without also explicitly
 #' `--env`-forwarding every `SLURM_*` variable any job function might
 #' need, not just the ones we happen to already know about.
-build_apptainer_rscript_path <- function(container, jobname, rscript_cmd, lib_paths = character(0)) {
+#' `extra_binds`/`pwd_override` exist for the ingest slurm pipeline (see
+#' R/create_ingest_slurm_bundle.R): unlike every R/methods/*.R job, which
+#' only ever touches an in-memory matrix passed via `global_objects` and
+#' writes its own `results_<i>.RDS`, ingest_core/fgsea_grid/gprofiler_grid/
+#' projectr_*_grid read/write ordinary project-relative paths (config/,
+#' results/, slurm_bundles/<dataset_id>/) that live OUTSIDE this job's own
+#' `_rslurm_<jobname>` bundle directory -- $RSLURM_BUNDLE_DIR alone can't
+#' reach them. `extra_binds` is a character vector of HOST paths, each
+#' bound read-write at the identical absolute path inside the container
+#' (source == destination, same rationale as `lib_paths` below -- so
+#' project-relative paths resolve unmodified once `pwd_override` also
+#' points there); `pwd_override` overrides the default
+#' `$MOUNT/_rslurm_<jobname>` working directory to one of those binds
+#' (typically the project root) so relative paths actually work.
+build_apptainer_rscript_path <- function(container, jobname, rscript_cmd, lib_paths = character(0),
+                                          extra_binds = character(0), pwd_override = NULL) {
   binds <- c(
-    sprintf('-B "$SQUASHFS_PATH:%s:image-src=/"', .rslurm_squashfs_mount),
-    if (length(lib_paths) > 0) sprintf('-B "%s:%s"', lib_paths, lib_paths)
+    # :ro keeps the bundle directory read-only inside the container (it
+    # was implicitly read-only before via squashfs's own format; a plain
+    # directory bind needs the flag spelled out instead).
+    sprintf('-B "$RSLURM_BUNDLE_DIR:%s:ro"', .rslurm_bundle_mount),
+    if (length(lib_paths) > 0) sprintf('-B "%s:%s"', lib_paths, lib_paths),
+    if (length(extra_binds) > 0) sprintf('-B "%s:%s"', extra_binds, extra_binds)
   )
+  pwd <- pwd_override %||% sprintf("%s/_rslurm_%s", .rslurm_bundle_mount, jobname)
   paste(c(
     "apptainer run",
-    sprintf('--pwd "%s/_rslurm_%s"', .rslurm_squashfs_mount, jobname),
+    sprintf('--pwd "%s"', pwd),
     binds,
     container,
     rscript_cmd
@@ -74,8 +98,9 @@ build_apptainer_rscript_path <- function(container, jobname, rscript_cmd, lib_pa
 #' @param jobname passed through to rslurm
 #' @param global_objects character vector of object names f depends on
 #' @param pkgs character vector of packages f depends on
-#' @param cluster_cfg one method's (or network backend's) entry from
-#'   cluster_config.yml -- must have mem/cpus_per_task/time/container/
+#' @param cluster_cfg one method's (or network backend's) entry from a
+#'   dataset config's `slurm:` block (formerly a separate
+#'   cluster_config.yml) -- must have mem/cpus_per_task/time/container/
 #'   libPaths/sh_template/rscript_path, and may optionally have
 #'   sh_template_single (used instead of sh_template when this family
 #'   dispatches to slurm_call -- see param `jobs_df` -- falls back to
@@ -86,6 +111,11 @@ build_apptainer_rscript_path <- function(container, jobname, rscript_cmd, lib_pa
 #'   `rscript_path` (see `build_apptainer_rscript_path()` below).
 #' @param slurm_options_extra named list merged into slurm_options, for any
 #'   job-family-specific overrides (e.g. a container override)
+#' @param extra_binds / pwd_override: passed straight through to
+#'   build_apptainer_rscript_path() -- see its header. Only needed by jobs
+#'   that read/write ordinary project-relative paths outside their own
+#'   bundle directory (the ingest slurm pipeline); every R/methods/*.R job
+#'   leaves these at their defaults.
 #' @param submit passed through to rslurm; defaults to FALSE (build the
 #'   sbatch materials without actually submitting)
 #' @param output_dir directory rslurm's `_rslurm_<jobname>` bundle is
@@ -95,7 +125,8 @@ build_apptainer_rscript_path <- function(container, jobname, rscript_cmd, lib_pa
 submit_job_family <- function(f, jobs_df, jobname, global_objects = character(0),
                                pkgs = character(0), cluster_cfg,
                                slurm_options_extra = list(), submit = FALSE,
-                               output_dir = getwd()) {
+                               output_dir = getwd(),
+                               extra_binds = character(0), pwd_override = NULL) {
   # No `container` here -- it's baked into rscript_path (below) as part of
   # an explicit `apptainer run ...` invocation instead of a native
   # `--container=` SBATCH option.
@@ -123,9 +154,9 @@ submit_job_family <- function(f, jobs_df, jobname, global_objects = character(0)
   # own templates, whose only change is writing results to
   # Sys.getenv("RSLURM_OUTPUT_DIR") instead of a relative path -- see
   # config/rslurm_templates/slurm_run_R.txt / slurm_run_single_R.txt and
-  # R/README.md's squashfs packaging section for why. Falls back to
-  # rslurm's own bundled templates untouched if this project's copies
-  # aren't present for some reason.
+  # R/README.md's "Packaging a bundle for the cluster" section for why.
+  # Falls back to rslurm's own bundled templates untouched if this
+  # project's copies aren't present for some reason.
   r_template <- if (is_single_job) {
     here::here("config/rslurm_templates/slurm_run_single_R.txt")
   } else {
@@ -140,7 +171,8 @@ submit_job_family <- function(f, jobs_df, jobname, global_objects = character(0)
     pkgs           = pkgs,
     libPaths       = cluster_cfg$libPaths,
     rscript_path   = build_apptainer_rscript_path(cluster_cfg$container, jobname, cluster_cfg$rscript_path,
-                                                   lib_paths = cluster_cfg$libPaths),
+                                                   lib_paths = cluster_cfg$libPaths,
+                                                   extra_binds = extra_binds, pwd_override = pwd_override),
     sh_template    = sh_template,
     r_template     = r_template,
     slurm_options  = slurm_options,
@@ -165,8 +197,8 @@ submit_job_family <- function(f, jobs_df, jobname, global_objects = character(0)
   }
 }
 
-#' Save a named list of sjob objects for this dataset/method, so a later
-#' step can find each job's output directory without re-running setup.
+#' Save the sjob object for this dataset/method, so a later step can find
+#' its output directory without re-running setup.
 save_sjobs <- function(sjobs, dataset_id, method, results_root = here::here("results/rslurm")) {
   dir.create(file.path(results_root, dataset_id), recursive = TRUE, showWarnings = FALSE)
   out_path <- file.path(results_root, dataset_id, paste0(method, "_sjobs.rds"))

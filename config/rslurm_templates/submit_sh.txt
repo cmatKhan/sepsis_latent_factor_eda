@@ -7,11 +7,10 @@
 # No native --container SBATCH directive here -- the container is instead
 # invoked explicitly as part of the rscript variable substituted into the
 # final line below (constructed by R/lib/submit.R::submit_job_family() as
-# a full `apptainer run ...` command, including this family's image and,
-# since this job's bundle lives in a squashfs archive, a
-# `-B "$SQUASHFS_PATH":...:image-src=/` bind of it -- see R/README.md's
-# squashfs section). `spack load` makes `apptainer` itself available on
-# PATH before that line runs.
+# a full `apptainer run ...` command, including this family's image and a
+# `-B "$RSLURM_BUNDLE_DIR":...` bind of the plain bundle directory --
+# see R/README.md's "Packaging a bundle for the cluster" section). `spack
+# load` makes `apptainer` itself available on PATH before that line runs.
 #
 # Whisker variables injected by rslurm:
 #   {{{jobname}}}   {{{max_node}}}   {{{rscript}}}
@@ -31,5 +30,17 @@
 set -euo pipefail
 
 eval $(spack load --sh apptainer)
+
+# Strip R library-path env vars from the submitting shell BEFORE they can
+# leak into the container -- confirmed directly (2026-09-15, testing
+# bioconductor-biocparallel_bioconductor-cogaps_bioconductor-deseq2_
+# bioconductor-fgsea_pruned_e7b1731bd8833692.sif): an inherited
+# R_LIBS_USER pointing at a host R 4.6 library shadowed the container's
+# own /opt/conda/lib/R/library, making every package except a couple
+# resolve to FALSE even though they ARE installed inside the image.
+# Deliberately NOT `--cleanenv` (see R/lib/submit.R's header) -- that
+# strips SLURM_ARRAY_TASK_ID too and breaks every array job; this only
+# targets the specific variables that actually caused the contamination.
+unset R_LIBS_USER R_LIBS_SITE R_LIBS R_HOME
 
 {{{rscript}}} slurm_run.R

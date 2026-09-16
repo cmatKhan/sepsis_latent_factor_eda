@@ -1,8 +1,8 @@
 # Sepsis timecourse latent-factor stability
 
 Pipeline for quantifying the stability of latent factors (PCA, NMF, CoGAPS,
-WGCNA, wTO) found in the sepsis timecourse expression data, across random
-seeds and across rank/parameter choices.
+sPCA, CP, Tucker, and WGCNA) found in the sepsis timecourse expression
+data, across random seeds and across rank/parameter choices.
 
 Three stages:
 
@@ -34,8 +34,8 @@ Rscript R/ingest_results.R config/GSE110487_config.yml GSE110487_results results
 - Discovers job families as the subdirectories of `<results_dir>`
   containing `results_*.RDS` files.
 - **Additive**: re-running the same command only adds families not yet in
-  the DB for that dataset (e.g. drop a `wto_grid/` directory in later and
-  re-run -- only `wto_grid` gets ingested; everything else is reported as
+  the DB for that dataset (e.g. drop a `cp_grid/` directory in later and
+  re-run -- only `cp_grid` gets ingested; everything else is reported as
   skipped).
 - **Overwrite**: `--overwrite` (bare) replaces every family found in
   `<results_dir>`; `--overwrite jobname1,jobname2` replaces just those
@@ -44,8 +44,8 @@ Rscript R/ingest_results.R config/GSE110487_config.yml GSE110487_results results
 - A new dataset (different `dataset.id` in the config) is ingested
   alongside any existing datasets in the same DB file -- point multiple
   configs at the same `<db_path>` to build up a multi-dataset DB.
-- Large artifacts (loading matrices, sample/module scores, wTO edge tables)
-  are written under `<db_dir>/stability_artifacts/<dataset_id>/` and
+- Large artifacts (loading matrices, sample/module scores, CP/Tucker
+  time-mode loadings) are written under `<db_dir>/stability_artifacts/<dataset_id>/` and
   referenced by path from the DB; everything the app filters/aggregates on
   lives in the SQLite tables themselves.
 - The dataset config's `sample_metadata_path`/`sample_id_col` and
@@ -73,5 +73,8 @@ shiny::runApp("app")
   `results/stability.sqlite` (resolved relative to either the repo root or
   `app/`, whichever the app was launched from).
 - The dataset list, methods, and job families shown are all queried live
-  from the DB, so re-ingesting (e.g. adding `wto_grid`) makes new data
-  appear on the next app launch with no app changes needed.
+  from the DB, so re-ingesting (e.g. adding `cp_grid`) makes new data
+  appear on the next app launch with no app changes needed. **Caveat**:
+  this applies to what's *listed*; sPCA/CP/Tucker don't have Level 1/2/3
+  views wired up in the app yet (stage 1 setup and stage 2 ingest fully
+  support them; the app doesn't) -- see R/README.md's "Deferred" section.

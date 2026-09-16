@@ -7,8 +7,9 @@
 load('add_objects.RData')
 {{/add_obj}}
 
-# cwd is inside a read-only, mounted squashfs archive (see R/README.md's
-# squashfs section) -- R's default graphics device otherwise lazily tries
+# cwd is inside a read-only bind-mounted bundle directory (see
+# R/README.md's "Packaging a bundle for the cluster" section) -- R's
+# default graphics device otherwise lazily tries
 # to create "Rplots.pdf" in cwd the first time ANY plotting call happens
 # (even indirectly, inside a package internal to a job function), which
 # fails hard there. Pre-opening a device pointed at a writable tempdir

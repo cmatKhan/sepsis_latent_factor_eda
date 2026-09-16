@@ -41,12 +41,7 @@ method_overview <- function(con, dataset_id) {
      FROM wgcna_fit_pairs wp JOIN fits ft ON ft.fit_id = wp.fit_a
      WHERE ft.dataset_id = ?",
     params = list(dataset_id))
-  wto <- DBI::dbGetQuery(con,
-    "SELECT 'wto' AS method, AVG(wp.pearson) AS pearson, AVG(wp.spearman) AS spearman
-     FROM wto_fit_pairs wp JOIN fits ft ON ft.fit_id = wp.fit_a
-     WHERE ft.dataset_id = ?",
-    params = list(dataset_id))
-  list(counts = counts, stability = stab, wgcna = wgcna, wto = wto)
+  list(counts = counts, stability = stab, wgcna = wgcna)
 }
 
 #' Matched same-rank factor similarities with rank/seed info -- the Level-1
@@ -61,6 +56,23 @@ seed_stability_by_rank <- function(con, dataset_id, method) {
      WHERE fp.matched = 1 AND fp.same_rank = 1
        AND fa.dataset_id = ? AND fa.method = ?",
     params = list(dataset_id, method))
+}
+
+#' Mean +/- SD of the seed-sweep family's own (in-sample) reconstruction
+#' `mse` per rank -- distinct from maskcv_curve() (a single fixed mask
+#' draw, no seed dimension at all). Answers "how much does reconstruction
+#' quality vary across random seeds at this rank?", a genuine stability
+#' question masking-CV doesn't address (it answers "which rank
+#' generalizes best," a model-selection question).
+seed_sweep_mse_by_rank <- function(con, dataset_id, method) {
+  d <- DBI::dbGetQuery(con,
+    "SELECT rank, mse FROM fits
+     WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok' AND mse IS NOT NULL",
+    params = list(dataset_id, method))
+  if (nrow(d) == 0) return(d)
+  agg <- aggregate(mse ~ rank, data = d, FUN = function(x) c(mean = mean(x), sd = sd(x), n = length(x)))
+  out <- data.frame(rank = agg$rank, mean_mse = agg$mse[, "mean"], sd_mse = agg$mse[, "sd"], n = agg$mse[, "n"])
+  out[order(out$rank), ]
 }
 
 maskcv_curve <- function(con, dataset_id, method) {
@@ -110,12 +122,19 @@ distinct_ranks <- function(con, dataset_id, method) {
     params = list(dataset_id, method))$rank
 }
 
+#' `family != 'maskcv'` (rather than hardcoding 'seed_sweep') so this
+#' works for both seed_sweep methods (pca/nmf/cogaps/ica) and sPCA, whose
+#' job family is 'param_grid' (see PARAM_GRID_METHODS in
+#' R/lib/ingest/extract.R) since K/para have no genuine seed dimension --
+#' `alpha` is included because sPCA's `para` value is stored there (see
+#' extract_result()'s spca branch) and is what the app labels sPCA's
+#' per-rank fit selector with (there being no real `seed` to show).
 fits_at_rank <- function(con, dataset_id, method, rank) {
   DBI::dbGetQuery(con,
-    "SELECT fit_id, seed, mse, n_factors, loadings_file FROM fits
+    "SELECT fit_id, seed, alpha, mse, n_factors, loadings_file FROM fits
      WHERE dataset_id = ? AND method = ? AND rank = ? AND status = 'ok'
-       AND family = 'seed_sweep'
-     ORDER BY seed",
+       AND family != 'maskcv'
+     ORDER BY seed, alpha",
     params = list(dataset_id, method, rank))
 }
 
@@ -163,8 +182,68 @@ factor_matches_everywhere <- function(con, fit_id, factor_index) {
     params = list(fit_id, factor_index))
 }
 
+#' Every ok fit for a method, in whatever shape that method's Level 1
+#' already uses to build its own fit choices (seed_sweep across all ranks
+#' for pca/nmf/cogaps; direct_fits() for sPCA/CP/Tucker; wgcna_fits() for
+#' WGCNA) -- used by the standalone "Compare methods" screen's fit
+#' pickers, which need to offer EVERY fit up front rather than drilling
+#' down one rank at a time.
+all_fits_for_compare <- function(con, dataset_id, method) {
+  if (method == "wgcna") return(wgcna_fits(con, dataset_id)$fit_id)
+  if (method %in% c("spca", "cp", "tucker")) return(direct_fits(con, dataset_id, method)$fit_id)
+  DBI::dbGetQuery(con,
+    "SELECT fit_id FROM fits
+     WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok'
+     ORDER BY rank, seed",
+    params = list(dataset_id, method))$fit_id
+}
+
 get_fit <- function(con, fit_id) {
   DBI::dbGetQuery(con, "SELECT * FROM fits WHERE fit_id = ?", params = list(fit_id))
+}
+
+#' Human-readable descriptor for one fit, method-aware -- used in
+#' breadcrumbs, Level 1's fit-select labels, and Level 3 plot titles so
+#' every method (including the "direct fit" ones with no seed dimension:
+#' sPCA/CP/Tucker) gets a sensible label instead of a literal "rank NA
+#' seed NA".
+fit_descriptor <- function(con, method, fit_id) {
+  f <- get_fit(con, fit_id)
+  if (nrow(f) == 0) return("")
+  if (method == "wgcna") {
+    sprintf("power %s", f$power)
+  } else if (method == "spca") {
+    sprintf("K=%s", f$rank)
+  } else if (method == "cp") {
+    sprintf("num_components=%s", f$rank)
+  } else if (method == "tucker") {
+    sprintf("rank_genes=%s, rank_subjects=%s, rank_time=%s", f$rank_genes, f$rank_subjects, f$rank_time)
+  } else if (!is.na(f$seed)) {
+    sprintf("rank %s seed %s", f$rank, f$seed)
+  } else {
+    sprintf("rank %s", f$rank)
+  }
+}
+
+#' All ok fits for a "direct fit" method (sPCA/CP/Tucker) -- no seed
+#' dimension to group by, so (unlike fits_at_rank()) this returns every
+#' fit for the method directly.
+direct_fits <- function(con, dataset_id, method) {
+  DBI::dbGetQuery(con,
+    "SELECT fit_id, rank, rank_genes, rank_subjects, rank_time, mse, n_factors
+     FROM fits WHERE dataset_id = ? AND method = ? AND status = 'ok'
+     ORDER BY rank, rank_genes, rank_subjects, rank_time",
+    params = list(dataset_id, method))
+}
+
+#' Lowest-MSE fit for a direct-fit method -- Level 0's headline, standing
+#' in for the masking-CV-based headlines other methods use (sPCA/CP/Tucker
+#' have no masking_cv family at all).
+best_direct_fit <- function(con, dataset_id, method) {
+  d <- direct_fits(con, dataset_id, method)
+  d <- d[!is.na(d$mse), ]
+  if (nrow(d) == 0) return(NULL)
+  d[which.min(d$mse), ]
 }
 
 get_factor_id <- function(con, fit_id, factor_index) {
@@ -189,6 +268,110 @@ load_loadings <- function(con, fit_id) {
   path <- resolve_artifact(f$loadings_file)
   if (!file.exists(path)) return(NULL)
   readRDS(path)
+}
+
+#' CP/Tucker's third (time-mode) loading matrix -- rows = timepoint
+#' levels, columns = component. NULL for any other method (no
+#' time_loadings_file).
+load_time_loadings <- function(con, fit_id) {
+  f <- get_fit(con, fit_id)
+  if (nrow(f) == 0 || is.na(f$time_loadings_file)) return(NULL)
+  path <- resolve_artifact(f$time_loadings_file)
+  if (!file.exists(path)) return(NULL)
+  readRDS(path)
+}
+
+## ---- pattern drivers (differential features, projectR::projectionDriveR()) ---
+##
+## Read-only helpers for R/lib/ingest/driver.R's ingest-time batch pass
+## (pattern_drivers table) plus a self-contained on-demand runner for
+## combinations that pass wasn't scoped to cover (arbitrary grouping
+## column / factor / mode) -- deliberately NOT sourcing R/lib/ingest/
+## driver.R itself, mirroring how R/lib/ingest/enrichment.R's ingest-time
+## logic is already duplicated rather than shared with the app (see that
+## file's header: "app is fully decoupled from ingest").
+
+#' Already-cached projectionDriveR() results for one fit -- populates a
+#' selector of (factor, grouping column, level pair, mode) combinations
+#' already computed at ingest time.
+pattern_drivers_for_fit <- function(con, fit_id) {
+  DBI::dbGetQuery(con,
+    "SELECT driver_id, factor_index, grouping_col, group1_level, group2_level, mode,
+            n_genes_considered, n_significant_shared, computed_at
+     FROM pattern_drivers WHERE fit_id = ? ORDER BY factor_index, grouping_col, group1_level, group2_level",
+    params = list(fit_id))
+}
+
+load_pattern_driver_result <- function(con, driver_id) {
+  f <- DBI::dbGetQuery(con, "SELECT result_file FROM pattern_drivers WHERE driver_id = ?", params = list(driver_id))
+  if (nrow(f) == 0 || is.na(f$result_file)) return(NULL)
+  path <- resolve_artifact(f$result_file)
+  if (!file.exists(path)) return(NULL)
+  readRDS(path)
+}
+
+#' 2-6 level categorical columns of a dataset's registered sample
+#' metadata -- same eligibility rule as driver.R's batch pass (excludes
+#' the id column and anything higher-cardinality), but a slightly wider
+#' 2-6 range since this is a user-driven on-demand selector, not an
+#' exhaustive ingest sweep.
+available_grouping_columns <- function(con, dataset_id) {
+  sm <- dataset_metadata(con, dataset_id, "sample")
+  if (is.null(sm)) return(character(0))
+  Filter(function(col) {
+    col != "sample_id" && (is.character(sm[[col]]) || is.factor(sm[[col]])) &&
+      length(unique(stats::na.omit(sm[[col]]))) %in% 2:6
+  }, names(sm))
+}
+
+#' On-demand projectionDriveR() run for a combination not already cached
+#' -- checks pattern_drivers first (cache hit -> just loads it), otherwise
+#' computes live and stores the result the SAME way the ingest-time batch
+#' pass does, so it shows up in pattern_drivers_for_fit() on next visit.
+run_pattern_driver_on_demand <- function(con, db_path, fit_id, factor_index, dataset_id,
+                                          grouping_col, group1_level, group2_level, mode = "CI") {
+  cached <- DBI::dbGetQuery(con,
+    "SELECT driver_id FROM pattern_drivers
+     WHERE fit_id=? AND factor_index=? AND grouping_col=? AND group1_level=? AND group2_level=? AND mode=?",
+    params = list(fit_id, factor_index, grouping_col, group1_level, group2_level, mode))
+  if (nrow(cached) > 0) return(load_pattern_driver_result(con, cached$driver_id[1]))
+
+  loadings <- load_loadings(con, fit_id)
+  if (is.null(loadings) || !(factor_index %in% seq_len(ncol(loadings)))) return(NULL)
+  pattern_name <- colnames(loadings)[factor_index] %||% paste0("factor_", factor_index)
+  colnames(loadings)[factor_index] <- pattern_name
+
+  mat_file <- DBI::dbGetQuery(con, "SELECT matrix_file FROM datasets WHERE dataset_id = ?", params = list(dataset_id))
+  if (nrow(mat_file) == 0 || is.na(mat_file$matrix_file)) return(NULL)
+  mat <- as.matrix(readRDS(resolve_artifact(mat_file$matrix_file)))
+
+  sm <- dataset_metadata(con, dataset_id, "sample")
+  if (is.null(sm) || !(grouping_col %in% names(sm))) return(NULL)
+  ids1 <- intersect(sm$sample_id[sm[[grouping_col]] == group1_level], colnames(mat))
+  ids2 <- intersect(sm$sample_id[sm[[grouping_col]] == group2_level], colnames(mat))
+  if (length(ids1) < 3 || length(ids2) < 3) return(NULL)
+
+  result <- tryCatch(
+    projectR::projectionDriveR(cellgroup1 = mat[, ids1, drop = FALSE], cellgroup2 = mat[, ids2, drop = FALSE],
+                                loadings = loadings, pattern_name = pattern_name, display = FALSE, mode = mode),
+    error = function(e) NULL)
+  if (is.null(result)) return(NULL)
+
+  n_shared <- if (mode == "CI") length(result$sig_genes$significant_shared_genes %||% character(0))
+              else length(result$sig_genes$PV_significant_shared_genes %||% character(0))
+  n_considered <- if (mode == "CI") nrow(result$mean_ci) else nrow(result$mean_stats)
+  art_dir <- file.path(getOption("stability.db_dir"), "stability_artifacts", dataset_id)
+  dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
+  fname <- sprintf("driver_fit%d_f%d_%s_%s-vs-%s_%s_ondemand.rds", fit_id, factor_index, grouping_col,
+                    make.names(group1_level), make.names(group2_level), mode)
+  saveRDS(result[setdiff(names(result), "plotted_ci")], file.path(art_dir, fname))
+  DBI::dbExecute(con,
+    "INSERT OR IGNORE INTO pattern_drivers (fit_id, factor_index, grouping_col, group1_level, group2_level, mode,
+                                             n_genes_considered, n_significant_shared, result_file, computed_at)
+     VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))",
+    params = list(fit_id, factor_index, grouping_col, group1_level, group2_level, mode,
+                  n_considered, n_shared, file.path("stability_artifacts", dataset_id, fname)))
+  result
 }
 
 ## ---- network methods ---------------------------------------------------------
@@ -237,25 +420,6 @@ wgcna_module_best_matches <- function(con, dataset_id, fit_id) {
      FROM wgcna_module_pairs p JOIN fits fa ON fa.fit_id = p.fit_a
      WHERE p.fit_b = ?1 AND p.matched = 1",
     params = list(fit_id))
-}
-
-wto_fits <- function(con, dataset_id) {
-  DBI::dbGetQuery(con,
-    "SELECT fit_id, n_boot, seed, delta, loadings_file FROM fits
-     WHERE dataset_id = ? AND method = 'wto' AND status = 'ok' ORDER BY n_boot, seed",
-    params = list(dataset_id))
-}
-
-wto_pair_matrix <- function(con, dataset_id) {
-  DBI::dbGetQuery(con,
-    "SELECT fa.fit_id AS fit_a, fb.fit_id AS fit_b,
-            fa.n_boot AS n_a, fa.seed AS seed_a, fb.n_boot AS n_b, fb.seed AS seed_b,
-            wp.pearson, wp.spearman, wp.jaccard_sig
-     FROM wto_fit_pairs wp
-     JOIN fits fa ON fa.fit_id = wp.fit_a
-     JOIN fits fb ON fb.fit_id = wp.fit_b
-     WHERE fa.dataset_id = ?",
-    params = list(dataset_id))
 }
 
 ## ---- enrichment cache ---------------------------------------------------------
