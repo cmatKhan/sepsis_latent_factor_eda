@@ -259,3 +259,18 @@ if (opt$stage == "core") {
   }
   DBI::dbDisconnect(con)
 }
+
+# Every _rslurm_<jobname>/submit.sh generated above expects
+# $RSLURM_BUNDLE_DIR (and, per slurm_run.R, $RSLURM_OUTPUT_DIR) to already
+# be exported in the submitting shell -- see build_apptainer_rscript_path()'s
+# header and config/rslurm_templates/submit_sh.txt's `set -euo pipefail`.
+# Running a job family's submit.sh directly (e.g. a bare `sbatch submit.sh`)
+# fails with "RSLURM_BUNDLE_DIR: unbound variable" for exactly that reason.
+# write_submit_all_script() (safe to call repeatedly -- see its own header)
+# writes/refreshes slurm_bundles/ingest/submit_all_ingest.sh, which exports
+# both variables and discovers every _rslurm_* directory dynamically; use
+# IT to submit, not `sbatch` directly against a job family's own submit.sh.
+write_submit_all_script("ingest", opt$output)
+message("Wrote/refreshed ", file.path(opt$output, "submit_all_ingest.sh"),
+        " -- use it to actually submit the job(s) staged above, e.g.:\n  ",
+        "cd ", opt$output, " && ./submit_all_ingest.sh .")
