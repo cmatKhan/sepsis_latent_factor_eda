@@ -94,9 +94,18 @@ cache_dataset_matrix <- function(con, dataset_id, dataset_yaml, db_path, force =
 #'   ingest_slurm_config.yml's `driver:` entry); the pattern-driver pass is
 #'   staged as its own `driver_grid` job family instead, during
 #'   --stage enrichment (see R/ingest_jobs/driver_job.R).
+#' @param project_root absolute path this dataset's
+#'   slurm_bundles/<dataset_id>/_rslurm_<jobname>/params.RDS files (and
+#'   redundancy.R's own source file, for staleness detection -- see
+#'   run_all_redundancy()) live under. Defaults to getwd(), correct for
+#'   R/ingest_results.R's direct CLI use (run from the project root).
+#'   run_ingest_core_job() passes the container's bind-mounted PROJECT_ROOT
+#'   explicitly instead, since its own cwd is rslurm's bundle directory,
+#'   NOT the project root (see that function's header for why cwd can't
+#'   just be overridden to fix this the other way around).
 ingest_one_dataset <- function(con, config_path, results_dir, db_path,
                                 overwrite = FALSE, recompute_redundancy = FALSE,
-                                run_pattern_drivers = TRUE) {
+                                run_pattern_drivers = TRUE, project_root = getwd()) {
   dataset_yaml <- yaml::read_yaml(config_path)
   dataset_id <- dataset_yaml$dataset$id
   stopifnot(!is.null(dataset_id))
@@ -144,7 +153,7 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
       }
     }
 
-    params_path <- file.path("slurm_bundles", dataset_id, paste0("_rslurm_", jobname), "params.RDS")
+    params_path <- file.path(project_root, "slurm_bundles", dataset_id, paste0("_rslurm_", jobname), "params.RDS")
     if (!file.exists(params_path)) {
       message("  [", jobname, "] bundle params not found at ", params_path, " -- skipping this family")
       report[[jobname]] <- "skipped (no params.RDS)"
@@ -276,7 +285,7 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
     }
   }
 
-  run_all_redundancy(con, db_path, dataset_id, force = recompute_redundancy)
+  run_all_redundancy(con, db_path, dataset_id, force = recompute_redundancy, project_root = project_root)
 
   # Differential feature identification (projectR::projectionDriveR(), see
   # R/lib/ingest/driver.R) -- batch pass over representative fits x

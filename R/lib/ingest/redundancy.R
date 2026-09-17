@@ -108,10 +108,20 @@ representative_fit_ids <- function(con, dataset_id, method) {
 #' edited more recently than the cached artifact -- fit data itself can't
 #' go stale (fit_ids are immutable; delete_family() already cascades), so
 #' the only real staleness vector here is the ANALYSIS CODE changing.
-run_all_redundancy <- function(con, db_path, dataset_id, force = FALSE) {
+#' @param project_root absolute project-root path used to locate THIS file
+#'   (redundancy.R itself) for the staleness check below. Deliberately NOT
+#'   here::here() -- that requires the `here` package (not installed in
+#'   every container this can run inside, e.g. ingest_core) AND a
+#'   resolvable project anchor from the CURRENT working directory, which
+#'   inside a containerized slurm job is rslurm's own bundle directory, not
+#'   the project root. Defaults to getwd(), correct when called from
+#'   R/ingest_results.R's direct CLI use (run from the project root);
+#'   run_ingest_core_job() passes its bind-mounted PROJECT_ROOT explicitly
+#'   via ingest_one_dataset()'s own project_root argument.
+run_all_redundancy <- function(con, db_path, dataset_id, force = FALSE, project_root = getwd()) {
   art_dir <- artifacts_dir(db_path, dataset_id)
   dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
-  this_file <- here::here("R/lib/ingest/redundancy.R")
+  this_file <- file.path(project_root, "R/lib/ingest/redundancy.R")
   redundancy_src_mtime <- if (file.exists(this_file)) file.mtime(this_file) else Sys.time()
 
   for (method in c("nmf", "cogaps", "spca", "ica")) {

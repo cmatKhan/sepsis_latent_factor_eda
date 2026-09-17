@@ -65,16 +65,19 @@ source(here("R/ingest_jobs/driver_job.R"))
 FRAMEWORK_FUNCS <- ls(envir = .GlobalEnv)
 
 # Bind-mounted (read-write, same absolute path in and out of the
-# container) + set as --pwd for every job family below, so
+# container) via extra_binds on every submit_job_family() call below, so
 # config/<id>_config.yml, results/<id>_results/, results/stability.sqlite
 # (+ stability_artifacts/), and slurm_bundles/<id>/_rslurm_<jobname>/
-# params.RDS all resolve via their ordinary project-relative paths exactly
-# as they do outside the container -- no path translation, no baking
-# config/params content into global_objects. Mounting the whole project
-# root (rather than just `results/`) is the simplest way to cover all
-# three trees ingest_one_dataset() touches in one bind; narrow this to
-# just `here("results")` (+ read-only `here("config")`/`here("slurm_bundles")`
-# binds) later if you'd rather not expose the rest of the project tree.
+# params.RDS are all REACHABLE inside the container at this same absolute
+# path. NOT used as --pwd (never pass this as submit_job_family()'s
+# pwd_override) -- that collides with rslurm's own slurm_run.R, which loads
+# f.RDS/params.RDS/add_objects.RData via relative paths from ITS bundle
+# directory before calling the job function (see run_ingest_core_job()'s
+# header for the full story). Consequently, every path a containerized job
+# actually touches under this tree must be built as an ABSOLUTE path baked
+# in via global_objects (e.g. ingest_one_dataset()'s project_root
+# argument, or normalizePath()-ed config_path/db_path below) -- cwd inside
+# the container can't be relied on to resolve anything project-relative.
 PROJECT_ROOT <- here::here()
 
 option_list <- list(
@@ -156,6 +159,10 @@ if (opt$stage == "core") {
   assign("targets", targets, envir = .GlobalEnv)
   assign("db_path", normalizePath(opt$db, mustWork = FALSE), envir = .GlobalEnv)
   assign("recompute_redundancy", recompute_redundancy, envir = .GlobalEnv)
+  # PROJECT_ROOT itself was defined AFTER FRAMEWORK_FUNCS was captured
+  # (above), so it isn't already among those baked-in globals -- needed by
+  # run_ingest_core_job() to pass ingest_one_dataset()'s project_root arg.
+  assign("PROJECT_ROOT", PROJECT_ROOT, envir = .GlobalEnv)
   # ingest_one_dataset() also list.dirs()/reads results_*.RDS straight out
   # of each targets$results_dir -- these commonly live OUTSIDE PROJECT_ROOT
   # entirely (e.g. as sibling directories of the project checkout, not
@@ -170,7 +177,7 @@ if (opt$stage == "core") {
   results_parents <- unique(dirname(targets$results_dir))
   submit_job_family(
     f = run_ingest_core_job, jobs_df = NULL, jobname = "ingest_core",
-    global_objects = c(FRAMEWORK_FUNCS, "targets", "db_path", "recompute_redundancy"),
+    global_objects = c(FRAMEWORK_FUNCS, "targets", "db_path", "recompute_redundancy", "PROJECT_ROOT"),
     # NOTE: no projectR here -- ingest_core's image doesn't have it (a
     # different image than driver_grid needs, see run_ingest_core_job()'s
     # header); run_pattern_drivers = FALSE there, staged as its own

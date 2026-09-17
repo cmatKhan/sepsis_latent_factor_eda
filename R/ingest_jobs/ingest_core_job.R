@@ -11,9 +11,10 @@
 # LOGIN NODE and bundles the resulting function objects alongside
 # `targets`/`db_path`/`recompute_redundancy`).
 #
-# `targets`/`db_path`/`recompute_redundancy` are read as FREE VARIABLES,
-# NOT function parameters -- this job is staged via submit_job_family()
-# with jobs_df = NULL, which dispatches to rslurm::slurm_call() with no
+# `targets`/`db_path`/`recompute_redundancy`/`PROJECT_ROOT` are read as
+# FREE VARIABLES, NOT function parameters -- this job is staged via
+# submit_job_family() with jobs_df = NULL, which dispatches to
+# rslurm::slurm_call() with no
 # `params`. rslurm's generated slurm_run_single_R.txt then calls
 # `do.call(f, list())` -- i.e. with ZERO arguments -- relying entirely on
 # `add_objects.RData` (loaded into the same global environment this
@@ -36,8 +37,14 @@ run_ingest_core_job <- function() {
       # header and config/ingest_slurm_config.yml's `driver:` entry); that
       # pass is staged as its own driver_grid job family during
       # --stage enrichment instead.
+      # project_root = PROJECT_ROOT -- ingest_one_dataset()'s default
+      # (project_root = getwd()) is wrong here: this job's cwd is rslurm's
+      # own bundle directory, not the project root, but
+      # slurm_bundles/<id>/_rslurm_<jobname>/params.RDS lookups (and
+      # run_all_redundancy()'s staleness check) need the latter.
       ingest_one_dataset(con, targets$config_path[i], targets$results_dir[i], db_path,
-                          recompute_redundancy = force_redundancy, run_pattern_drivers = FALSE),
+                          recompute_redundancy = force_redundancy, run_pattern_drivers = FALSE,
+                          project_root = PROJECT_ROOT),
       error = function(e) message("  FAILED (", targets$dataset_id[i], "): ", conditionMessage(e))
     )
   }
