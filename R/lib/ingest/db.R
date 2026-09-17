@@ -32,10 +32,24 @@ artifacts_dir <- function(db_path, dataset_id) {
 #' (artifacts always live next to the DB), so the DB + artifacts move
 #' together and resolve correctly no matter where ingest or the app is
 #' launched from. This resolves a stored path back to an absolute one.
+#'
+#' Vectorized over `path` (db_path is a single, shared value) -- most
+#' callers already wrap this in vapply()/sapply() for exactly that reason,
+#' but a plain vector `path` (e.g. an un-vapply-wrapped `f$loadings_file`
+#' with multiple rows) used to hit `is.na(path) || !nzchar(path)`'s
+#' length-1-only `||`/`&&`, erroring with "'length = N' in coercion to
+#' 'logical(1)'" the moment more than one row came back. Handling vectors
+#' directly here fixes every such call site at once, including any future
+#' one that forgets to vapply()-wrap it, and is a no-op behavior change for
+#' existing scalar/vapply-wrapped callers.
 resolve_artifact <- function(path, db_path) {
-  if (is.na(path) || !nzchar(path)) return(NA_character_)
-  if (startsWith(path, "/")) return(path)
-  file.path(normalizePath(dirname(db_path)), path)
+  out <- rep(NA_character_, length(path))
+  ok <- !is.na(path) & nzchar(path)
+  is_abs <- ok & startsWith(path, "/")
+  out[is_abs] <- path[is_abs]
+  rel <- ok & !is_abs
+  out[rel] <- file.path(normalizePath(dirname(db_path)), path[rel])
+  out
 }
 
 ensure_schema <- function(con) {

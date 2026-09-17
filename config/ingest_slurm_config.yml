@@ -24,9 +24,9 @@
 # least-privilege is worth the extra image).
 
 ingest_core:
-  mem: 16G
+  mem: 30G
   cpus_per_task: 1        # single SQLite writer -- no benefit from more
-  time: "04:00:00"
+  time: "10:00:00"
   container: "/ref/mblab/containers/chasem/sepsis_timecourse_factors_eda.sif"
   libPaths: "/ref/mblab/software/chasem/R/4.6.0"
   sh_template: "config/rslurm_templates/submit_sh.txt"
