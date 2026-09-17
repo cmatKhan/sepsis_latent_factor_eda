@@ -31,7 +31,15 @@ build_projectr_pairs <- function(con, dataset_ids, families,
         fids <- representative_fit_ids(con, ds_a, m)
         if (length(fids) == 0) next
         rows[[length(rows) + 1]] <- data.frame(
-          source_dataset_id = ds_a, target_dataset_id = ds_b, method = m,
+          # NOTE: named source_method (not method) -- this data.frame is
+          # used directly as submit_job_family()'s jobs_df for
+          # projectr_within_grid/cross_grid, and rslurm::slurm_apply()
+          # requires every column name to match one of run_projectr_job()'s
+          # (R/ingest_jobs/projectr_job.R) formal parameter names exactly
+          # -- that function takes `source_method`, consistent with its
+          # other source_*-prefixed parameters (source_fit_id,
+          # source_dataset_id, source_mat_file, source_scores_file).
+          source_dataset_id = ds_a, target_dataset_id = ds_b, source_method = m,
           source_fit_id = fids,
           projection_type = if (within) "within_dataset" else "cross_dataset",
           include_intercept = !within,
@@ -41,7 +49,7 @@ build_projectr_pairs <- function(con, dataset_ids, families,
     }
   }
   if (length(rows) == 0) return(data.frame(
-    source_dataset_id = character(0), target_dataset_id = character(0), method = character(0),
+    source_dataset_id = character(0), target_dataset_id = character(0), source_method = character(0),
     source_fit_id = integer(0), projection_type = character(0), include_intercept = logical(0)
   ))
   do.call(rbind, rows)
