@@ -94,10 +94,11 @@ cache_dataset_matrix <- function(con, dataset_id, dataset_yaml, db_path, force =
 #'   ingest_slurm_config.yml's `driver:` entry); the pattern-driver pass is
 #'   staged as its own `driver_grid` job family instead, during
 #'   --stage enrichment (see R/ingest_jobs/driver_job.R).
-#' @param project_root absolute path this dataset's
-#'   slurm_bundles/<dataset_id>/_rslurm_<jobname>/params.RDS files (and
-#'   redundancy.R's own source file, for staleness detection -- see
-#'   run_all_redundancy()) live under. Defaults to getwd(), correct for
+#' @param project_root absolute project-root path, used (a) as the
+#'   fallback location for this dataset's rslurm bundle when it isn't
+#'   colocated with results_dir -- see bundle_dir below -- and (b) to
+#'   locate redundancy.R's own source file for staleness detection (see
+#'   run_all_redundancy()). Defaults to getwd(), correct for
 #'   R/ingest_results.R's direct CLI use (run from the project root).
 #'   run_ingest_core_job() passes the container's bind-mounted PROJECT_ROOT
 #'   explicitly instead, since its own cwd is rslurm's bundle directory,
@@ -121,6 +122,23 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
   }
   jobnames <- basename(family_dirs)
   message("  families found: ", paste(jobnames, collapse = ", "))
+
+  # Each family's ORIGINAL rslurm bundle (_rslurm_<jobname>/params.RDS) --
+  # NOT the same tree as family_dirs/results_dir above (that's where
+  # RESULTS landed; the bundle is where params.RDS/f.RDS/etc. that
+  # PRODUCED those results still live). Two conventions in the wild here:
+  # (1) results_dir's own sibling, dropping its "_results" suffix -- e.g.
+  # /scratch/.../GSE110487_T2_results (results) next to /scratch/.../
+  # GSE110487_T2 (bundle) -- what R/lib/submit_all_script.R's rsync
+  # workflow actually produces when deployed to a cluster, one dataset's
+  # bundle/results copied in as two independent top-level directories; (2)
+  # project_root/slurm_bundles/<dataset_id> -- what R/create_slurm_bundle.R
+  # writes locally when bundle-building and ingest happen from the SAME
+  # project checkout, never separately relocated. Try (1) first since it's
+  # colocated with results_dir (the input we actually have in hand), (2) as
+  # a fallback for co-located/local use.
+  bundle_dir <- sub("_results$", "", results_dir)
+  if (!dir.exists(bundle_dir)) bundle_dir <- file.path(project_root, "slurm_bundles", dataset_id)
 
   ensure_dataset(con, dataset_id, dataset_yaml$dataset$description %||% NA_character_)
   art_dir <- artifacts_dir(db_path, dataset_id)
@@ -153,7 +171,7 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
       }
     }
 
-    params_path <- file.path(project_root, "slurm_bundles", dataset_id, paste0("_rslurm_", jobname), "params.RDS")
+    params_path <- file.path(bundle_dir, paste0("_rslurm_", jobname), "params.RDS")
     if (!file.exists(params_path)) {
       message("  [", jobname, "] bundle params not found at ", params_path, " -- skipping this family")
       report[[jobname]] <- "skipped (no params.RDS)"
