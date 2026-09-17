@@ -182,7 +182,7 @@ if (opt$stage == "core") {
     # different image than driver_grid needs, see run_ingest_core_job()'s
     # header); run_pattern_drivers = FALSE there, staged as its own
     # driver_grid job family during --stage enrichment instead.
-    pkgs = c("DBI", "RSQLite", "arrow", "yaml", "CoGAPS", "clue", "matrixStats"),
+    pkgs = c("DBI", "RSQLite", "arrow", "yaml", "CoGAPS", "clue", "matrixStats", "mclust"),
     cluster_cfg = slurm_cfg$ingest_core, output_dir = opt$output,
     extra_binds = unique(c(PROJECT_ROOT, results_parents))
   )
