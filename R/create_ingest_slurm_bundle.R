@@ -16,7 +16,7 @@
 # Usage:
 #   Rscript R/create_ingest_slurm_bundle.R --datasets datasets.txt --stage core
 #   # ... wait for ingest_core to finish ...
-#   Rscript R/create_ingest_slurm_bundle.R --datasets datasets.txt --stage enrichment
+#   Rscript R/create_ingest_slurm_bundle.R --datasets datasets.txt -nd -stage enrichment
 #   # ... wait for fgsea_grid/gprofiler_grid/projectr_*_grid ...
 #   Rscript R/ingest_enrichment_results.R --bundle-dir slurm_bundles/ingest --db results/stability.sqlite
 #   Rscript R/ingest_projectr_results.R   --bundle-dir slurm_bundles/ingest --db results/stability.sqlite
@@ -90,7 +90,13 @@ option_list <- list(
   make_option("--recache-matrix", type = "character", default = NULL,
               help = "bare flag = recache every dataset's matrix; or a comma-separated list of dataset ids"),
   make_option("--recompute-redundancy", type = "character", default = NULL,
-              help = "bare flag = recompute for every dataset; or a comma-separated list of dataset ids")
+              help = "bare flag = recompute for every dataset; or a comma-separated list of dataset ids"),
+  make_option("--max-array-size", type = "integer", default = 1000,
+              help = paste("max rows per array-job submission for the (potentially huge) projectr grid --",
+                            "oversized families are split into <jobname>_part<k> submissions instead of one",
+                            "array job (see submit_job_family()'s doc). Default 1000 is a common Slurm",
+                            "MaxArraySize -- check `scontrol show config | grep -i MaxArraySize` on your",
+                            "cluster and pass the real value here if different."))
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 slurm_cfg <- yaml::read_yaml(opt$`slurm-config`)
@@ -199,11 +205,37 @@ if (opt$stage == "core") {
   # needs the projectr image, not ingest_core's. One single (non-array) job,
   # looping every dataset sequentially against the SAME db (one writer),
   # same rationale as ingest_core itself.
+  #
+  # sample_metadata_maps/sample_id_cols: read HERE, on the login node
+  # (using targets$config_path -- already case-corrected/absolutized above,
+  # unlike re-deriving "config/<id>_config.yml" from scratch), because
+  # dataset_metadata_sources' registered sample_metadata_path is a LIVE
+  # pointer to wherever the raw data actually lives (see run_pattern_driver()'s
+  # doc in R/lib/ingest/driver.R for why it's deliberately never cached
+  # there) -- typically unreachable from inside driver_grid's container.
+  # A dataset missing a config match, sample_metadata_path, or a readable
+  # file just gets NULL here; run_driver_job() skips it rather than ever
+  # falling back to that broken raw-path read itself.
+  sample_metadata_maps <- setNames(lapply(all_dataset_ids, function(ds) {
+    cp <- targets$config_path[match(ds, targets$dataset_id)]
+    if (is.na(cp) || !file.exists(cp)) return(NULL)
+    sp <- yaml::read_yaml(cp)$dataset$sample_metadata_path
+    if (is.null(sp) || !file.exists(sp)) return(NULL)
+    read_sample_metadata(sp)
+  }), all_dataset_ids)
+  sample_id_cols <- setNames(lapply(all_dataset_ids, function(ds) {
+    cp <- targets$config_path[match(ds, targets$dataset_id)]
+    if (is.na(cp) || !file.exists(cp)) return(NULL)
+    yaml::read_yaml(cp)$dataset$sample_id_col %||% "sample_id"
+  }), all_dataset_ids)
+
   assign("all_dataset_ids", all_dataset_ids, envir = .GlobalEnv)
   assign("db_path", normalizePath(opt$db, mustWork = FALSE), envir = .GlobalEnv)
+  assign("sample_metadata_maps", sample_metadata_maps, envir = .GlobalEnv)
+  assign("sample_id_cols", sample_id_cols, envir = .GlobalEnv)
   submit_job_family(
     f = run_driver_job, jobs_df = NULL, jobname = "driver_grid",
-    global_objects = c(FRAMEWORK_FUNCS, "all_dataset_ids", "db_path"),
+    global_objects = c(FRAMEWORK_FUNCS, "all_dataset_ids", "db_path", "sample_metadata_maps", "sample_id_cols"),
     pkgs = c("DBI", "RSQLite", "arrow", "projectR"),
     cluster_cfg = slurm_cfg$driver, output_dir = opt$output,
     extra_binds = PROJECT_ROOT
@@ -258,7 +290,7 @@ if (opt$stage == "core") {
       jobname = "fgsea_grid", global_objects = c(FRAMEWORK_FUNCS, "pathways"),
       pkgs = c("CoGAPS", "BiocParallel", "arrow"),
       cluster_cfg = slurm_cfg$fgsea, output_dir = opt$output,
-      extra_binds = PROJECT_ROOT
+      extra_binds = PROJECT_ROOT, max_array_size = opt$`max-array-size`
     )
 
     gprofiler_targets <- do.call(rbind, lapply(seq_len(nrow(rep_rows)), function(i) {
@@ -328,7 +360,7 @@ if (opt$stage == "core") {
       jobname = paste0("projectr_", sub("_dataset$", "", ptype), "_grid"),
       global_objects = c(FRAMEWORK_FUNCS, "symbol_maps"), pkgs = c("projectR", "arrow"),
       cluster_cfg = slurm_cfg$projectr, output_dir = opt$output,
-      extra_binds = PROJECT_ROOT
+      extra_binds = PROJECT_ROOT, max_array_size = opt$`max-array-size`
     )
   }
   DBI::dbDisconnect(con)

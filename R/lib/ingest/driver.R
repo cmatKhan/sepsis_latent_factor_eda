@@ -22,8 +22,23 @@ if (!exists("%||%")) `%||%` <- function(a, b) if (is.null(a)) b else a
 #' constraint on pattern_drivers means calling this twice for the same
 #' combination just no-ops the second time (checked explicitly here so we
 #' don't rely on a silent constraint-violation swallow).
+#'
+#' @param sample_metadata / id_col: pass a pre-loaded sample-metadata
+#'   data.frame + its id column name to use it directly instead of
+#'   re-reading `dataset_metadata_sources`. Needed because that table
+#'   deliberately stores a LIVE pointer to the config's own
+#'   sample_metadata_path (see app/R/metadata_helpers.R's header -- so the
+#'   app always reflects the source file's current contents, no re-ingest
+#'   needed) -- which is typically an absolute path on whatever machine
+#'   holds the raw data, unreachable from inside a cluster container.
+#'   run_driver_job() (R/ingest_jobs/driver_job.R) supplies metadata
+#'   pre-read on the login node instead of ever touching that raw path
+#'   itself from inside the container. Leave both NULL (the default) for
+#'   R/ingest_results.R's direct, non-containerized CLI use, where the
+#'   raw path DOES resolve fine and the old DB-lookup behavior is kept.
 run_pattern_driver <- function(con, db_path, fit_id, factor_index, dataset_id,
-                                grouping_col, group1_level, group2_level, mode = "CI") {
+                                grouping_col, group1_level, group2_level, mode = "CI",
+                                sample_metadata = NULL, id_col = NULL) {
   existing <- DBI::dbGetQuery(con,
     "SELECT driver_id FROM pattern_drivers
      WHERE fit_id = ? AND factor_index = ? AND grouping_col = ? AND group1_level = ? AND group2_level = ? AND mode = ?",
@@ -44,14 +59,20 @@ run_pattern_driver <- function(con, db_path, fit_id, factor_index, dataset_id,
   }
   mat <- as.matrix(readRDS(resolve_artifact(mat_row$matrix_file, db_path)))
 
-  meta_row <- DBI::dbGetQuery(con, "SELECT path, id_col FROM dataset_metadata_sources WHERE dataset_id = ? AND kind = 'sample'",
-                               params = list(dataset_id))
-  if (nrow(meta_row) == 0) return(invisible(NULL))
-  sm <- as.data.frame(arrow::read_parquet(meta_row$path[1]))
+  if (is.null(sample_metadata)) {
+    meta_row <- DBI::dbGetQuery(con, "SELECT path, id_col FROM dataset_metadata_sources WHERE dataset_id = ? AND kind = 'sample'",
+                                 params = list(dataset_id))
+    if (nrow(meta_row) == 0) return(invisible(NULL))
+    sm <- as.data.frame(arrow::read_parquet(meta_row$path[1]))
+    id_col <- meta_row$id_col[1]
+  } else {
+    sm <- sample_metadata
+    if (is.null(id_col)) return(invisible(NULL))
+  }
   if (!(grouping_col %in% names(sm))) return(invisible(NULL))
 
-  ids1 <- sm[[meta_row$id_col[1]]][sm[[grouping_col]] == group1_level]
-  ids2 <- sm[[meta_row$id_col[1]]][sm[[grouping_col]] == group2_level]
+  ids1 <- sm[[id_col]][sm[[grouping_col]] == group1_level]
+  ids2 <- sm[[id_col]][sm[[grouping_col]] == group2_level]
   ids1 <- intersect(ids1, colnames(mat)); ids2 <- intersect(ids2, colnames(mat))
   if (length(ids1) < 3 || length(ids2) < 3) return(invisible(NULL))   # too few samples per group to be meaningful
 
@@ -93,14 +114,25 @@ run_pattern_driver <- function(con, db_path, fit_id, factor_index, dataset_id,
 #' categorical sample-metadata column (skips the id column itself and
 #' anything with >4 levels -- avoids combinatorial blowup on high-
 #' cardinality columns like patient_id), all pairs of levels.
-run_all_pattern_drivers <- function(con, db_path, dataset_id, mode = "CI", max_factors = 2) {
-  meta_row <- DBI::dbGetQuery(con, "SELECT path, id_col FROM dataset_metadata_sources WHERE dataset_id = ? AND kind = 'sample'",
-                               params = list(dataset_id))
-  if (nrow(meta_row) == 0) return(invisible(NULL))
-  sm <- as.data.frame(arrow::read_parquet(meta_row$path[1]))
+#'
+#' @param sample_metadata / id_col: see run_pattern_driver()'s matching
+#'   doc -- passed straight through to every run_pattern_driver() call
+#'   below instead of re-querying dataset_metadata_sources per pair.
+run_all_pattern_drivers <- function(con, db_path, dataset_id, mode = "CI", max_factors = 2,
+                                     sample_metadata = NULL, id_col = NULL) {
+  if (is.null(sample_metadata)) {
+    meta_row <- DBI::dbGetQuery(con, "SELECT path, id_col FROM dataset_metadata_sources WHERE dataset_id = ? AND kind = 'sample'",
+                                 params = list(dataset_id))
+    if (nrow(meta_row) == 0) return(invisible(NULL))
+    sm <- as.data.frame(arrow::read_parquet(meta_row$path[1]))
+    id_col <- meta_row$id_col[1]
+  } else {
+    sm <- sample_metadata
+    if (is.null(id_col)) return(invisible(NULL))
+  }
 
   cat_cols <- Filter(function(col) {
-    col != meta_row$id_col[1] && (is.character(sm[[col]]) || is.factor(sm[[col]])) &&
+    col != id_col && (is.character(sm[[col]]) || is.factor(sm[[col]])) &&
       length(unique(na.omit(sm[[col]]))) %in% 2:4
   }, names(sm))
   if (length(cat_cols) == 0) return(invisible(NULL))
@@ -114,7 +146,8 @@ run_all_pattern_drivers <- function(con, db_path, dataset_id, mode = "CI", max_f
           levels_ <- sort(unique(na.omit(sm[[col]])))
           pairs <- utils::combn(levels_, 2, simplify = FALSE)
           for (p in pairs) {
-            run_pattern_driver(con, db_path, fit_id, fi, dataset_id, col, p[1], p[2], mode = mode)
+            run_pattern_driver(con, db_path, fit_id, fi, dataset_id, col, p[1], p[2], mode = mode,
+                                sample_metadata = sm, id_col = id_col)
           }
         }
       }

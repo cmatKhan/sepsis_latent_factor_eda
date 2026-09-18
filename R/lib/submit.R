@@ -122,11 +122,38 @@ build_apptainer_rscript_path <- function(container, jobname, rscript_cmd, lib_pa
 #'   created in -- defaults to the current working directory (rslurm's own
 #'   default). Created if it doesn't exist. Restored to the prior working
 #'   directory afterward regardless of success/failure.
+#' @param max_array_size if `jobs_df` has more rows than this, split into
+#'   multiple `<jobname>_part<k>` submissions of at most this many rows
+#'   each, rather than one array job (recursing into this same function
+#'   once per chunk, with max_array_size = NULL to avoid re-splitting).
+#'   Slurm's own site-configured MaxArraySize rejects a single --array=
+#'   directive larger than that with "Invalid job array specification" --
+#'   confirmed on this project's cluster: a 5646-row array job submitted
+#'   fine, a 64321-row one from the SAME job family did not. NULL (default)
+#'   never splits, matching every prior caller's behavior exactly. Ignored
+#'   for single (jobs_df = NULL) jobs -- those aren't arrays at all.
 submit_job_family <- function(f, jobs_df, jobname, global_objects = character(0),
                                pkgs = character(0), cluster_cfg,
                                slurm_options_extra = list(), submit = FALSE,
                                output_dir = getwd(),
-                               extra_binds = character(0), pwd_override = NULL) {
+                               extra_binds = character(0), pwd_override = NULL,
+                               max_array_size = NULL) {
+  is_single_job_early <- is.null(jobs_df) || nrow(jobs_df) == 0
+  if (!is_single_job_early && !is.null(max_array_size) && nrow(jobs_df) > max_array_size) {
+    chunk_id <- ceiling(seq_len(nrow(jobs_df)) / max_array_size)
+    n_chunks <- max(chunk_id)
+    message("  [", jobname, "] ", nrow(jobs_df), " rows exceeds max_array_size (", max_array_size,
+            ") -- splitting into ", n_chunks, " submissions (", jobname, "_part1..", n_chunks, ")")
+    return(invisible(lapply(seq_len(n_chunks), function(k) {
+      submit_job_family(
+        f = f, jobs_df = jobs_df[chunk_id == k, , drop = FALSE],
+        jobname = sprintf("%s_part%d", jobname, k),
+        global_objects = global_objects, pkgs = pkgs, cluster_cfg = cluster_cfg,
+        slurm_options_extra = slurm_options_extra, submit = submit, output_dir = output_dir,
+        extra_binds = extra_binds, pwd_override = pwd_override, max_array_size = NULL
+      )
+    })))
+  }
   # No `container` here -- it's baked into rscript_path (below) as part of
   # an explicit `apptainer run ...` invocation instead of a native
   # `--container=` SBATCH option.

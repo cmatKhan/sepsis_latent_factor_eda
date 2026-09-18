@@ -21,18 +21,36 @@
 # constraint as every other ingest job (see ingest_core_job.R's header):
 # everything it calls must already exist via `global_objects`.
 #
-# `all_dataset_ids`/`db_path` are read as FREE VARIABLES, NOT function
-# parameters -- see run_ingest_core_job()'s header (R/ingest_jobs/
-# ingest_core_job.R) for exactly why: this job is staged via
-# submit_job_family() with jobs_df = NULL (slurm_call(), no `params`), so
-# rslurm calls this function with ZERO arguments; declaring these as
-# formal parameters would shadow the global lookup and fail with
-# "argument ... is missing, with no default".
+# `all_dataset_ids`/`db_path`/`sample_metadata_maps`/`sample_id_cols` are
+# read as FREE VARIABLES, NOT function parameters -- see
+# run_ingest_core_job()'s header (R/ingest_jobs/ingest_core_job.R) for
+# exactly why: this job is staged via submit_job_family() with
+# jobs_df = NULL (slurm_call(), no `params`), so rslurm calls this
+# function with ZERO arguments; declaring these as formal parameters would
+# shadow the global lookup and fail with "argument ... is missing, with
+# no default".
+#
+# `sample_metadata_maps`/`sample_id_cols` (dataset_id -> data.frame /
+# id-column name) are built on the LOGIN NODE at staging time (see
+# R/create_ingest_slurm_bundle.R's driver_grid block) and baked in here --
+# run_all_pattern_drivers() would otherwise fall back to reading
+# dataset_metadata_sources' raw sample_metadata_path directly, which is
+# typically an absolute path on whatever machine holds the raw data
+# (unreachable from inside this container). A dataset with no cached
+# metadata (config never set sample_metadata_path, or the login node
+# couldn't read it) is skipped outright here, rather than falling through
+# to that same broken raw-path read.
 run_driver_job <- function() {
   con <- open_stability_db(db_path)
   for (dataset_id in all_dataset_ids) {
+    sm <- sample_metadata_maps[[dataset_id]]
+    id_col <- sample_id_cols[[dataset_id]]
+    if (is.null(sm) || is.null(id_col)) {
+      message("  no cached sample metadata for ", dataset_id, " -- skipping pattern-driver pass")
+      next
+    }
     tryCatch(
-      run_all_pattern_drivers(con, db_path, dataset_id),
+      run_all_pattern_drivers(con, db_path, dataset_id, sample_metadata = sm, id_col = id_col),
       error = function(e) message("  pattern-driver pass failed for ", dataset_id, ": ", conditionMessage(e))
     )
   }
