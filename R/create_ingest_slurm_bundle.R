@@ -61,8 +61,17 @@ source(here("R/ingest_jobs/driver_job.R"))
 # PARAM_GRID_METHODS, breaking classify_jobname() -> ingest_one_dataset()
 # inside run_ingest_core_job() with "object 'PARAM_GRID_METHODS' not
 # found" -- any future non-function constant added to these lib files
-# would hit the same gap if this were re-narrowed).
-FRAMEWORK_FUNCS <- ls(envir = .GlobalEnv)
+# would hit the same gap if this were re-narrowed). ALSO deliberately
+# `all.names = TRUE` -- plain ls() silently excludes dot-prefixed names,
+# which is a SEPARATE exclusion from the is.function() one above and bit
+# us the same way: R/lib/ingest/symbol_mapping.R's private `.remap_ids()`
+# helper (called internally by remap_to_ensembl()/remap_to_symbol(), both
+# ordinary non-dot names that WERE captured) was silently missing from
+# every job's add_objects.RData, failing at runtime -- not submission
+# time -- with "could not find function '.remap_ids'" the moment
+# fgsea_grid/gprofiler_grid/projectr_*_grid actually called it. Any future
+# dot-prefixed ("private") helper added to these lib files needs this too.
+FRAMEWORK_FUNCS <- ls(envir = .GlobalEnv, all.names = TRUE)
 
 # Bind-mounted (read-write, same absolute path in and out of the
 # container) via extra_binds on every submit_job_family() call below, so
