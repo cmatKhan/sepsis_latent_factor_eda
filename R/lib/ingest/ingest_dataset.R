@@ -146,7 +146,9 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
 
   ds_cfg <- dataset_yaml$dataset
   register_metadata_source(con, dataset_id, "sample", ds_cfg$sample_metadata_path, ds_cfg$sample_id_col)
-  register_metadata_source(con, dataset_id, "feature", ds_cfg$feature_metadata_path, ds_cfg$feature_id_col)
+  register_metadata_source(con, dataset_id, "feature", ds_cfg$feature_metadata_path, ds_cfg$feature_id_col,
+                            ensembl_col = ds_cfg$ensembl_col %||% "ensembl",
+                            symbol_col = ds_cfg$symbol_col %||% NA_character_)
 
   overwrite_requested <- function(jobname) {
     isTRUE(overwrite) || (is.character(overwrite) && jobname %in% overwrite)

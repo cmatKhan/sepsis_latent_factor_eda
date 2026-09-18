@@ -36,6 +36,7 @@ dataset:
   feature_id_col: IlluminaID   # matches both expression.parquet and feature_metadata.parquet directly
   value_col: value
   ensembl_col: ENSEMBL
+  symbol_col: SYMBOL
 
   preprocessing_script: R/preprocessing/ship-trend_preprocessing.R
   # NOTE: no sample_metadata_path (see blocking TODO above) -> no

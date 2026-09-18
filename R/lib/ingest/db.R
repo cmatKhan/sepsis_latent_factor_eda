@@ -234,6 +234,16 @@ ensure_schema <- function(con) {
   # projectr_grid so target-matrix lookups don't re-run preprocessing_script
   # per task.
   ensure_column(con, "datasets", "matrix_file", "TEXT")
+  # dataset.ensembl_col, for kind='feature' rows -- see
+  # register_metadata_source()'s doc above for why this is stored
+  # (app-side on-demand enrichment needs it without reading config/*.yml).
+  # Datasets ingested before this column existed have NULL here until
+  # re-ingested (--stage core / R/ingest_results.R re-registers it fresh
+  # every time, no separate backfill step needed).
+  ensure_column(con, "dataset_metadata_sources", "ensembl_col", "TEXT")
+  # dataset.symbol_col (display-only override) -- see
+  # register_metadata_source()'s doc above.
+  ensure_column(con, "dataset_metadata_sources", "symbol_col", "TEXT")
 
   # wTO removed entirely (never had any ingested fits in practice) --
   # drop its table/columns outright rather than leaving dead schema
@@ -281,14 +291,33 @@ ensure_column <- function(con, table, col, decl) {
 #' straight from its config -- pure bookkeeping, no metadata content is
 #' copied in. Silently no-ops for a kind whose path/id_col isn't set in the
 #' config (e.g. matrix_path-mode datasets with no parquet trio).
-register_metadata_source <- function(con, dataset_id, kind, path, id_col) {
+#'
+#' @param ensembl_col only meaningful for kind = "feature" -- the dataset's
+#'   `dataset.ensembl_col` (see R/lib/ingest/symbol_mapping.R), stored here
+#'   so the app (which never reads config/*.yml directly -- see
+#'   app/R/metadata_helpers.R's header) can build the SAME canonical
+#'   Ensembl remap for its own on-demand gprofiler queries as the slurm
+#'   pipeline uses, without needing config access. NA for kind = "sample".
+#' @param symbol_col only meaningful for kind = "feature" -- the dataset's
+#'   `dataset.symbol_col`, REQUIRED to be set explicitly in every config
+#'   for the app to show gene symbols (see R/lib/ingest/symbol_mapping.R::
+#'   build_symbol_map() and config/dataset_metadata.example.yml).
+#'   Display-only (never used computationally -- see that function's
+#'   header); deliberately no auto-detection fallback -- an unset or
+#'   wrong symbol_col just means the app falls back further down its
+#'   display chain (see app/R/metadata_helpers.R::build_display_map()),
+#'   never a guess. NA for kind = "sample", or when the config never set
+#'   symbol_col.
+register_metadata_source <- function(con, dataset_id, kind, path, id_col,
+                                      ensembl_col = NA_character_, symbol_col = NA_character_) {
   if (is.null(path) || is.null(id_col) || !nzchar(path) || !nzchar(id_col)) return(invisible(NULL))
   DBI::dbExecute(con,
-    "INSERT INTO dataset_metadata_sources (dataset_id, kind, path, id_col, registered_at)
-     VALUES (?, ?, ?, ?, datetime('now'))
+    "INSERT INTO dataset_metadata_sources (dataset_id, kind, path, id_col, ensembl_col, symbol_col, registered_at)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(dataset_id, kind) DO UPDATE SET
-       path = excluded.path, id_col = excluded.id_col, registered_at = excluded.registered_at",
-    params = list(dataset_id, kind, path, id_col))
+       path = excluded.path, id_col = excluded.id_col, ensembl_col = excluded.ensembl_col,
+       symbol_col = excluded.symbol_col, registered_at = excluded.registered_at",
+    params = list(dataset_id, kind, path, id_col, ensembl_col, symbol_col))
   invisible(NULL)
 }
 

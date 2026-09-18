@@ -17,6 +17,7 @@ dataset:
   feature_id_col: feature_id   # feature_metadata.parquet has a literal `feature_id` column -- matches expression.parquet directly, no TODO here
   value_col: value
   ensembl_col: ensembl
+  symbol_col: symbol
 
   preprocessing_script: R/preprocessing/gse95233_preprocessing.R
 

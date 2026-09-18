@@ -28,6 +28,7 @@ dataset:
   feature_id_col: feature_id
   value_col: value
   ensembl_col: ensembl
+  symbol_col: symbol
 
   preprocessing_script: R/preprocessing/gse95233_d03_preprocessing.R
   # No subject_id_col/timepoint_col -- this is a single-timepoint matrix

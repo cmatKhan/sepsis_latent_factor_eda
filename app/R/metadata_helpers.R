@@ -12,14 +12,137 @@
 
 #' Look up the registered pointer for a dataset's sample/feature metadata,
 #' or NULL if none was registered at ingest time (e.g. the dataset config
-#' didn't set that path/id_col).
+#' didn't set that path/id_col). `ensembl_col`/`symbol_col` (kind =
+#' "feature" only; NA otherwise) are NA for datasets ingested before those
+#' columns existed -- re-run --stage core (or R/ingest_results.R) for that
+#' dataset to populate them.
 metadata_source <- function(con, dataset_id, kind = c("sample", "feature")) {
   kind <- match.arg(kind)
   d <- DBI::dbGetQuery(con,
-    "SELECT path, id_col FROM dataset_metadata_sources WHERE dataset_id = ? AND kind = ?",
+    "SELECT path, id_col, ensembl_col, symbol_col FROM dataset_metadata_sources WHERE dataset_id = ? AND kind = ?",
     params = list(dataset_id, kind))
   if (nrow(d) == 0) return(NULL)
-  list(path = d$path[1], id_col = d$id_col[1])
+  list(path = d$path[1], id_col = d$id_col[1], ensembl_col = d$ensembl_col[1], symbol_col = d$symbol_col[1])
+}
+
+#' Build (and cache for the life of this Shiny session) a dataset's
+#' (feature_id -> Ensembl gene id) map for the app's on-demand gprofiler
+#' queries -- THE canonical cross-dataset identifier used everywhere else
+#' in this pipeline (see R/lib/ingest/symbol_mapping.R's header;
+#' gprofiler2::gost() often can't recognize raw native platform ids at
+#' all, e.g. microarray probe accessions, which is why this matters and
+#' isn't just cosmetic).
+#'
+#' Deliberately reuses build_ensembl_map() (sourced from R/lib/ingest/
+#' symbol_mapping.R -- see app.R's top) by constructing a minimal
+#' config-shaped list from dataset_metadata_sources instead of reading
+#' config/*.yml directly -- this app is "fully decoupled from ingest" (see
+#' this file's header) and must get everything through the DB.
+#'
+#' Returns NULL (logged once via a message, not a per-call notification)
+#' if this dataset predates the ensembl_col column, has no feature
+#' metadata registered at all, or the map fails to build for any reason
+#' -- callers should treat that as "no remap available, query native ids
+#' as a fallback" exactly like remap_to_ensembl() itself does for an
+#' empty/NULL map.
+.ensembl_map_cache <- new.env(parent = emptyenv())
+ensembl_map_for_dataset <- function(con, dataset_id) {
+  if (exists(dataset_id, envir = .ensembl_map_cache, inherits = FALSE)) {
+    return(get(dataset_id, envir = .ensembl_map_cache, inherits = FALSE))
+  }
+  meta <- metadata_source(con, dataset_id, "feature")
+  map <- NULL
+  if (!is.null(meta) && !is.na(meta$ensembl_col) && nzchar(meta$ensembl_col)) {
+    pseudo_yaml <- list(dataset = list(
+      id = dataset_id,
+      feature_metadata_path = meta$path,
+      feature_id_col = meta$id_col,
+      ensembl_col = meta$ensembl_col
+    ))
+    map <- tryCatch(build_ensembl_map(pseudo_yaml), error = function(e) NULL)
+  }
+  if (is.null(map)) {
+    message("ensembl_map_for_dataset('", dataset_id, "'): no usable Ensembl map -- ",
+            "on-demand enrichment for this dataset will query native platform ids ",
+            "(re-run --stage core / R/ingest_results.R for this dataset if it predates ",
+            "the ensembl_col column)")
+  }
+  assign(dataset_id, map, envir = .ensembl_map_cache)
+  map
+}
+
+#' Remap a character vector of gene names (e.g. WGCNA module membership)
+#' to Ensembl gene id via a prebuilt map -- the vector analog of
+#' remap_to_ensembl() (matrix version, R/lib/ingest/symbol_mapping.R),
+#' used for the app's WGCNA on-demand enrichment queries. Returns `genes`
+#' unchanged if `ensembl_map` is NULL/empty.
+remap_genes_to_ensembl <- function(genes, ensembl_map) {
+  if (is.null(ensembl_map) || length(ensembl_map) == 0) return(genes)
+  mapped <- ensembl_map[genes]
+  mapped <- mapped[!is.na(mapped) & nzchar(mapped)]
+  if (length(mapped) == 0) return(genes)
+  unique(unname(mapped))
+}
+
+#' DISPLAY ONLY -- never used for cross-dataset matching/enrichment (see
+#' this file's/symbol_mapping.R's headers; ensembl_map_for_dataset()/
+#' remap_to_ensembl() are the computational path). Which feature_metadata
+#' column to show gene names by, absent an explicit user pick: the
+#' dataset's registered `dataset.symbol_col` (set explicitly in every
+#' dataset's config -- see config/dataset_metadata.example.yml -- and
+#' registered at ingest time via register_metadata_source()) if it names
+#' a real column, else NA. Deliberately NOT auto-detected/guessed from a
+#' fixed list of likely column names (an earlier version of this function
+#' did that) -- explicit config is more reliable than a guess, and this
+#' project's configs all set it explicitly now anyway.
+resolve_symbol_col <- function(con, dataset_id, available_cols) {
+  meta <- metadata_source(con, dataset_id, "feature")
+  if (!is.null(meta) && !is.na(meta$symbol_col) && meta$symbol_col %in% available_cols) {
+    return(meta$symbol_col)
+  }
+  NA_character_
+}
+
+#' Build a (feature_id -> display string) map for showing recognizable
+#' gene names to users -- DISPLAY ONLY (see this function's/
+#' resolve_symbol_col()'s headers; never used for cross-dataset matching
+#' or enrichment queries, which always use ensembl_map_for_dataset()/
+#' remap_to_ensembl() instead).
+#'
+#' Fallback chain per feature, first non-blank wins: (1) `label_col` (an
+#' arbitrary feature_metadata column name -- defaults to
+#' resolve_symbol_col()'s pick, i.e. gene symbol, when NULL); (2) this
+#' dataset's canonical Ensembl gene id (via ensembl_map_for_dataset(),
+#' already version-stripped/first-of-multi-mapping -- see
+#' R/lib/ingest/symbol_mapping.R); (3) the feature_id itself (always
+#' present by definition, so this is the guaranteed final fallback -- a
+#' displayed gene "name" should never be blank).
+#'
+#' Reads feature_metadata via dataset_metadata() (this file's existing
+#' live-read helper -- reflects the source file's *current* contents, per
+#' this file's header), not a fresh parquet read, for consistency with
+#' every other metadata display in the app.
+#'
+#' Returns NULL if this dataset has no feature metadata registered at all.
+build_display_map <- function(con, dataset_id, label_col = NULL) {
+  m <- dataset_metadata(con, dataset_id, "feature")
+  if (is.null(m)) return(NULL)
+
+  resolved_label_col <- label_col %||% resolve_symbol_col(con, dataset_id, names(m))
+  chosen <- if (!is.null(resolved_label_col) && !is.na(resolved_label_col) &&
+                resolved_label_col %in% names(m)) {
+    as.character(m[[resolved_label_col]])
+  } else {
+    rep(NA_character_, nrow(m))
+  }
+
+  ensembl_map <- ensembl_map_for_dataset(con, dataset_id)
+  ensembl_vals <- if (!is.null(ensembl_map)) unname(ensembl_map[m$feature_id]) else rep(NA_character_, nrow(m))
+
+  display <- ifelse(!is.na(chosen) & nzchar(chosen), chosen,
+             ifelse(!is.na(ensembl_vals) & nzchar(ensembl_vals), ensembl_vals,
+                    m$feature_id))
+  setNames(display, m$feature_id)
 }
 
 #' Read a metadata table from its registered path (local file or http(s)

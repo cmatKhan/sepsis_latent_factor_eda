@@ -23,6 +23,7 @@ dataset:
   feature_id_col: IlluminaID
   value_col: value
   ensembl_col: ENSEMBL
+  symbol_col: SYMBOL
 
   preprocessing_script: R/preprocessing/dilgom_preprocessing.R
   # NOTE: cp/tucker (rTensor methods) still NOT added -- sample_metadata

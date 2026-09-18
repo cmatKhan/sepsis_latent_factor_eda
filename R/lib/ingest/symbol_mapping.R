@@ -61,30 +61,33 @@ build_ensembl_map <- function(dataset_yaml) {
 #' DISPLAY ONLY (see this file's header; never used for cross-dataset
 #' computational matching -- see build_ensembl_map() for that).
 #'
-#' Column choice, in order: (1) `dataset.symbol_col`, if set in the
-#' config -- an EXPLICIT override naming exactly which feature_metadata
-#' column holds the gene symbol (falls back to (2) with a warning if that
-#' named column doesn't actually exist in feature_metadata_path); (2)
-#' failing that, a prioritized guess across likely default names
-#' (`symbol`/`gene_symbol`/`SYMBOL`/`Symbol`).
+#' Column choice: `dataset.symbol_col`, set EXPLICITLY in every dataset's
+#' config (see config/dataset_metadata.example.yml) -- naming exactly
+#' which feature_metadata column holds the gene symbol. Deliberately NOT
+#' auto-detected/guessed from a fixed list of likely column names (an
+#' earlier version of this function did that) -- explicit config is more
+#' reliable than a guess, and this project's configs all set it
+#' explicitly now anyway. Warns (and returns NULL) if `symbol_col` is
+#' unset or names a column that doesn't actually exist in
+#' feature_metadata_path.
 #'
-#' Returns NULL (no map at all) if there's genuinely no symbol column
-#' available (e.g. GSE110487's GeneID is already Entrez) -- callers
-#' should then leave the matrix's own rownames as-is for display.
+#' Returns NULL (no map at all) if there's genuinely no usable symbol
+#' column -- callers should then leave the matrix's own rownames as-is
+#' for display.
 build_symbol_map <- function(dataset_yaml) {
   ds <- dataset_yaml$dataset
   if (is.null(ds$feature_metadata_path) || !file.exists(ds$feature_metadata_path)) return(NULL)
   fm <- arrow::read_parquet(ds$feature_metadata_path)
-  sym_col <- if (!is.null(ds$symbol_col)) {
-    if (ds$symbol_col %in% names(fm)) {
-      ds$symbol_col
-    } else {
-      warning("dataset.symbol_col '", ds$symbol_col, "' (dataset '", ds$id %||% "?",
-               "') not found in feature_metadata_path -- falling back to auto-detection")
-      intersect(c("symbol", "gene_symbol", "SYMBOL", "Symbol"), names(fm))[1]
-    }
+  sym_col <- if (!is.null(ds$symbol_col) && ds$symbol_col %in% names(fm)) {
+    ds$symbol_col
   } else {
-    intersect(c("symbol", "gene_symbol", "SYMBOL", "Symbol"), names(fm))[1]
+    if (!is.null(ds$symbol_col)) {
+      warning("dataset.symbol_col '", ds$symbol_col, "' (dataset '", ds$id %||% "?",
+               "') not found in feature_metadata_path")
+    } else {
+      warning("dataset.symbol_col not set (dataset '", ds$id %||% "?", "')")
+    }
+    NA_character_
   }
   if (is.na(sym_col) || is.null(sym_col)) return(NULL)
   id_col <- ds$feature_id_col %||% "feature_id"

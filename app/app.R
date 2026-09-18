@@ -24,6 +24,11 @@ source(file.path("R", "comparison_helpers.R"), local = TRUE)
 # prepare_loadings()/pair_similarities() -- reused unmodified for
 # the standalone "Compare methods" screen (see app/R/comparison_helpers.R)
 source(file.path("..", "R", "lib", "ingest", "similarity.R"), local = TRUE)
+# build_ensembl_map()/remap_to_ensembl() -- pure functions, safe to reuse
+# unmodified (see app/R/metadata_helpers.R::ensembl_map_for_dataset(),
+# which supplies build_ensembl_map()'s input from the DB rather than
+# config/*.yml, keeping this app decoupled from ingest).
+source(file.path("..", "R", "lib", "ingest", "symbol_mapping.R"), local = TRUE)
 
 db_path <- Sys.getenv("STABILITY_DB", unset = "")
 if (!nzchar(db_path)) {
@@ -52,6 +57,11 @@ local({
        UNIQUE(dataset_id, kind))")
   ensure_column(con, "fits", "scores_file", "TEXT")
   ensure_column(con, "enrichment_cache", "query_size", "INTEGER")
+  # dataset.ensembl_col -- see R/lib/ingest/db.R's matching migration and
+  # app/R/metadata_helpers.R::ensembl_map_for_dataset(), which reads this
+  # to build the app's on-demand enrichment Ensembl remap.
+  ensure_column(con, "dataset_metadata_sources", "ensembl_col", "TEXT")
+  ensure_column(con, "dataset_metadata_sources", "symbol_col", "TEXT")
 })
 
 #' Larger, darker text for the per-factor (Level 3) plots -- gene/term
@@ -1262,7 +1272,15 @@ server <- function(input, output, session) {
   #' that (see run_enrich_all_factors() vs. run_enrich_best_seed_all_ranks()).
   run_enrich_all_factors_core <- function(fit_id, topn, method, on_progress = NULL) {
     L <- load_loadings(con, fit_id); req(!is.null(L))
-    n_factors <- ncol(L)
+    # Ensembl-remap ONCE for the whole fit (not per factor/combo) -- THE
+    # canonical cross-dataset identifier for enrichment queries, same as
+    # the slurm fgsea_grid/gprofiler_grid pipeline; see
+    # app/R/metadata_helpers.R::ensembl_map_for_dataset()'s header for why
+    # this matters (gprofiler2::gost() often can't recognize raw native
+    # platform ids at all).
+    dataset_id <- get_fit(con, fit_id)$dataset_id[1]
+    L_ens <- remap_to_ensembl(L, ensembl_map_for_dataset(con, dataset_id))
+    n_factors <- ncol(L_ens)
     dirs <- if (method == "pca") c("pos", "neg") else "pos"
     combos <- expand.grid(factor_index = seq_len(n_factors), qtype = c("ora", "gsea"),
                            direction = dirs, stringsAsFactors = FALSE)
@@ -1274,7 +1292,7 @@ server <- function(input, output, session) {
       }
       if (!is.null(find_or_reuse_enrichment(fit_id, fi, qt, dr))) next   # already run, or reused from an equivalent factor
       factor_id <- get_factor_id(con, fit_id, fi)
-      v <- L[, fi]
+      v <- L_ens[, fi]
       genes <- if (qt == "ora") {
         if (dr == "neg") names(sort(v))[seq_len(min(topn, length(v)))]
         else names(sort(v, decreasing = TRUE))[seq_len(min(topn, length(v)))]
@@ -1431,6 +1449,8 @@ server <- function(input, output, session) {
     sizes <- wgcna_module_sizes(con, fit_id)
     n <- nrow(sizes)
     if (n == 0) return(invisible(NULL))
+    dataset_id <- get_fit(con, fit_id)$dataset_id[1]
+    ensembl_map <- ensembl_map_for_dataset(con, dataset_id)
     for (i in seq_len(n)) {
       mod <- sizes$module[i]
       if (!is.null(on_progress)) on_progress(sprintf("module %s (%d of %d)", mod, i, n), 1 / n)
@@ -1439,9 +1459,10 @@ server <- function(input, output, session) {
       if (!is.null(enrichment_cached(con, factor_id, "ora", "pos"))) next   # already run
       genes <- DBI::dbGetQuery(con, "SELECT gene FROM wgcna_modules WHERE fit_id = ? AND module = ?",
                                 params = list(fit_id, mod))$gene
+      genes_ens <- remap_genes_to_ensembl(genes, ensembl_map)
       res <- tryCatch(
         gprofiler2::gost(
-          query = genes, organism = "hsapiens", significant = TRUE,
+          query = genes_ens, organism = "hsapiens", significant = TRUE,
           ordered_query = FALSE, correction_method = "fdr",
           sources = c("GO:BP", "GO:MF", "REAC", "KEGG", "WP")),
         error = function(e) {
@@ -1506,6 +1527,7 @@ server <- function(input, output, session) {
         nav_panel(
           "Module genes",
           p("Member genes of this module -- no continuous ranking available (WGCNA doesn't store intramodular connectivity/kME today), so this is the full membership list."),
+          selectInput("l3_label_col", "Label genes by:", choices = "feature_id"),
           DTOutput("l3_wgcna_genes")
         ),
         nav_panel(
@@ -1557,7 +1579,11 @@ server <- function(input, output, session) {
     req(nav$level == 3)
     m <- feature_meta_reactive()
     choices <- if (is.null(m)) "feature_id" else c("feature_id", setdiff(names(m), "feature_id"))
-    updateSelectInput(session, "l3_label_col", choices = choices)
+    # Default to gene symbol (DISPLAY ONLY -- see build_display_map()'s
+    # header) rather than feature_id, when a symbol column is
+    # available/resolvable for this dataset.
+    default_sel <- if (!is.null(m)) resolve_symbol_col(con, ds(), names(m)) %||% "feature_id" else "feature_id"
+    updateSelectInput(session, "l3_label_col", choices = choices, selected = default_sel)
   })
 
   output$l3_loadings <- renderPlot({
@@ -1566,14 +1592,16 @@ server <- function(input, output, session) {
     ord <- order(abs(v), decreasing = TRUE)[seq_len(min(topn, length(v)))]
     d <- data.frame(feature_id = names(v)[ord], loading = v[ord], stringsAsFactors = FALSE)
 
+    # DISPLAY ONLY -- see build_display_map()'s header. Fallback chain:
+    # chosen label_col (defaults to gene symbol) -> Ensembl gene id ->
+    # feature_id itself, never left blank.
     label_col <- input$l3_label_col %||% "feature_id"
-    m <- feature_meta_reactive()
-    if (!is.null(m) && label_col %in% names(m) && label_col != "feature_id") {
-      d <- merge(d, m[, c("feature_id", label_col)], by = "feature_id", all.x = TRUE)
-      d$label <- ifelse(is.na(d[[label_col]]) | !nzchar(as.character(d[[label_col]])),
-                        d$feature_id, as.character(d[[label_col]]))
-    } else {
+    if (label_col == "feature_id") {
       d$label <- d$feature_id
+    } else {
+      disp <- build_display_map(con, ds(), label_col)
+      d$label <- if (!is.null(disp)) unname(disp[d$feature_id]) else d$feature_id
+      d$label[is.na(d$label)] <- d$feature_id[is.na(d$label)]
     }
     d <- d[order(abs(d$loading), decreasing = TRUE), ]
     d$label <- factor(d$label, levels = rev(d$label))
@@ -1627,6 +1655,17 @@ server <- function(input, output, session) {
 
     factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
     v <- l3_loadings()
+    # Ensembl-remap before gene extraction -- THE canonical cross-dataset
+    # identifier for enrichment queries (see app/R/metadata_helpers.R::
+    # ensembl_map_for_dataset()'s header). remap_to_ensembl() is matrix-
+    # shaped; wrap/unwrap this single factor's named vector through a
+    # 1-column matrix rather than duplicating its collapse-by-id logic.
+    dataset_id <- get_fit(con, nav$fit)$dataset_id[1]
+    ensembl_map <- ensembl_map_for_dataset(con, dataset_id)
+    if (!is.null(ensembl_map) && length(ensembl_map) > 0) {
+      v_mat <- remap_to_ensembl(matrix(v, ncol = 1, dimnames = list(names(v), "v")), ensembl_map)
+      v <- setNames(v_mat[, 1], rownames(v_mat))
+    }
     genes <- if (qtype == "ora") {
       n <- input$l3_enrich_topn
       if (direction == "neg") names(sort(v))[seq_len(min(n, length(v)))]
@@ -1735,7 +1774,19 @@ server <- function(input, output, session) {
   })
   output$l3_wgcna_genes <- renderDT({
     genes <- l3_wgcna_genes_reactive()
-    datatable(data.frame(gene = genes), rownames = FALSE, options = list(pageLength = 20))
+    # DISPLAY ONLY -- see build_display_map()'s header. `gene` (the raw,
+    # native feature_id) is kept as its own column alongside the
+    # human-readable label, not replaced by it.
+    label_col <- input$l3_label_col %||% "feature_id"
+    label <- if (label_col == "feature_id") {
+      genes
+    } else {
+      disp <- build_display_map(con, ds(), label_col)
+      out <- if (!is.null(disp)) unname(disp[genes]) else genes
+      out[is.na(out)] <- genes[is.na(out)]
+      out
+    }
+    datatable(data.frame(gene = genes, label = label), rownames = FALSE, options = list(pageLength = 20))
   })
   wgcna_enrich_result <- eventReactive(input$l3_wgcna_enrich_go, {
     req(nav$method == "wgcna", nav$fit, nav$factor_index)
@@ -1745,10 +1796,12 @@ server <- function(input, output, session) {
     cached <- enrichment_cached(con, factor_id, "ora", "pos")
     if (!is.null(cached)) return(cached)
     genes <- l3_wgcna_genes_reactive()
+    dataset_id <- get_fit(con, nav$fit)$dataset_id[1]
+    genes_ens <- remap_genes_to_ensembl(genes, ensembl_map_for_dataset(con, dataset_id))
     res <- withProgress(message = "Querying g:Profiler ...", {
       tryCatch(
         gprofiler2::gost(
-          query = genes, organism = "hsapiens", significant = TRUE,
+          query = genes_ens, organism = "hsapiens", significant = TRUE,
           ordered_query = FALSE, correction_method = "fdr",
           sources = c("GO:BP", "GO:MF", "REAC", "KEGG", "WP")),
         error = function(e) {

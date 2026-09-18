@@ -16,6 +16,7 @@ dataset:
   feature_id_col: feature_id
   value_col: value
   ensembl_col: ENSEMBL
+  symbol_col: SYMBOL
 
   preprocessing_script: R/preprocessing/corticus_preprocessing.R
 

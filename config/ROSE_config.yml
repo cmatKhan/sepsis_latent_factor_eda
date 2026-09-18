@@ -29,6 +29,7 @@ dataset:
   feature_id_col: feature_id
   value_col: value
   ensembl_col: feature_id
+  symbol_col: symbol
 
   preprocessing_script: R/preprocessing/rose_preprocessing.R
   # NOTE: cp/tucker (rTensor methods) removed -- rose_sample_meta.parquet

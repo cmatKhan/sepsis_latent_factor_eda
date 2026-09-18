@@ -22,6 +22,7 @@ dataset:
   feature_id_col: feature_id   # matches this dataset's actual parquet schema directly -- see config/ROSE_config.yml's NOTE re: the GeneID/feature_id mixup fixed there
   value_col: value
   ensembl_col: feature_id
+  symbol_col: symbol
 
   preprocessing_script: R/preprocessing/rose_day0_preprocessing.R
   # No subject_id_col/timepoint_col -- this is a single-timepoint matrix

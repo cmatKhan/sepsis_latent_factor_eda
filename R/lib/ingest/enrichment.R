@@ -17,6 +17,7 @@
 # request this was built for.
 
 library(DBI)
+source(here::here("R/lib/ingest/symbol_mapping.R"))
 
 #' get_fit()/get_factor_id()/enrichment_cached()/enrichment_store() below
 #' mirror app/R/db_helpers.R's functions of the same name exactly (same
@@ -136,7 +137,13 @@ ib_find_or_reuse <- function(con, db_path, fit_id, factor_index, qtype, directio
 }
 
 #' Runs (or reuses) enrichment for one factor's (qtype, direction)
-#' combination and stores the result, unless already cached.
+#' combination and stores the result, unless already cached. `v` must
+#' already be Ensembl-remapped by the caller (see run_all_enrichment()) --
+#' THE canonical cross-dataset identifier for enrichment queries, same as
+#' the slurm fgsea_grid/gprofiler_grid pipeline (R/ingest_jobs/
+#' fgsea_job.R, gprofiler_job.R) -- not left as native platform ids, which
+#' gprofiler2::gost() often can't recognize at all (e.g. raw microarray
+#' probe ids).
 ib_run_one <- function(con, db_path, fit_id, factor_index, v, qtype, direction, topn) {
   if (!is.null(ib_find_or_reuse(con, db_path, fit_id, factor_index, qtype, direction))) return(invisible(NULL))
   factor_id <- ib_get_factor_id(con, fit_id, factor_index)
@@ -178,6 +185,23 @@ run_all_enrichment <- function(con, db_path, query_types = c("ora", "gsea"), top
        AND method != 'wgcna' AND n_factors IS NOT NULL AND n_factors > 0
      ORDER BY dataset_id, method, fit_id")
 
+  # Ensembl maps -- THE canonical cross-dataset identifier for enrichment
+  # queries (see R/lib/ingest/symbol_mapping.R's header), built directly
+  # from config/*.yml here since this CLI path runs on the login node
+  # (same assumption cache_dataset_matrix() makes -- see R/ingest_results.R's
+  # header) and has real filesystem access to those configs, unlike the app
+  # (see app/R/metadata_helpers.R::ensembl_map_for_dataset(), which instead
+  # reads dataset_metadata_sources.ensembl_col to stay decoupled from ingest).
+  all_ds_ids <- unique(c(fits$dataset_id, DBI::dbGetQuery(con,
+    "SELECT DISTINCT dataset_id FROM fits WHERE status = 'ok' AND method = 'wgcna'")$dataset_id))
+  available_cfg <- list.files("config", pattern = "_config\\.yml$")
+  ensembl_maps <- setNames(lapply(all_ds_ids, function(id) {
+    match_idx <- match(tolower(paste0(id, "_config.yml")), tolower(available_cfg))
+    if (is.na(match_idx)) return(NULL)
+    tryCatch(build_ensembl_map(yaml::read_yaml(file.path("config", available_cfg[match_idx]))),
+             error = function(e) NULL)
+  }), all_ds_ids)
+
   n_fits <- nrow(fits)
   message("run_all_enrichment(): ", n_fits, " non-WGCNA ok fit(s) to consider")
   for (i in seq_len(n_fits)) {
@@ -189,9 +213,10 @@ run_all_enrichment <- function(con, db_path, query_types = c("ora", "gsea"), top
       message("  no loadings artifact -- skipping")
       next
     }
+    L_ens <- remap_to_ensembl(L, ensembl_maps[[fits$dataset_id[i]]])
     dirs <- if (fits$method[i] == "pca") c("pos", "neg") else "pos"
-    for (fi in seq_len(ncol(L))) {
-      v <- L[, fi]
+    for (fi in seq_len(ncol(L_ens))) {
+      v <- L_ens[, fi]
       for (dir in dirs) {
         for (qt in query_types) {
           ib_run_one(con, db_path, fit_id, fi, v, qt, dir, topn)
@@ -209,6 +234,7 @@ run_all_enrichment <- function(con, db_path, query_types = c("ora", "gsea"), top
   message("run_all_enrichment(): ", n_wg, " ok WGCNA fit(s) to consider")
   for (i in seq_len(n_wg)) {
     fit_id <- wgcna_fits$fit_id[i]
+    ensembl_map <- ensembl_maps[[wgcna_fits$dataset_id[i]]]
     modules <- DBI::dbGetQuery(con,
       "SELECT DISTINCT module FROM wgcna_modules WHERE fit_id = ? ORDER BY module",
       params = list(fit_id))$module
@@ -220,9 +246,15 @@ run_all_enrichment <- function(con, db_path, query_types = c("ora", "gsea"), top
       if (!is.null(ib_enrichment_cached(con, factor_id, "ora", "pos"))) next
       genes <- DBI::dbGetQuery(con, "SELECT gene FROM wgcna_modules WHERE fit_id = ? AND module = ?",
                                 params = list(fit_id, mod))$gene
+      genes_ens <- if (!is.null(ensembl_map)) {
+        mapped <- ensembl_map[genes]
+        unique(mapped[!is.na(mapped) & nzchar(mapped)])
+      } else {
+        genes
+      }
       res <- tryCatch(
         gprofiler2::gost(
-          query = genes, organism = "hsapiens", significant = TRUE,
+          query = genes_ens, organism = "hsapiens", significant = TRUE,
           ordered_query = FALSE, correction_method = "fdr",
           sources = c("GO:BP", "GO:MF", "REAC", "KEGG", "WP")),
         error = function(e) {

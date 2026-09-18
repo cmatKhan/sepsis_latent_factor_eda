@@ -22,6 +22,7 @@ dataset:
   # build_ensembl_map() (R/lib/ingest/symbol_mapping.R) can't find
   # "ensembl_id" at all anymore and returns NULL.
   ensembl_col: ensembl_gene_id
+  symbol_col: gene_symbol
 
   preprocessing_script: R/preprocessing/anemones_preprocessing.R
 
