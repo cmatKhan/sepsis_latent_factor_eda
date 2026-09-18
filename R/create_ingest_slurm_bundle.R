@@ -287,23 +287,40 @@ if (opt$stage == "core") {
           sum(pairs$projection_type == "within_dataset"), " within-dataset, ",
           sum(pairs$projection_type == "cross_dataset"), " cross-dataset")
 
+  # Looks up one column (via `query_fn`, called ONCE per DISTINCT key, not
+  # once per row) and broadcasts it back across every row of `keys`. The
+  # "reduced all-pairs" cross-dataset grid repeats the same handful of
+  # source_fit_id/source_dataset_id/target_dataset_id values across tens of
+  # thousands of rows (e.g. 64321 cross-dataset rows here, but only a few
+  # hundred distinct source fits and ~30 distinct datasets) -- querying
+  # per-row instead of per-distinct-key means the same tiny result gets
+  # re-fetched thousands of times over, and on a networked/scratch
+  # filesystem (where each SQLite round-trip can cost far more than on
+  # local disk) that turns a sub-second lookup into a run that looks hung
+  # for many minutes.
+  lookup_by_distinct_key <- function(keys, query_fn) {
+    uniq <- unique(keys)
+    vals <- vapply(uniq, query_fn, character(1))
+    unname(vals[match(keys, uniq)])
+  }
+
   for (ptype in c("within_dataset", "cross_dataset")) {
     sub <- pairs[pairs$projection_type == ptype, ]
     if (nrow(sub) == 0) next
-    sub$loadings_file <- vapply(sub$source_fit_id, function(fid) {
+    sub$loadings_file <- lookup_by_distinct_key(sub$source_fit_id, function(fid) {
       resolve_artifact(DBI::dbGetQuery(con, "SELECT loadings_file FROM fits WHERE fit_id = ?",
                                         params = list(fid))$loadings_file, opt$db)
-    }, character(1))
-    sub$target_matrix_file <- vapply(sub$target_dataset_id, target_matrix_path_for, character(1))
-    sub$source_mat_file <- vapply(sub$source_dataset_id, function(ds) {
+    })
+    sub$target_matrix_file <- lookup_by_distinct_key(sub$target_dataset_id, target_matrix_path_for)
+    sub$source_mat_file <- lookup_by_distinct_key(sub$source_dataset_id, function(ds) {
       f <- DBI::dbGetQuery(con, "SELECT matrix_file FROM datasets WHERE dataset_id = ?",
                             params = list(ds))$matrix_file
       if (length(f) == 1 && !is.na(f)) resolve_artifact(f, opt$db) else NA_character_
-    }, character(1))
-    sub$source_scores_file <- vapply(sub$source_fit_id, function(fid) {
+    })
+    sub$source_scores_file <- lookup_by_distinct_key(sub$source_fit_id, function(fid) {
       f <- DBI::dbGetQuery(con, "SELECT scores_file FROM fits WHERE fit_id = ?", params = list(fid))$scores_file
       if (length(f) == 1 && !is.na(f)) resolve_artifact(f, opt$db) else NA_character_
-    }, character(1))
+    })
 
     assign("symbol_maps", symbol_maps, envir = .GlobalEnv)
     submit_job_family(
