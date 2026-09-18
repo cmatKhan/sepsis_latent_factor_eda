@@ -480,6 +480,35 @@ What gets computed at ingest (see `R/lib/ingest/`):
 Artifact paths are stored relative to the DB file's directory, so the DB
 and its `stability_artifacts/` folder move together as a unit.
 
+**Cross-dataset gene identifier mapping** (`R/lib/ingest/symbol_mapping.R`):
+`fgsea_grid`/`gprofiler_grid`/`projectr_within_grid`/`projectr_cross_grid`
+all compare/project matrices whose rownames are otherwise each dataset's
+own native platform id (Illumina/Affymetrix probe, Entrez GeneID, Ensembl
+feature_id). **Ensembl gene id (version-stripped, e.g.
+`ENSG00000001234.2` -> `ENSG00000001234`) is THE canonical identifier for
+all of this computational work** -- `build_ensembl_map()`/
+`remap_to_ensembl()` remap every dataset's rownames to Ensembl first so
+they're actually comparable, using `dataset.ensembl_col` (default
+`"ensembl"`, same column the preprocessing-script contract already
+passes through). Gene SYMBOL (`build_symbol_map()`/`remap_to_symbol()`,
+`dataset.symbol_col`) is DISPLAY ONLY -- e.g. showing recognizable gene
+names in the app -- and is never used for the actual cross-dataset
+matching itself, since symbols are ambiguous/aliased/renamed across
+annotation releases and are exact-string-matched here, both of which can
+silently produce spurious matches or mismatches.
+
+A dataset missing (or misconfigured) `ensembl_col` keeps its native ids
+while every successfully-mapped dataset becomes Ensembl ids, so
+cross-dataset comparisons against it intersect on ~nothing -- surfacing
+not as an error but as `projectR`'s "0 row names matched between data
+and loadings" / near-zero `n_genes_matched` in the `projections` table.
+Some datasets' Ensembl column holds `;`-delimited MULTI-gene mappings
+(one probe -> several Ensembl genes, common on older array platforms) --
+`build_ensembl_map()` takes the first listed gene as a transparent
+default; revisit that choice in `R/lib/ingest/symbol_mapping.R` if it
+matters for your analysis (e.g. expanding one probe's value across every
+listed gene instead of picking one).
+
 ## Stage 3: the Shiny stability explorer
 
 ```bash

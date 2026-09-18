@@ -1,11 +1,15 @@
 # Phase-2 slurm SINGLE job (NOT an array, NOT parallelized) -- g:Profiler's
 # API is rate-limited, so every (fit, factor, direction) combination is
 # looped over sequentially in one process. `targets` (one row per
-# fit x factor x direction) and `symbol_maps` are baked in as global
+# fit x factor x direction) and `ensembl_maps` are baked in as global
 # objects at grid-build time; loadings are read directly from their
-# artifact files (no DB access from the compute node).
+# artifact files (no DB access from the compute node). Remapping to
+# Ensembl (not gene symbol) is the canonical cross-dataset identifier
+# space here -- see R/lib/ingest/symbol_mapping.R's header for why.
+# gprofiler2::gost() natively accepts Ensembl gene ids as `query` (no
+# extra argument needed -- it auto-detects id type).
 #
-# `gprofiler_targets`/`symbol_maps` are read as FREE VARIABLES, NOT
+# `gprofiler_targets`/`ensembl_maps` are read as FREE VARIABLES, NOT
 # function parameters -- see run_ingest_core_job()'s header (R/ingest_jobs/
 # ingest_core_job.R) for why: this job is staged via submit_job_family()
 # with jobs_df = NULL (slurm_call(), no `params`), so rslurm calls this
@@ -27,11 +31,11 @@ run_gprofiler_job <- function() {
     key <- as.character(fid)
     if (!exists(key, envir = loaded)) {
       L <- as.matrix(readRDS(gprofiler_targets$loadings_file[i]))
-      assign(key, remap_to_symbol(L, symbol_maps[[gprofiler_targets$dataset_id[i]]]), envir = loaded)
+      assign(key, remap_to_ensembl(L, ensembl_maps[[gprofiler_targets$dataset_id[i]]]), envir = loaded)
     }
-    L_sym <- get(key, envir = loaded)
+    L_ens <- get(key, envir = loaded)
     fi <- gprofiler_targets$factor_index[i]
-    v <- L_sym[, fi]
+    v <- L_ens[, fi]
     genes <- if (gprofiler_targets$direction[i] == "neg") names(sort(v))[seq_len(min(100, length(v)))]
              else names(sort(v, decreasing = TRUE))[seq_len(min(100, length(v)))]
 

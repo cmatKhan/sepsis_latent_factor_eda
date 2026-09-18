@@ -241,11 +241,18 @@ if (opt$stage == "core") {
     extra_binds = PROJECT_ROOT
   )
 
-  # symbol maps + dataset matrix file lookups, built once on the login node
-  symbol_maps <- setNames(lapply(all_dataset_ids, function(ds) {
-    cfg_path <- file.path("config", paste0(ds, "_config.yml"))
-    if (!file.exists(cfg_path)) return(NULL)
-    build_symbol_map(yaml::read_yaml(cfg_path))
+  # Ensembl maps (THE canonical cross-dataset identifier -- see
+  # R/lib/ingest/symbol_mapping.R's header) + dataset matrix file lookups,
+  # built once on the login node. Uses targets$config_path (already
+  # case-corrected/absolutized -- see its own construction above) rather
+  # than re-deriving "config/<id>_config.yml" from scratch, which is
+  # case-SENSITIVE and silently misses every dataset whose config
+  # filename lowercases a day/timepoint suffix (GSE110487_T2 ->
+  # GSE110487_t2_config.yml, etc.).
+  ensembl_maps <- setNames(lapply(all_dataset_ids, function(ds) {
+    cp <- targets$config_path[match(ds, targets$dataset_id)]
+    if (is.na(cp) || !file.exists(cp)) return(NULL)
+    build_ensembl_map(yaml::read_yaml(cp))
   }), all_dataset_ids)
 
   target_matrix_path_for <- function(dataset_id) {
@@ -270,8 +277,15 @@ if (opt$stage == "core") {
 
   if (!is.null(rep_rows) && nrow(rep_rows) > 0) {
     if (!requireNamespace("msigdbr", quietly = TRUE)) stop("Package 'msigdbr' is required")
-    msig <- msigdbr::msigdbr(species = "Homo sapiens", category = "H")
-    pathways <- split(msig$gene_symbol, msig$gs_name)
+    # collection = (not the deprecated category = -- msigdbr >= 10.0.0),
+    # ensembl_gene = (not gene_symbol =) to match this pipeline's
+    # canonical cross-dataset identifier space (see R/lib/ingest/
+    # symbol_mapping.R's header) -- fgsea/fora both need `pathways` in the
+    # SAME id space as the Ensembl-remapped loadings they're compared
+    # against.
+    msig <- msigdbr::msigdbr(species = "Homo sapiens", collection = "H")
+    msig <- msig[!is.na(msig$ensembl_gene) & nzchar(msig$ensembl_gene), ]
+    pathways <- split(msig$ensembl_gene, msig$gs_name)
     assign("pathways", pathways, envir = .GlobalEnv)
 
     # per-row cogaps marker genes (already computed by run_all_redundancy() during --stage core)
@@ -282,11 +296,11 @@ if (opt$stage == "core") {
                              params = list(rep_rows$fit_id[i]))
       rep_rows$cogaps_marker_genes[[i]] <- if (nrow(mk) > 0) split(mk$gene, mk$factor_index) else NULL
     }
-    rep_rows$symbol_map <- lapply(rep_rows$dataset_id, function(ds) symbol_maps[[ds]])
+    rep_rows$ensembl_map <- lapply(rep_rows$dataset_id, function(ds) ensembl_maps[[ds]])
 
     submit_job_family(
       f = run_fgsea_job,
-      jobs_df = rep_rows[, c("dataset_id", "method", "fit_id", "loadings_file", "symbol_map", "cogaps_marker_genes")],
+      jobs_df = rep_rows[, c("dataset_id", "method", "fit_id", "loadings_file", "ensembl_map", "cogaps_marker_genes")],
       jobname = "fgsea_grid", global_objects = c(FRAMEWORK_FUNCS, "pathways"),
       pkgs = c("CoGAPS", "BiocParallel", "arrow"),
       cluster_cfg = slurm_cfg$fgsea, output_dir = opt$output,
@@ -301,10 +315,10 @@ if (opt$stage == "core") {
                   factor_index = seq_len(ncol(L)), direction = dirs, stringsAsFactors = FALSE)
     }))
     assign("gprofiler_targets", gprofiler_targets, envir = .GlobalEnv)
-    assign("symbol_maps", symbol_maps, envir = .GlobalEnv)
+    assign("ensembl_maps", ensembl_maps, envir = .GlobalEnv)
     submit_job_family(
       f = run_gprofiler_job, jobs_df = NULL, jobname = "gprofiler_grid",
-      global_objects = c(FRAMEWORK_FUNCS, "gprofiler_targets", "symbol_maps"), pkgs = c("gprofiler2", "arrow"),
+      global_objects = c(FRAMEWORK_FUNCS, "gprofiler_targets", "ensembl_maps"), pkgs = c("gprofiler2", "arrow"),
       cluster_cfg = slurm_cfg$gprofiler, output_dir = opt$output,
       extra_binds = PROJECT_ROOT
     )
@@ -354,11 +368,11 @@ if (opt$stage == "core") {
       if (length(f) == 1 && !is.na(f)) resolve_artifact(f, opt$db) else NA_character_
     })
 
-    assign("symbol_maps", symbol_maps, envir = .GlobalEnv)
+    assign("ensembl_maps", ensembl_maps, envir = .GlobalEnv)
     submit_job_family(
       f = run_projectr_job, jobs_df = sub,
       jobname = paste0("projectr_", sub("_dataset$", "", ptype), "_grid"),
-      global_objects = c(FRAMEWORK_FUNCS, "symbol_maps"), pkgs = c("projectR", "arrow"),
+      global_objects = c(FRAMEWORK_FUNCS, "ensembl_maps"), pkgs = c("projectR", "arrow"),
       cluster_cfg = slurm_cfg$projectr, output_dir = opt$output,
       extra_binds = PROJECT_ROOT, max_array_size = opt$`max-array-size`
     )

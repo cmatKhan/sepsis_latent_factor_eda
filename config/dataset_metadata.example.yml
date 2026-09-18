@@ -46,7 +46,33 @@ dataset:
   sample_id_col: sample_id
   feature_id_col: feature_id
   value_col: value
+
+  # THE canonical cross-dataset identifier for all COMPUTATIONAL work
+  # (fgsea_grid/gprofiler_grid/projectr_*_grid; see R/lib/ingest/
+  # symbol_mapping.R::build_ensembl_map()/remap_to_ensembl()) -- names
+  # the feature_metadata_path column holding this dataset's Ensembl gene
+  # id. Every dataset's matrix rownames get remapped into this space
+  # (version suffix stripped, e.g. ENSG00000001234.2 -> ENSG00000001234)
+  # before cross-dataset comparison, since native platform ids
+  # (probe/Entrez/etc.) otherwise never match across datasets. Also
+  # passed through unchanged to preprocessing_script (mode 2). A dataset
+  # missing this (or pointed at a nonexistent column) keeps its native
+  # ids while every successfully-mapped dataset becomes Ensembl, so
+  # cross-dataset comparisons against it intersect on ~nothing -- surfaces
+  # as projectR's "0 row names matched between data and loadings" rather
+  # than an error, so it's worth verifying this resolves correctly for
+  # any dataset involved in cross-dataset work.
   ensembl_col: ensembl
+
+  # Optional, DISPLAY ONLY -- never used for the actual cross-dataset
+  # computational matching (see ensembl_col above for that). Names the
+  # feature_metadata_path column holding this dataset's gene SYMBOL, for
+  # showing recognizable gene names in the app. Without this, the symbol
+  # column is GUESSED from a fixed list of common names (symbol/
+  # gene_symbol/SYMBOL/Symbol) -- set this explicitly if your feature
+  # metadata spells it differently (e.g. gene_name, external_gene_name,
+  # hgnc_symbol).
+  # symbol_col: gene_name
 
   # Required only if methods.cp / methods.tucker (tensor decomposition) are
   # configured below -- both columns in sample_metadata_path, used to
