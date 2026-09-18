@@ -14,7 +14,14 @@ dataset:
   sample_id_col: sample_id
   feature_id_col: feature_id
   value_col: value
-  ensembl_col: ensembl_id
+  # Was "ensembl_id" -- renamed to "ensembl_tx_id" (transcript-level, NOT
+  # usable as the cross-dataset gene-level identifier) when
+  # "ensembl_gene_id" was added to feature_metadata.parquet. This base
+  # config was missed when the four day-specific ANEMONES configs were
+  # updated for the rename -- confirmed directly: with the stale value,
+  # build_ensembl_map() (R/lib/ingest/symbol_mapping.R) can't find
+  # "ensembl_id" at all anymore and returns NULL.
+  ensembl_col: ensembl_gene_id
 
   preprocessing_script: R/preprocessing/anemones_preprocessing.R
 

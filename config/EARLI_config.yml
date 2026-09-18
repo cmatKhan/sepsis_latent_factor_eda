@@ -12,7 +12,16 @@ dataset:
   sample_metadata_path: /home/chase/projects/hf_sepsis_collection/EARLI/sample_metadata.parquet
   feature_metadata_path: /home/chase/projects/hf_sepsis_collection/EARLI/feature_metadata.parquet
   sample_id_col: sample_id
-  feature_id_col: GeneID
+  # Fixed 2026-09-18 (was "GeneID", which doesn't exist as a column in
+  # this dataset's feature_metadata.parquet -- confirmed directly; its
+  # actual columns are feature_id/seqnames/start/end/width/strand/symbol/
+  # genename/genetype/... and the already-cached matrix's own rownames are
+  # Ensembl gene ids, matching "feature_id"). With the stale "GeneID"
+  # value, build_ensembl_map() (R/lib/ingest/symbol_mapping.R) couldn't
+  # find that column at all and silently returned NULL -- cross-dataset
+  # work (fgsea_grid/gprofiler_grid/projectr_*_grid) for this dataset was
+  # comparing un-remapped native ids the whole time as a result.
+  feature_id_col: feature_id
   value_col: value
   ensembl_col: feature_id
 

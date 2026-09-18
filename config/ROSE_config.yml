@@ -12,16 +12,21 @@ dataset:
   sample_metadata_path: /home/chase/projects/sepsis_timecourse_factors_eda/data/rose_sample_meta.parquet
   feature_metadata_path: /home/chase/projects/sepsis_timecourse_factors_eda/data/rose_feature_meta.parquet
   sample_id_col: sample_id
-  # feature_metadata.parquet's key column is GeneID (Entrez), which is also
-  # what R/rose_preprocessing.R uses as the matrix's rownames -- there is
-  # no column literally named "feature_id" in this dataset's metadata.
-  # Confirmed by ingest-time join coverage: GeneID matches 100% of loadings
-  # row names, "feature_id" matches 0% (doesn't exist as a column at all).
-  # (Fixed here alongside this config's schema migration -- this field was
-  # still set to the wrong value "feature_id" despite this same comment
-  # already documenting the correct one; see GSE110487_config.yml, which
-  # got this fix earlier.)
-  feature_id_col: GeneID
+  # CORRECTED 2026-09-18: this comment previously claimed the key column
+  # was "GeneID" (Entrez) and that "feature_id" doesn't exist at all --
+  # confirmed directly against the CURRENT data/rose_feature_meta.parquet
+  # that this is simply wrong: its actual columns are feature_id/seqnames/
+  # start/end/width/strand/symbol/biotype (no GeneID column exists), and
+  # the already-cached matrix's own rownames are Ensembl gene ids
+  # (ENSG...), matching "feature_id" exactly -- same convention as
+  # config/ROSE_day0_config.yml/ROSE_day2_config.yml, whose OWN comments
+  # already correctly use feature_id_col: feature_id. With the stale
+  # "GeneID" value, build_ensembl_map() (R/lib/ingest/symbol_mapping.R)
+  # couldn't find that column at all and silently returned NULL --
+  # cross-dataset work (fgsea_grid/gprofiler_grid/projectr_*_grid) for
+  # this specific dataset was comparing un-remapped native ids the whole
+  # time as a result.
+  feature_id_col: feature_id
   value_col: value
   ensembl_col: feature_id
 
