@@ -239,7 +239,7 @@ ensure_schema <- function(con) {
   # R/lib/ingest/ingest_dataset.R::cache_dataset_metadata()). Needed so
   # anything reading sample/feature metadata to STAGE cluster jobs (e.g.
   # R/create_ingest_slurm_bundle.R's driver_grid sample_metadata_maps and
-  # fgsea_grid/gprofiler_grid/projectr_*_grid's ensembl_maps) can do so
+  # fgsea_grid/projectr_*_grid's ensembl_maps) can do so
   # from wherever it's actually invoked (typically the cluster login node)
   # without needing raw config paths (sample_metadata_path/
   # feature_metadata_path) that only resolve on whatever machine holds the

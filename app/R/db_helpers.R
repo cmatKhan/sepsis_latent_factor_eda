@@ -287,9 +287,10 @@ load_time_loadings <- function(con, fit_id) {
 ## (pattern_drivers table) plus a self-contained on-demand runner for
 ## combinations that pass wasn't scoped to cover (arbitrary grouping
 ## column / factor / mode) -- deliberately NOT sourcing R/lib/ingest/
-## driver.R itself, mirroring how R/lib/ingest/enrichment.R's ingest-time
-## logic is already duplicated rather than shared with the app (see that
-## file's header: "app is fully decoupled from ingest").
+## driver.R itself, mirroring how the app keeps its own duplicated,
+## on-demand gprofiler2::gost() query logic (app.R) fully decoupled from
+## the ingest-time enrichment pass (R/ingest_jobs/fgsea_job.R's local
+## fora()/fgsea() ORA/GSEA) rather than sourcing/sharing it directly.
 
 #' Already-cached projectionDriveR() results for one fit -- populates a
 #' selector of (factor, grouping column, level pair, mode) combinations

@@ -8,7 +8,7 @@
 #
 # Usage (CLI):
 #   Rscript R/ingest_results.R <dataset_config.yml> <results_dir> <db_path> \
-#     [--overwrite [jobname,...]] [--recache-matrix] [--recompute-redundancy] [--run-enrichment]
+#     [--overwrite [jobname,...]] [--recache-matrix] [--recompute-redundancy]
 #
 # `--overwrite` (bare = every family present in <results_dir>; or
 # `--overwrite jobname1,jobname2` = just those) deletes and re-ingests --
@@ -17,14 +17,18 @@
 # even if not auto-detected as stale (see cache_dataset_matrix()).
 # `--recompute-redundancy` forces the pattern-redundancy diagnostic to
 # recompute even if not auto-detected as stale (see run_all_redundancy()).
-# `--run-enrichment` (legacy, on-demand path; the slurm pipeline's
-# fgsea_grid/gprofiler_grid jobs are the preferred route now -- see
-# R/create_ingest_slurm_bundle.R) runs gprofiler2 ORA/GSEA for every ok
-# fit's every factor across the WHOLE db, skipping anything already cached.
+#
+# (`--run-enrichment`/R/lib/ingest/enrichment.R's run_all_enrichment(), a
+# legacy whole-DB gprofiler2 ORA/GSEA pass, was retired 2026-09-19 alongside
+# the slurm pipeline's gprofiler_grid job family -- both had the same
+# gprofiler2-API-rate-limit scaling problem; see R/ingest_jobs/fgsea_job.R's
+# header for the local fora()/fgsea()-based replacement, now folded into
+# fgsea_grid. The app's own per-factor, on-demand gprofiler2 queries in
+# app/app.R are unaffected and remain the one live g:Profiler call site.)
 #
 # Usage (interactive): set `ingest_config_path`, `ingest_results_dir`,
 # `ingest_db_path` (and optionally `ingest_overwrite`, `ingest_recache_matrix`,
-# `ingest_recompute_redundancy`, `ingest_run_enrichment`) then source this file.
+# `ingest_recompute_redundancy`) then source this file.
 
 library(here)
 library(yaml)
@@ -68,9 +72,6 @@ if (!exists("ingest_recache_matrix")) {
 if (!exists("ingest_recompute_redundancy")) {
   ingest_recompute_redundancy <- "--recompute-redundancy" %in% args
 }
-if (!exists("ingest_run_enrichment")) {
-  ingest_run_enrichment <- "--run-enrichment" %in% args
-}
 
 con <- open_stability_db(ingest_db_path)
 # cache_dataset_matrix() sources preprocessing_script by path and reads
@@ -94,11 +95,5 @@ counts <- DBI::dbGetQuery(con, "
   UNION ALL SELECT 'fit_redundancy', COUNT(*) FROM fit_redundancy fr JOIN fits ft ON ft.fit_id = fr.fit_id WHERE ft.dataset_id = :d",
   params = list(d = dataset_id))
 for (r in seq_len(nrow(counts))) message(sprintf("  %-22s %d rows", counts$tbl[r], counts$n[r]))
-
-if (isTRUE(ingest_run_enrichment)) {
-  message("\n===== --run-enrichment: running gprofiler2 ORA/GSEA for the WHOLE db =====")
-  source(here("R/lib/ingest/enrichment.R"))
-  run_all_enrichment(con, ingest_db_path)
-}
 
 DBI::dbDisconnect(con)

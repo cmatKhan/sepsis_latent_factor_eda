@@ -2,7 +2,7 @@
 #
 #   - build_ensembl_map() / remap_to_ensembl(): the CANONICAL identifier
 #     space for ALL cross-dataset COMPUTATIONAL work (fgsea_grid/
-#     gprofiler_grid/projectr_within_grid/projectr_cross_grid). Ensembl
+#     projectr_within_grid/projectr_cross_grid). Ensembl
 #     gene id, version suffix stripped (ENSG00000001234.2 ->
 #     ENSG00000001234) -- chosen over gene symbol because symbols are
 #     ambiguous/aliased/renamed across annotation releases and are

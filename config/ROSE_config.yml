@@ -23,7 +23,7 @@ dataset:
   # already correctly use feature_id_col: feature_id. With the stale
   # "GeneID" value, build_ensembl_map() (R/lib/ingest/symbol_mapping.R)
   # couldn't find that column at all and silently returned NULL --
-  # cross-dataset work (fgsea_grid/gprofiler_grid/projectr_*_grid) for
+  # cross-dataset work (fgsea_grid/projectr_*_grid) for
   # this specific dataset was comparing un-remapped native ids the whole
   # time as a result.
   feature_id_col: feature_id

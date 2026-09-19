@@ -76,7 +76,7 @@ cache_dataset_matrix <- function(con, dataset_id, dataset_yaml, db_path, force =
 #'
 #' Needed because R/create_ingest_slurm_bundle.R's --stage enrichment
 #' builds `sample_metadata_maps` (driver_grid) and `ensembl_maps`
-#' (fgsea_grid/gprofiler_grid/projectr_*_grid) by reading each dataset's
+#' (fgsea_grid/projectr_*_grid) by reading each dataset's
 #' metadata -- confirmed directly (2026-09-18): without a cached artifact
 #' to fall back on, EVERY dataset's map silently came back NULL when
 #' staged from the cluster, since file.exists() on the raw config paths is

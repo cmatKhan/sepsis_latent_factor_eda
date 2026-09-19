@@ -19,7 +19,7 @@ dataset:
   # Ensembl gene ids, matching "feature_id"). With the stale "GeneID"
   # value, build_ensembl_map() (R/lib/ingest/symbol_mapping.R) couldn't
   # find that column at all and silently returned NULL -- cross-dataset
-  # work (fgsea_grid/gprofiler_grid/projectr_*_grid) for this dataset was
+  # work (fgsea_grid/projectr_*_grid) for this dataset was
   # comparing un-remapped native ids the whole time as a result.
   feature_id_col: feature_id
   value_col: value

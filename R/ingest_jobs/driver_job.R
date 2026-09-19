@@ -13,7 +13,7 @@
 # Belongs in --stage enrichment, not --stage core: run_all_pattern_drivers()
 # calls representative_fit_ids(), which needs fits.mse -- populated only
 # after ingest_core has already run (same precondition fgsea_grid/
-# gprofiler_grid/projectr_*_grid already have). Also needs each dataset's
+# projectr_*_grid already have). Also needs each dataset's
 # matrix already cached (cache_dataset_matrix(), login-node-only --
 # already satisfied by the time --stage enrichment is reached).
 #

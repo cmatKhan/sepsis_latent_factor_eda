@@ -481,7 +481,7 @@ Artifact paths are stored relative to the DB file's directory, so the DB
 and its `stability_artifacts/` folder move together as a unit.
 
 **Cross-dataset gene identifier mapping** (`R/lib/ingest/symbol_mapping.R`):
-`fgsea_grid`/`gprofiler_grid`/`projectr_within_grid`/`projectr_cross_grid`
+`fgsea_grid`/`projectr_within_grid`/`projectr_cross_grid`
 all compare/project matrices whose rownames are otherwise each dataset's
 own native platform id (Illumina/Affymetrix probe, Entrez GeneID, Ensembl
 feature_id). **Ensembl gene id (version-stripped, e.g.

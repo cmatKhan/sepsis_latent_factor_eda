@@ -1274,7 +1274,7 @@ server <- function(input, output, session) {
     L <- load_loadings(con, fit_id); req(!is.null(L))
     # Ensembl-remap ONCE for the whole fit (not per factor/combo) -- THE
     # canonical cross-dataset identifier for enrichment queries, same as
-    # the slurm fgsea_grid/gprofiler_grid pipeline; see
+    # the slurm fgsea_grid pipeline (its local fora()/fgsea() pass -- gprofiler_grid itself was retired 2026-09-19); see
     # app/R/metadata_helpers.R::ensembl_map_for_dataset()'s header for why
     # this matters (gprofiler2::gost() often can't recognize raw native
     # platform ids at all).

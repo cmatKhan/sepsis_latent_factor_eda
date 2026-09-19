@@ -48,7 +48,7 @@ dataset:
   value_col: value
 
   # THE canonical cross-dataset identifier for all COMPUTATIONAL work
-  # (fgsea_grid/gprofiler_grid/projectr_*_grid; see R/lib/ingest/
+  # (fgsea_grid/projectr_*_grid; see R/lib/ingest/
   # symbol_mapping.R::build_ensembl_map()/remap_to_ensembl()) -- names
   # the feature_metadata_path column holding this dataset's Ensembl gene
   # id. Every dataset's matrix rownames get remapped into this space

@@ -58,7 +58,7 @@ source(here::here("R/lib/submit_all_script.R"))
 #' `extra_binds`/`pwd_override` exist for the ingest slurm pipeline (see
 #' R/create_ingest_slurm_bundle.R): unlike every R/methods/*.R job, which
 #' only ever touches an in-memory matrix passed via `global_objects` and
-#' writes its own `results_<i>.RDS`, ingest_core/fgsea_grid/gprofiler_grid/
+#' writes its own `results_<i>.RDS`, ingest_core/fgsea_grid/
 #' projectr_*_grid read/write ordinary project-relative paths (config/,
 #' results/, slurm_bundles/<dataset_id>/) that live OUTSIDE this job's own
 #' `_rslurm_<jobname>` bundle directory -- $RSLURM_BUNDLE_DIR alone can't
@@ -160,9 +160,7 @@ build_apptainer_rscript_path <- function(container, jobname, rscript_cmd, lib_pa
 #'   handle EITHER shape (a single wrapped per-row result, or a list of
 #'   several) -- see R/ingest_enrichment_results.R's/R/ingest_projectr_
 #'   results.R's `entries <- if (!is.null(x$some_scalar_field)) list(x)
-#'   else x` pattern (already how R/ingest_jobs/gprofiler_job.R's
-#'   single-job results were always read, since that job internally loops
-#'   over all its rows in one non-array process).
+#'   else x` pattern.
 submit_job_family <- function(f, jobs_df, jobname, global_objects = character(0),
                                pkgs = character(0), cluster_cfg,
                                slurm_options_extra = list(), submit = FALSE,

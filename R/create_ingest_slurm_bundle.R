@@ -8,16 +8,20 @@
 # Phase 2 (--stage enrichment): run ONLY after Phase 1's job has finished
 # and the DB reflects its results (representative-fit selection needs
 # fits.mse, which doesn't exist until ingest_core has run). Queries the DB
-# for representative fits per (dataset, method) and stages three more job
-# families: fgsea_grid (array, parallel), gprofiler_grid (single, serial
-# -- API rate-limited), and projectr_within_grid/projectr_cross_grid
-# (array, "reduced all-pairs" -- see R/lib/ingest/projectr_pairs.R).
+# for representative fits per (dataset, method) and stages two more job
+# families: fgsea_grid (array, parallel -- ALSO covers the local
+# fora()/fgsea()-based ORA/GSEA pass across GO/KEGG/Reactome/WikiPathways/
+# Hallmark that used to be a separate, API-rate-limited gprofiler_grid job
+# family; see R/ingest_jobs/fgsea_job.R's header and this script's
+# `pathways_by_source` comment for why gprofiler_grid was retired
+# 2026-09-19), and projectr_within_grid/projectr_cross_grid (array,
+# "reduced all-pairs" -- see R/lib/ingest/projectr_pairs.R).
 #
 # Usage:
 #   Rscript R/create_ingest_slurm_bundle.R --datasets datasets.txt --stage core
 #   # ... wait for ingest_core to finish ...
 #   Rscript R/create_ingest_slurm_bundle.R --datasets datasets.txt -nd -stage enrichment
-#   # ... wait for fgsea_grid/gprofiler_grid/projectr_*_grid ...
+#   # ... wait for fgsea_grid/projectr_*_grid ...
 #   Rscript R/ingest_enrichment_results.R --bundle-dir slurm_bundles/ingest --db results/stability.sqlite
 #   Rscript R/ingest_projectr_results.R   --bundle-dir slurm_bundles/ingest --db results/stability.sqlite
 #
@@ -41,7 +45,6 @@ source(here("R/lib/ingest/projectr_pairs.R"))
 source(here("R/lib/submit.R"))
 source(here("R/ingest_jobs/ingest_core_job.R"))
 source(here("R/ingest_jobs/fgsea_job.R"))
-source(here("R/ingest_jobs/gprofiler_job.R"))
 source(here("R/ingest_jobs/projectr_job.R"))
 source(here("R/ingest_jobs/driver_job.R"))
 
@@ -69,7 +72,7 @@ source(here("R/ingest_jobs/driver_job.R"))
 # ordinary non-dot names that WERE captured) was silently missing from
 # every job's add_objects.RData, failing at runtime -- not submission
 # time -- with "could not find function '.remap_ids'" the moment
-# fgsea_grid/gprofiler_grid/projectr_*_grid actually called it. Any future
+# fgsea_grid/projectr_*_grid actually called it. Any future
 # dot-prefixed ("private") helper added to these lib files needs this too.
 FRAMEWORK_FUNCS <- ls(envir = .GlobalEnv, all.names = TRUE)
 
@@ -298,7 +301,7 @@ if (opt$stage == "core") {
     resolve_artifact(f, opt$db)
   }
 
-  # ---- fgsea + gprofiler: representative fits only ----
+  # ---- fgsea (+ local ORA/GSEA replacing gprofiler_grid): representative fits only ----
   rep_rows <- do.call(rbind, lapply(all_dataset_ids, function(ds) {
     do.call(rbind, lapply(c("pca", "nmf", "cogaps", "spca", "ica"), function(m) {
       fids <- representative_fit_ids(con, ds, m)
@@ -318,10 +321,43 @@ if (opt$stage == "core") {
     # symbol_mapping.R's header) -- fgsea/fora both need `pathways` in the
     # SAME id space as the Ensembl-remapped loadings they're compared
     # against.
-    msig <- msigdbr::msigdbr(species = "Homo sapiens", collection = "H")
-    msig <- msig[!is.na(msig$ensembl_gene) & nzchar(msig$ensembl_gene), ]
-    pathways <- split(msig$ensembl_gene, msig$gs_name)
+    fetch_msig <- function(collection, subcollection = NULL) {
+      msig <- msigdbr::msigdbr(species = "Homo sapiens", collection = collection, subcollection = subcollection)
+      msig <- msig[!is.na(msig$ensembl_gene) & nzchar(msig$ensembl_gene), ]
+      split(msig$ensembl_gene, msig$gs_name)
+    }
+    pathways <- fetch_msig("H")
     assign("pathways", pathways, envir = .GlobalEnv)
+
+    # NEW (2026-09-19): local, parallel replacement for gprofiler_grid's
+    # per-request g:Profiler API calls (retired -- see git history/project
+    # notes; g:Profiler itself confirmed via their own FAQ that they don't
+    # offer a self-hosted/local instance for high query volumes, so a local
+    # mirror of their DB isn't possible). `fora()`/`fgsea()` against these
+    # same msigdbr collections reproduce gprofiler's ORA/GSEA modes
+    # entirely locally, run as part of fgsea_grid (R/ingest_jobs/
+    # fgsea_job.R) instead of a separate rate-limited job family -- see
+    # that file's header for exactly how each collection is used.
+    #
+    # Collection/subcollection choices mirror gprofiler's default `sources
+    # = c("GO:BP", "GO:MF", "REAC", "KEGG", "WP")`: GO:BP/GO:MF come from
+    # msigdbr's C5 collection (subcollection strings match verbatim);
+    # REACTOME/WIKIPATHWAYS from C2's CP:REACTOME/CP:WIKIPATHWAYS.  KEGG
+    # is NOT a single subcollection in the installed msigdbr version
+    # (confirmed via `msigdbr::msigdbr_collections()`: C2 splits it into
+    # CP:KEGG_LEGACY and CP:KEGG_MEDICUS) -- CP:KEGG_LEGACY is used here as
+    # the closer analog to gprofiler's classic KEGG pathway source.
+    # HALLMARK reuses the same `pathways` object built above (already
+    # Hallmark-only) rather than re-querying msigdbr for it.
+    pathways_by_source <- list(
+      HALLMARK = pathways,
+      `GO:BP` = fetch_msig("C5", "GO:BP"),
+      `GO:MF` = fetch_msig("C5", "GO:MF"),
+      KEGG    = fetch_msig("C2", "CP:KEGG_LEGACY"),
+      REAC    = fetch_msig("C2", "CP:REACTOME"),
+      WP      = fetch_msig("C2", "CP:WIKIPATHWAYS")
+    )
+    assign("pathways_by_source", pathways_by_source, envir = .GlobalEnv)
 
     # per-row cogaps marker genes (already computed by run_all_redundancy() during --stage core)
     rep_rows$cogaps_marker_genes <- vector("list", nrow(rep_rows))
@@ -333,32 +369,25 @@ if (opt$stage == "core") {
     }
     rep_rows$ensembl_map <- lapply(rep_rows$dataset_id, function(ds) ensembl_maps[[ds]])
 
+    # gprofiler_grid (retired 2026-09-19) used to be staged here as a
+    # separate job family covering the SAME (fit, factor, direction) grid
+    # via live gprofiler2::gost() calls -- see fgsea_job.R's header and this
+    # block's `pathways_by_source` comment above for why that's now folded
+    # into fgsea_grid instead (local fora()/fgsea() against the same
+    # msigdbr collections, no API rate limit, no separate container image).
+    # The app's own per-factor, on-demand gprofiler2 queries (app/app.R)
+    # are unaffected -- those remain the one intentionally-kept live
+    # g:Profiler call site.
     submit_job_family(
       f = run_fgsea_job,
       jobs_df = rep_rows[, c("dataset_id", "method", "fit_id", "loadings_file", "ensembl_map", "cogaps_marker_genes")],
-      jobname = "fgsea_grid", global_objects = c(FRAMEWORK_FUNCS, "pathways"),
+      jobname = "fgsea_grid", global_objects = c(FRAMEWORK_FUNCS, "pathways", "pathways_by_source"),
       pkgs = c("CoGAPS", "BiocParallel", "arrow"),
       cluster_cfg = slurm_cfg$fgsea, output_dir = opt$output,
       extra_binds = PROJECT_ROOT, max_array_size = opt$`max-array-size`
     )
-
-    gprofiler_targets <- do.call(rbind, lapply(seq_len(nrow(rep_rows)), function(i) {
-      L <- as.matrix(readRDS(rep_rows$loadings_file[i]))
-      dirs <- if (rep_rows$method[i] %in% c("pca", "ica", "spca")) c("pos", "neg") else "pos"
-      expand.grid(dataset_id = rep_rows$dataset_id[i], method = rep_rows$method[i],
-                  fit_id = rep_rows$fit_id[i], loadings_file = rep_rows$loadings_file[i],
-                  factor_index = seq_len(ncol(L)), direction = dirs, stringsAsFactors = FALSE)
-    }))
-    assign("gprofiler_targets", gprofiler_targets, envir = .GlobalEnv)
-    assign("ensembl_maps", ensembl_maps, envir = .GlobalEnv)
-    submit_job_family(
-      f = run_gprofiler_job, jobs_df = NULL, jobname = "gprofiler_grid",
-      global_objects = c(FRAMEWORK_FUNCS, "gprofiler_targets", "ensembl_maps"), pkgs = c("gprofiler2", "arrow"),
-      cluster_cfg = slurm_cfg$gprofiler, output_dir = opt$output,
-      extra_binds = PROJECT_ROOT
-    )
   } else {
-    message("No representative fits found for fgsea/gprofiler -- skipping both")
+    message("No representative fits found for fgsea -- skipping")
   }
 
   # ---- projectr: reduced all-pairs, two explicitly-named families ----

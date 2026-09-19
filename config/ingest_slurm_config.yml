@@ -18,10 +18,10 @@
 # RSQLite, yaml, CoGAPS, clue, fgsea, BiocParallel; utils is base R) was
 # already confirmed present. Consolidating onto the one already-built,
 # already-audited image avoids relying on a second, separately-maintained
-# image ever silently drifting out of sync like this again. gprofiler
-# stays on its own separate, smaller image (needs network egress to
-# g:Profiler's API, unlike everything else here, so keeping it minimal /
-# least-privilege is worth the extra image).
+# image ever silently drifting out of sync like this again. (A separate
+# `gprofiler` entry/image used to live here for the gprofiler_grid job
+# family, needing network egress to g:Profiler's API -- retired 2026-09-19,
+# see the comment further down where that entry used to be.)
 
 ingest_core:
   mem: 30G
@@ -43,19 +43,18 @@ fgsea:
   sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
   rscript_path: "Rscript"
 
-gprofiler:
-  mem: 20G
-  cpus_per_task: 1          # deliberately serial -- g:Profiler API, not compute-bound
-  time: "08:00:00"
-  # verified 2026-09-15: arrow/gprofiler2 import cleanly, and a live
-  # gost() call succeeded (network egress confirmed) -- see
-  # config/rslurm_templates/submit_sh.txt's env-leak fix, same as
-  # ingest_core/fgsea's image
-  container: "/ref/mblab/containers/chasem/r-arrow_r-gprofiler2_b4673b4475a66970.sif"
-  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
-  sh_template: "config/rslurm_templates/submit_sh.txt"
-  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
-  rscript_path: "/opt/conda/bin/Rscript"
+# gprofiler_grid (its own job family + the r-arrow_r-gprofiler2_*.sif image
+# above) was retired 2026-09-19 -- gprofiler2's live, rate-limited
+# g:Profiler API calls (47,517+ requests for this project's grid) were
+# replaced with a local fora()/fgsea()-based ORA/GSEA pass against msigdbr
+# collections (GO:BP, GO:MF, KEGG, Reactome, WikiPathways, Hallmark), folded
+# into fgsea_grid below (see R/ingest_jobs/fgsea_job.R's header) -- no
+# network calls, no separate rate-limited job family, no separate image.
+# g:Profiler itself confirmed (via their own FAQ) that they don't offer a
+# self-hosted/local instance for high query volumes, ruling out a "point
+# gprofiler2 at a local mirror" fix. The app's own per-factor, on-demand
+# gprofiler2::gost() calls (app/app.R) are untouched and remain the one
+# live g:Profiler call site in this project.
 
 projectr:
   mem: 4G

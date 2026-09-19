@@ -3,3 +3,4 @@ results/
 slurm_bundles/
 logs/
 data/
+datasets.txt
