@@ -101,11 +101,15 @@ option_list <- list(
   make_option("--recompute-redundancy", type = "character", default = NULL,
               help = "bare flag = recompute for every dataset; or a comma-separated list of dataset ids"),
   make_option("--max-array-size", type = "integer", default = 1000,
-              help = paste("max rows per array-job submission for the (potentially huge) projectr grid --",
-                            "oversized families are split into <jobname>_part<k> submissions instead of one",
-                            "array job (see submit_job_family()'s doc). Default 1000 is a common Slurm",
-                            "MaxArraySize -- check `scontrol show config | grep -i MaxArraySize` on your",
-                            "cluster and pass the real value here if different."))
+              help = paste("max rows any ONE array task processes sequentially for fgsea_grid/",
+                            "projectr_within_grid/projectr_cross_grid -- a single small array job is",
+                            "still submitted regardless of total grid size (see submit_job_family()'s",
+                            "doc): a 3000-row grid with the default 1000 becomes one 3-task array job,",
+                            "not 3000 array tasks (or the old behavior of three separate 1000-task",
+                            "array-job submissions). Lower this to shorten each task's runtime, or",
+                            "raise it to shrink the array further; it is NOT a Slurm MaxArraySize limit",
+                            "to stay under (the resulting array is always small) -- pass 1 to fall back",
+                            "to one row per array task, closest to the pre-2026-09-19 default."))
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 slurm_cfg <- yaml::read_yaml(opt$`slurm-config`)

@@ -22,31 +22,42 @@ for (jobname in c("projectr_within_grid", "projectr_cross_grid")) {
   message(jobname, ": ", length(result_files), " result file(s)")
 
   DBI::dbExecute(con, "BEGIN")
+  n_entries <- 0
   for (f in result_files) {
     x <- readRDS(f)
-    if (is.list(x) && length(x) == 1 && is.null(names(x))) x <- x[[1]]
-    if (is.null(x$result) || is.null(x$result$projection)) {
-      message("  ", basename(f), ": no projection (failed task) -- skipping")
-      next
+    # Same either-shape handling as R/ingest_enrichment_results.R's
+    # fgsea_grid block -- see submit_job_family()'s `max_array_size` doc:
+    # a results_<task>.RDS is either one run_projectr_job() return value
+    # or a plain list of several (batched). `x$source_fit_id` is only
+    # present on the former.
+    entries <- if (!is.null(x$source_fit_id)) list(x) else x
+    n_entries <- n_entries + length(entries)
+
+    for (x in entries) {
+      if (is.null(x$result) || is.null(x$result$projection)) {
+        message("  ", basename(f), ": no projection (failed task) -- skipping")
+        next
+      }
+      proj <- x$result$projection
+      r2 <- x$result$r_squared
+
+      art_dir <- artifacts_dir(opt$db, x$source_dataset_id)
+      dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
+      fname <- sprintf("%s_src%d_tgt%s_projection.rds", jobname, x$source_fit_id, x$target_dataset_id)
+      saveRDS(x$result, file.path(art_dir, fname))
+
+      DBI::dbExecute(con,
+        "INSERT INTO projections (source_fit_id, source_dataset_id, target_dataset_id, method,
+                                   projection_type, include_intercept, n_genes_matched, n_samples,
+                                   mean_r_squared, median_r_squared, projection_file)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params = list(x$source_fit_id, x$source_dataset_id, x$target_dataset_id, x$method,
+                      x$projection_type, isTRUE(x$include_intercept), x$n_genes_matched, ncol(proj),
+                      mean(r2, na.rm = TRUE), median(r2, na.rm = TRUE),
+                      file.path("stability_artifacts", x$source_dataset_id, fname)))
     }
-    proj <- x$result$projection
-    r2 <- x$result$r_squared
-
-    art_dir <- artifacts_dir(opt$db, x$source_dataset_id)
-    dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
-    fname <- sprintf("%s_src%d_tgt%s_projection.rds", jobname, x$source_fit_id, x$target_dataset_id)
-    saveRDS(x$result, file.path(art_dir, fname))
-
-    DBI::dbExecute(con,
-      "INSERT INTO projections (source_fit_id, source_dataset_id, target_dataset_id, method,
-                                 projection_type, include_intercept, n_genes_matched, n_samples,
-                                 mean_r_squared, median_r_squared, projection_file)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      params = list(x$source_fit_id, x$source_dataset_id, x$target_dataset_id, x$method,
-                    x$projection_type, isTRUE(x$include_intercept), x$n_genes_matched, ncol(proj),
-                    mean(r2, na.rm = TRUE), median(r2, na.rm = TRUE),
-                    file.path("stability_artifacts", x$source_dataset_id, fname)))
   }
   DBI::dbExecute(con, "COMMIT")
+  message(jobname, ": ", n_entries, " pair-level result(s) across those file(s)")
 }
 DBI::dbDisconnect(con)

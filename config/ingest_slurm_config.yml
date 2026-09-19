@@ -44,7 +44,7 @@ fgsea:
   rscript_path: "Rscript"
 
 gprofiler:
-  mem: 4G
+  mem: 20G
   cpus_per_task: 1          # deliberately serial -- g:Profiler API, not compute-bound
   time: "08:00:00"
   # verified 2026-09-15: arrow/gprofiler2 import cleanly, and a live
@@ -82,7 +82,7 @@ driver:
   # small-categorical-column combination sequentially -- generous time
   # budget since the combinatorial pass (see run_all_pattern_drivers())
   # scales with dataset count and categorical-column cardinality.
-  time: "04:00:00"
+  time: "24:00:00"
   container: "/ref/mblab/containers/chasem/sepsis_timecourse_factors_eda.sif"
   libPaths: "/ref/mblab/software/chasem/R/4.6.0"
   sh_template: "config/rslurm_templates/submit_sh.txt"
