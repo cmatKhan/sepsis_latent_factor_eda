@@ -91,6 +91,22 @@ run_pattern_driver <- function(con, db_path, fit_id, factor_index, dataset_id,
               else length(result$sig_genes$PV_significant_shared_genes %||% character(0))
   n_considered <- if (mode == "CI") nrow(result$mean_ci) else nrow(result$mean_stats)
 
+  # Skip persisting combinations with NO significantly differentially-
+  # weighted shared genes ("the length of shared genes are: 0", printed by
+  # projectionDriveR() itself) -- these are the vast majority of
+  # (fit, factor, grouping column, level pair) combinations
+  # run_all_pattern_drivers() tries (most factor/grouping-column pairings
+  # just aren't biologically related), and storing them anyway both wastes
+  # an artifact file per combo and fills pattern_drivers with rows no
+  # downstream consumer (the app's driver browser) can do anything useful
+  # with -- n_significant_shared = 0 has no genes to show. NOT gated behind
+  # `force`/re-run logic: run_pattern_driver()'s own existing-row check
+  # (top of this function) already treats "no row in pattern_drivers" as
+  # "not yet computed", so skipping the INSERT here just means a future
+  # rerun harmlessly recomputes (and reskips) the same zero-shared-gene
+  # combo again, not that it's silently stuck as "done".
+  if (n_shared == 0) return(invisible(NULL))
+
   art_dir <- artifacts_dir(db_path, dataset_id)
   dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
   fname <- sprintf("driver_fit%d_f%d_%s_%s-vs-%s_%s.rds", fit_id, factor_index, grouping_col,

@@ -51,14 +51,32 @@
 # R/ingest_enrichment_results.R's header for how both write into the same
 # `enrichment_cache` schema.
 
+# Logging: one line per PHASE per fit (start, Hallmark GSEA, cogaps ORA
+# when applicable, local GSEA, local ORA, done-with-elapsed) -- NOT
+# per-factor or per-source, which would be hundreds of lines/fit (this
+# runs as a batched array task -- see submit_job_family()'s `max_array_size`
+# doc -- so a single task's log can cover many fits' worth of these lines).
+# `n_sig()` below just counts padj < 0.05 rows across a list of fgsea()/
+# fora() result data.frames, reused by every phase's summary line.
+n_sig <- function(results_list) {
+  sum(vapply(results_list, function(r) {
+    res <- if (is.list(r) && "result" %in% names(r)) r$result else r
+    if (is.null(res) || nrow(res) == 0) return(0L)
+    sum(res$padj < 0.05, na.rm = TRUE)
+  }, integer(1)))
+}
+
 run_fgsea_job <- function(dataset_id, method, fit_id, loadings_file,
                           ensembl_map = NULL, cogaps_marker_genes = NULL, cpus_per_task = 8) {
   library(fgsea); library(BiocParallel)
   register(MulticoreParam(cpus_per_task))
+  t0 <- Sys.time()
+  tag <- sprintf("[fgsea_grid] %s/%s fit=%d", dataset_id, method, fit_id)
 
   L <- as.matrix(readRDS(loadings_file))
   L_ens <- remap_to_ensembl(L, ensembl_map)
   n_factors <- ncol(L_ens)
+  message(sprintf("%s: starting -- %d factor(s), %d genes post-remap", tag, n_factors, nrow(L_ens)))
 
   gsea_results <- lapply(seq_len(n_factors), function(fi) {
     ranks <- sort(L_ens[, fi], decreasing = TRUE)
@@ -66,6 +84,8 @@ run_fgsea_job <- function(dataset_id, method, fit_id, loadings_file,
          result = tryCatch(fgsea(pathways = pathways, stats = ranks, minSize = 10, maxSize = 500),
                             error = function(e) NULL))
   })
+  message(sprintf("%s: Hallmark GSEA done -- %d significant term-hit(s) across %d factor(s)",
+                   tag, n_sig(gsea_results), n_factors))
 
   fora_results <- NULL
   if (method == "cogaps" && !is.null(cogaps_marker_genes)) {
@@ -86,6 +106,8 @@ run_fgsea_job <- function(dataset_id, method, fit_id, loadings_file,
                      minSize = 10, maxSize = 500),
                error = function(e) NULL)
     })
+    message(sprintf("%s: CoGAPS marker-gene ORA done -- %d significant term-hit(s) across %d pattern(s)",
+                     tag, n_sig(fora_results), length(fora_results)))
   }
 
   # ---- local ORA/GSEA replacing gprofiler_grid (see this file's header) ----
@@ -116,7 +138,15 @@ run_fgsea_job <- function(dataset_id, method, fit_id, loadings_file,
         }
       }
     }
+    message(sprintf("%s: local GSEA done -- %d source(s) x %d factor(s), %d significant term-hit(s)",
+                     tag, length(gsea_sources), n_factors, n_sig(local_gsea_results)))
+    message(sprintf("%s: local ORA done -- %d source(s) x %d direction(s) x %d factor(s), %d significant term-hit(s)",
+                     tag, length(pathways_by_source), length(dirs), n_factors, n_sig(local_ora_results)))
+  } else {
+    message(sprintf("%s: no `pathways_by_source` global found -- skipping local GSEA/ORA", tag))
   }
+
+  message(sprintf("%s: done in %.1fs", tag, as.numeric(difftime(Sys.time(), t0, units = "secs"))))
 
   list(dataset_id = dataset_id, method = method, fit_id = fit_id,
        gsea = gsea_results, fora = fora_results,
