@@ -234,6 +234,21 @@ ensure_schema <- function(con) {
   # projectr_grid so target-matrix lookups don't re-run preprocessing_script
   # per task.
   ensure_column(con, "datasets", "matrix_file", "TEXT")
+  # Cached, dataset-level sample/feature metadata artifacts -- same
+  # rationale/convention as matrix_file above (see
+  # R/lib/ingest/ingest_dataset.R::cache_dataset_metadata()). Needed so
+  # anything reading sample/feature metadata to STAGE cluster jobs (e.g.
+  # R/create_ingest_slurm_bundle.R's driver_grid sample_metadata_maps and
+  # fgsea_grid/gprofiler_grid/projectr_*_grid's ensembl_maps) can do so
+  # from wherever it's actually invoked (typically the cluster login node)
+  # without needing raw config paths (sample_metadata_path/
+  # feature_metadata_path) that only resolve on whatever machine holds the
+  # raw HuggingFace data -- confirmed directly (2026-09-18): with no cache,
+  # every dataset's sample_metadata_maps/ensembl_maps entry silently came
+  # back NULL when staged from the cluster, since file.exists() on those
+  # raw paths is always FALSE there.
+  ensure_column(con, "datasets", "sample_metadata_file", "TEXT")
+  ensure_column(con, "datasets", "feature_metadata_file", "TEXT")
   # dataset.ensembl_col, for kind='feature' rows -- see
   # register_metadata_source()'s doc above for why this is stored
   # (app-side on-demand enrichment needs it without reading config/*.yml).

@@ -195,10 +195,25 @@ run_all_enrichment <- function(con, db_path, query_types = c("ora", "gsea"), top
   all_ds_ids <- unique(c(fits$dataset_id, DBI::dbGetQuery(con,
     "SELECT DISTINCT dataset_id FROM fits WHERE status = 'ok' AND method = 'wgcna'")$dataset_id))
   available_cfg <- list.files("config", pattern = "_config\\.yml$")
+  # Prefers the CACHED feature_metadata artifact (datasets.
+  # feature_metadata_file, populated by cache_dataset_metadata()) over a
+  # raw feature_metadata_path read -- same rationale as
+  # R/create_ingest_slurm_bundle.R's ensembl_maps construction: this CLI's
+  # own header says it should run wherever the raw data resolves, but
+  # falling back gracefully here means it still works even when that
+  # assumption doesn't hold (e.g. run from the cluster after the cache was
+  # already synced over).
   ensembl_maps <- setNames(lapply(all_ds_ids, function(id) {
     match_idx <- match(tolower(paste0(id, "_config.yml")), tolower(available_cfg))
     if (is.na(match_idx)) return(NULL)
-    tryCatch(build_ensembl_map(yaml::read_yaml(file.path("config", available_cfg[match_idx]))),
+    fm <- NULL
+    f <- DBI::dbGetQuery(con, "SELECT feature_metadata_file FROM datasets WHERE dataset_id = ?",
+                          params = list(id))$feature_metadata_file
+    if (length(f) == 1 && !is.na(f)) {
+      path <- resolve_artifact(f, db_path)
+      if (file.exists(path)) fm <- tryCatch(readRDS(path), error = function(e) NULL)
+    }
+    tryCatch(build_ensembl_map(yaml::read_yaml(file.path("config", available_cfg[match_idx])), fm = fm),
              error = function(e) NULL)
   }), all_ds_ids)
 

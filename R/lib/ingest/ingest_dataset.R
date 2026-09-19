@@ -66,6 +66,70 @@ cache_dataset_matrix <- function(con, dataset_id, dataset_yaml, db_path, force =
   invisible(rel_path)
 }
 
+#' Build (if not already cached, or if stale) and record this dataset's
+#' sample AND feature metadata as stability_artifacts artifacts -- same
+#' login-node-only rationale as cache_dataset_matrix() (reads raw
+#' sample_metadata_path/feature_metadata_path, which typically only
+#' resolve on whatever machine holds the raw HuggingFace data, NOT
+#' wherever create_ingest_slurm_bundle.R actually gets invoked -- commonly
+#' the cluster login node).
+#'
+#' Needed because R/create_ingest_slurm_bundle.R's --stage enrichment
+#' builds `sample_metadata_maps` (driver_grid) and `ensembl_maps`
+#' (fgsea_grid/gprofiler_grid/projectr_*_grid) by reading each dataset's
+#' metadata -- confirmed directly (2026-09-18): without a cached artifact
+#' to fall back on, EVERY dataset's map silently came back NULL when
+#' staged from the cluster, since file.exists() on the raw config paths is
+#' always FALSE there (identical failure mode to the original
+#' cache_dataset_matrix() bug this mirrors). Both `build_ensembl_map()`/
+#' `build_symbol_map()` (R/lib/ingest/symbol_mapping.R) accept an optional
+#' pre-loaded `fm` to read the CACHED artifact instead of re-reading raw
+#' feature_metadata_path -- see their docs.
+#'
+#' Gracefully keeps whatever's already cached (rather than erroring) if
+#' the raw path is unreachable from wherever this happens to run --
+#' running this on the machine that actually HAS the raw data (same as
+#' cache_dataset_matrix()) is what actually populates the cache in the
+#' first place; running it elsewhere afterward is a safe no-op.
+cache_dataset_metadata <- function(con, dataset_id, dataset_yaml, db_path, force = FALSE) {
+  ds <- dataset_yaml$dataset
+  art_dir <- artifacts_dir(db_path, dataset_id)
+  dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
+
+  cache_one <- function(kind, raw_path, col) {
+    if (is.null(raw_path)) return(invisible(NULL))
+    existing <- DBI::dbGetQuery(con, sprintf("SELECT %s FROM datasets WHERE dataset_id = ?", col),
+                                 params = list(dataset_id))[[col]]
+    cached_path <- if (length(existing) == 1 && !is.na(existing)) resolve_artifact(existing, db_path) else NA_character_
+    have_cache <- !is.na(cached_path) && file.exists(cached_path)
+    raw_reachable_here <- file.exists(raw_path)
+    stale <- have_cache && !force && raw_reachable_here && file.mtime(raw_path) > file.mtime(cached_path)
+
+    if (!force && !stale && have_cache) return(invisible(existing))
+    if (!raw_reachable_here) {
+      if (have_cache) return(invisible(existing))   # keep existing cache -- can't rebuild from here
+      message("  no ", kind, "_metadata cached for ", dataset_id, " and raw path unreachable here (",
+              raw_path, ") -- skipping")
+      return(invisible(NULL))
+    }
+
+    message("  ", if (force) "force-recaching" else if (stale) "recaching (stale)" else "caching",
+            " ", kind, " metadata for ", dataset_id, "...")
+    df <- as.data.frame(arrow::read_parquet(raw_path))
+    fname <- paste0(kind, "_metadata.rds")
+    saveRDS(df, file.path(art_dir, fname))
+    rel_path <- file.path("stability_artifacts", dataset_id, fname)
+    ensure_dataset(con, dataset_id, ds$description %||% NA_character_)
+    DBI::dbExecute(con, sprintf("UPDATE datasets SET %s = ? WHERE dataset_id = ?", col),
+                   params = list(rel_path, dataset_id))
+    invisible(rel_path)
+  }
+
+  cache_one("sample", ds$sample_metadata_path, "sample_metadata_file")
+  cache_one("feature", ds$feature_metadata_path, "feature_metadata_file")
+  invisible(NULL)
+}
+
 #' Ingest ONE dataset's job-family results (+ redundancy) into `con`.
 #' Identical behavior to what R/ingest_results.R's body used to do inline;
 #' extracted so R/ingest_jobs/ingest_core_job.R can loop this over many

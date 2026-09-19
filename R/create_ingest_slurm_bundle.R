@@ -151,7 +151,14 @@ if (opt$stage == "core") {
   con_cache <- open_stability_db(opt$db)
   for (i in seq_len(nrow(targets))) {
     force_i <- isTRUE(recache_matrix) || (is.character(recache_matrix) && targets$dataset_id[i] %in% recache_matrix)
-    cache_dataset_matrix(con_cache, targets$dataset_id[i], yaml::read_yaml(targets$config_path[i]), opt$db, force = force_i)
+    ds_yaml_i <- yaml::read_yaml(targets$config_path[i])
+    cache_dataset_matrix(con_cache, targets$dataset_id[i], ds_yaml_i, opt$db, force = force_i)
+    # Also cache sample/feature metadata -- see cache_dataset_metadata()'s
+    # header. Harmless/no-op here if this script itself is run somewhere
+    # that can't reach the raw paths (e.g. the cluster) and a cache from
+    # R/cache_dataset_matrices.R already exists; genuinely populates it
+    # when run wherever the raw HuggingFace data resolves.
+    cache_dataset_metadata(con_cache, targets$dataset_id[i], ds_yaml_i, opt$db, force = force_i)
   }
   DBI::dbDisconnect(con_cache)
 
@@ -215,22 +222,25 @@ if (opt$stage == "core") {
   # looping every dataset sequentially against the SAME db (one writer),
   # same rationale as ingest_core itself.
   #
-  # sample_metadata_maps/sample_id_cols: read HERE, on the login node
-  # (using targets$config_path -- already case-corrected/absolutized above,
-  # unlike re-deriving "config/<id>_config.yml" from scratch), because
-  # dataset_metadata_sources' registered sample_metadata_path is a LIVE
-  # pointer to wherever the raw data actually lives (see run_pattern_driver()'s
-  # doc in R/lib/ingest/driver.R for why it's deliberately never cached
-  # there) -- typically unreachable from inside driver_grid's container.
-  # A dataset missing a config match, sample_metadata_path, or a readable
-  # file just gets NULL here; run_driver_job() skips it rather than ever
-  # falling back to that broken raw-path read itself.
+  # sample_metadata_maps: read from the CACHED artifact (datasets.
+  # sample_metadata_file, populated by cache_dataset_metadata() -- see its
+  # header) rather than the raw sample_metadata_path in each dataset's
+  # config, which is typically an absolute path on whatever machine holds
+  # the raw HuggingFace data -- NOT wherever this script actually gets
+  # invoked (commonly the cluster login node, confirmed directly
+  # (2026-09-18) to leave every dataset's map silently NULL otherwise,
+  # since file.exists() on that raw path is always FALSE there). A
+  # dataset with no cached artifact yet (e.g. never run through
+  # cache_dataset_matrices.R/--stage core's own caching loop since this
+  # fix landed) just gets NULL here; run_driver_job() skips it rather
+  # than ever falling back to a raw-path read itself.
   sample_metadata_maps <- setNames(lapply(all_dataset_ids, function(ds) {
-    cp <- targets$config_path[match(ds, targets$dataset_id)]
-    if (is.na(cp) || !file.exists(cp)) return(NULL)
-    sp <- yaml::read_yaml(cp)$dataset$sample_metadata_path
-    if (is.null(sp) || !file.exists(sp)) return(NULL)
-    read_sample_metadata(sp)
+    f <- DBI::dbGetQuery(con, "SELECT sample_metadata_file FROM datasets WHERE dataset_id = ?",
+                          params = list(ds))$sample_metadata_file
+    if (length(f) != 1 || is.na(f)) return(NULL)
+    path <- resolve_artifact(f, opt$db)
+    if (!file.exists(path)) return(NULL)
+    readRDS(path)
   }), all_dataset_ids)
   sample_id_cols <- setNames(lapply(all_dataset_ids, function(ds) {
     cp <- targets$config_path[match(ds, targets$dataset_id)]
@@ -257,11 +267,23 @@ if (opt$stage == "core") {
   # than re-deriving "config/<id>_config.yml" from scratch, which is
   # case-SENSITIVE and silently misses every dataset whose config
   # filename lowercases a day/timepoint suffix (GSE110487_T2 ->
-  # GSE110487_t2_config.yml, etc.).
+  # GSE110487_t2_config.yml, etc.). Config files themselves ARE reachable
+  # here (checked into git) -- only feature_metadata_path (the raw parquet
+  # build_ensembl_map() would otherwise read directly) commonly isn't, so
+  # the CACHED artifact (datasets.feature_metadata_file, populated by
+  # cache_dataset_metadata()) is read and passed in via `fm` instead. Same
+  # rationale/confirmed failure mode as sample_metadata_maps above.
   ensembl_maps <- setNames(lapply(all_dataset_ids, function(ds) {
     cp <- targets$config_path[match(ds, targets$dataset_id)]
     if (is.na(cp) || !file.exists(cp)) return(NULL)
-    build_ensembl_map(yaml::read_yaml(cp))
+    f <- DBI::dbGetQuery(con, "SELECT feature_metadata_file FROM datasets WHERE dataset_id = ?",
+                          params = list(ds))$feature_metadata_file
+    fm <- NULL
+    if (length(f) == 1 && !is.na(f)) {
+      path <- resolve_artifact(f, opt$db)
+      if (file.exists(path)) fm <- readRDS(path)
+    }
+    build_ensembl_map(yaml::read_yaml(cp), fm = fm)
   }), all_dataset_ids)
 
   target_matrix_path_for <- function(dataset_id) {

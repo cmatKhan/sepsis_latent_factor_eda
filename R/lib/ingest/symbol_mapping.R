@@ -39,10 +39,23 @@ strip_ensembl_version <- function(x) sub("\\.[0-9]+$", "", x)
 #' choice, not obviously "correct" for every use case (an alternative
 #' would be expanding one probe's value across every listed gene instead
 #' of picking one) -- revisit if that matters for your analysis.
-build_ensembl_map <- function(dataset_yaml) {
+#'
+#' @param fm optional pre-loaded feature_metadata data.frame (e.g. from
+#'   the cached artifact -- see R/lib/ingest/ingest_dataset.R::
+#'   cache_dataset_metadata()) -- skips reading feature_metadata_path
+#'   entirely when supplied. Needed wherever this is called from a
+#'   machine that doesn't have raw access to that path (e.g.
+#'   R/create_ingest_slurm_bundle.R, typically invoked on the cluster
+#'   login node, not wherever the raw HuggingFace data lives) --
+#'   confirmed directly (2026-09-18) that omitting this on such a machine
+#'   silently returns NULL for every dataset (file.exists() on the raw
+#'   path is always FALSE there), not an error.
+build_ensembl_map <- function(dataset_yaml, fm = NULL) {
   ds <- dataset_yaml$dataset
-  if (is.null(ds$feature_metadata_path) || !file.exists(ds$feature_metadata_path)) return(NULL)
-  fm <- arrow::read_parquet(ds$feature_metadata_path)
+  if (is.null(fm)) {
+    if (is.null(ds$feature_metadata_path) || !file.exists(ds$feature_metadata_path)) return(NULL)
+    fm <- arrow::read_parquet(ds$feature_metadata_path)
+  }
   ens_col <- ds$ensembl_col %||% "ensembl"
   if (!(ens_col %in% names(fm))) return(NULL)
   id_col <- ds$feature_id_col %||% "feature_id"
@@ -74,10 +87,15 @@ build_ensembl_map <- function(dataset_yaml) {
 #' Returns NULL (no map at all) if there's genuinely no usable symbol
 #' column -- callers should then leave the matrix's own rownames as-is
 #' for display.
-build_symbol_map <- function(dataset_yaml) {
+#'
+#' @param fm optional pre-loaded feature_metadata data.frame -- see
+#'   build_ensembl_map()'s matching doc for why this exists.
+build_symbol_map <- function(dataset_yaml, fm = NULL) {
   ds <- dataset_yaml$dataset
-  if (is.null(ds$feature_metadata_path) || !file.exists(ds$feature_metadata_path)) return(NULL)
-  fm <- arrow::read_parquet(ds$feature_metadata_path)
+  if (is.null(fm)) {
+    if (is.null(ds$feature_metadata_path) || !file.exists(ds$feature_metadata_path)) return(NULL)
+    fm <- arrow::read_parquet(ds$feature_metadata_path)
+  }
   sym_col <- if (!is.null(ds$symbol_col) && ds$symbol_col %in% names(fm)) {
     ds$symbol_col
   } else {

@@ -67,10 +67,17 @@ recache_matrix <- parse_flag_list(opt$`recache-matrix`)
 con <- open_stability_db(opt$db)
 for (i in seq_len(nrow(targets))) {
   force_i <- isTRUE(recache_matrix) || (is.character(recache_matrix) && targets$dataset_id[i] %in% recache_matrix)
-  cache_dataset_matrix(con, targets$dataset_id[i], yaml::read_yaml(targets$config_path[i]), opt$db, force = force_i)
+  ds_yaml <- yaml::read_yaml(targets$config_path[i])
+  cache_dataset_matrix(con, targets$dataset_id[i], ds_yaml, opt$db, force = force_i)
+  # Also cache sample/feature metadata -- needed so
+  # create_ingest_slurm_bundle.R's --stage enrichment can build
+  # sample_metadata_maps/ensembl_maps from the cache instead of these same
+  # raw (laptop-only) paths once it's run on the cluster -- see
+  # cache_dataset_metadata()'s header for the full story.
+  cache_dataset_metadata(con, targets$dataset_id[i], ds_yaml, opt$db, force = force_i)
 }
 DBI::dbDisconnect(con)
 
-message("\nDone -- cached matrices for ", nrow(targets), " dataset(s) into ",
+message("\nDone -- cached matrices + sample/feature metadata for ", nrow(targets), " dataset(s) into ",
         dirname(opt$db), "/stability_artifacts/ and recorded in ", opt$db)
 message("Sync both of those to the cluster before running create_ingest_slurm_bundle.R there.")
