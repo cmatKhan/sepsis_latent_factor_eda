@@ -34,9 +34,9 @@ ingest_core:
   rscript_path: "Rscript"
 
 fgsea:
-  mem: 8G
+  mem: 80G
   cpus_per_task: 8         # BiocParallel workers within each array task
-  time: "02:00:00"
+  time: "24:00:00"
   container: "/ref/mblab/containers/chasem/sepsis_timecourse_factors_eda.sif"
   libPaths: "/ref/mblab/software/chasem/R/4.6.0"
   sh_template: "config/rslurm_templates/submit_sh.txt"
@@ -59,7 +59,7 @@ fgsea:
 projectr:
   mem: 4G
   cpus_per_task: 1
-  time: "01:00:00"
+  time: "24:00:00"
   # Built from this repo's Dockerfile (rocker/tidyverse base + projectR
   # installed from the local fork via BuildKit's --build-context -- see
   # Dockerfile's own header) -- superset image covering every ingest job

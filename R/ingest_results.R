@@ -8,7 +8,8 @@
 #
 # Usage (CLI):
 #   Rscript R/ingest_results.R <dataset_config.yml> <results_dir> <db_path> \
-#     [--overwrite [jobname,...]] [--recache-matrix] [--recompute-redundancy]
+#     [--overwrite [jobname,...]] [--recache-matrix] [--recompute-redundancy] \
+#     [--recompute-sft]
 #
 # `--overwrite` (bare = every family present in <results_dir>; or
 # `--overwrite jobname1,jobname2` = just those) deletes and re-ingests --
@@ -17,6 +18,10 @@
 # even if not auto-detected as stale (see cache_dataset_matrix()).
 # `--recompute-redundancy` forces the pattern-redundancy diagnostic to
 # recompute even if not auto-detected as stale (see run_all_redundancy()).
+# `--recompute-sft` forces WGCNA::pickSoftThreshold()'s scale-free-topology
+# fit diagnostic to recompute even if the dataset's configured power grid
+# hasn't changed (see compute_wgcna_sft()). No-ops for datasets with no
+# methods.network.wgcna config.
 #
 # (`--run-enrichment`/R/lib/ingest/enrichment.R's run_all_enrichment(), a
 # legacy whole-DB gprofiler2 ORA/GSEA pass, was retired 2026-09-19 alongside
@@ -72,6 +77,9 @@ if (!exists("ingest_recache_matrix")) {
 if (!exists("ingest_recompute_redundancy")) {
   ingest_recompute_redundancy <- "--recompute-redundancy" %in% args
 }
+if (!exists("ingest_recompute_sft")) {
+  ingest_recompute_sft <- "--recompute-sft" %in% args
+}
 
 con <- open_stability_db(ingest_db_path)
 # cache_dataset_matrix() sources preprocessing_script by path and reads
@@ -81,6 +89,12 @@ con <- open_stability_db(ingest_db_path)
 dataset_yaml_for_cache <- yaml::read_yaml(ingest_config_path)
 cache_dataset_matrix(con, dataset_yaml_for_cache$dataset$id, dataset_yaml_for_cache,
                       ingest_db_path, force = ingest_recache_matrix)
+# compute_wgcna_sft() only needs the matrix just cached above + WGCNA
+# (installed here, same non-containerized-session constraint as
+# cache_dataset_matrix() -- see that function's header) -- never callable
+# from inside ingest_core's container.
+compute_wgcna_sft(con, dataset_yaml_for_cache$dataset$id, dataset_yaml_for_cache,
+                   ingest_db_path, force = ingest_recompute_sft)
 ingest_one_dataset(con, ingest_config_path, ingest_results_dir, ingest_db_path,
                     overwrite = ingest_overwrite, recompute_redundancy = ingest_recompute_redundancy)
 
@@ -90,7 +104,7 @@ counts <- DBI::dbGetQuery(con, "
   SELECT 'fits' AS tbl, COUNT(*) AS n FROM fits WHERE dataset_id = :d
   UNION ALL SELECT 'factors', COUNT(*) FROM factors f JOIN fits ft ON ft.fit_id = f.fit_id WHERE ft.dataset_id = :d
   UNION ALL SELECT 'factor_pairs', COUNT(*) FROM factor_pairs fp JOIN fits ft ON ft.fit_id = fp.fit_a WHERE ft.dataset_id = :d
-  UNION ALL SELECT 'maskcv_results', COUNT(*) FROM maskcv_results WHERE dataset_id = :d
+  UNION ALL SELECT 'wgcna_sft', COUNT(*) FROM wgcna_sft WHERE dataset_id = :d
   UNION ALL SELECT 'wgcna_fit_pairs', COUNT(*) FROM wgcna_fit_pairs wp JOIN fits ft ON ft.fit_id = wp.fit_a WHERE ft.dataset_id = :d
   UNION ALL SELECT 'fit_redundancy', COUNT(*) FROM fit_redundancy fr JOIN fits ft ON ft.fit_id = fr.fit_id WHERE ft.dataset_id = :d",
   params = list(d = dataset_id))

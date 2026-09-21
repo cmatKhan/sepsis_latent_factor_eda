@@ -81,11 +81,15 @@ readable_factor_theme <- function(base_size = 15) {
 FACTORIZATION_METHODS <- c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker")   # loadings/scores-capable
 STABILITY_METHODS     <- c("nmf", "cogaps", "ica")   # multi-seed -- stability views apply
 # PCA/sPCA are both deterministic given (rank [+ sPCA's para]) -- no
-# cross-seed stability question -- but DO have a real masking-CV family,
-# so Level 1 gets a masking-CV rank-selection plot + "Explore rank"
-# dropdown (see level1_ui()) rather than either the seed-stability tabs
+# cross-seed stability question -- so Level 1 gets a scree-style
+# reconstruction-error-by-rank plot + "Explore rank" dropdown (see
+# level1_ui()) rather than either the seed-stability tabs
 # (STABILITY_METHODS) or the flat fit list (DIRECT_FIT_METHODS below).
-MASKCV_RANK_METHODS   <- c("pca", "spca")
+# (A masking-CV rank-selection family was planned here at one point but
+# never actually wired into the config-driven method-registry system --
+# no `_maskcv` job has ever been generated for any dataset -- so it was
+# removed entirely rather than left as a permanently-empty panel.)
+SCREE_RANK_METHODS    <- c("pca", "spca")
 DIRECT_FIT_METHODS    <- c("cp", "tucker")           # no rank-selection UI at all -- Level 1 lists fits directly (like WGCNA's power list)
 TENSOR_METHODS        <- c("cp", "tucker")           # third (time-mode) loading matrix; "scores" is SUBJECT-mode, not sample-mode
 # Methods eligible as a side in the standalone "Compare methods" screen's
@@ -97,6 +101,32 @@ LOADINGS_METHODS      <- c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker"
 # excludes CP/Tucker (subject-mode scores, not sample-mode; see the
 # TENSOR_METHODS note throughout this file).
 SAMPLE_SCORE_METHODS  <- c("pca", "nmf", "cogaps", "spca", "ica", "wgcna")
+# Methods with signed loadings -- both loading directions are meaningful
+# to query separately (NMF/CoGAPS weights are non-negative, so only "pos"
+# applies there). Must match R/ingest_jobs/fgsea_job.R's own `dirs <-
+# if (method %in% c(...)) c("pos","neg") else "pos"` exactly, or ingested
+# neg-direction ORA/GSEA rows for ica/spca are computed but unreachable
+# from the app.
+NEG_DIRECTION_METHODS <- c("pca", "ica", "spca")
+# Methods R/create_ingest_slurm_bundle.R's --stage enrichment actually
+# stages fgsea_grid for (representative fits only) -- never cp/tucker
+# (no representative_fit_ids() concept the same way) or wgcna (its own
+# separate ORA-only path, see run_wgcna_enrich_all_modules_core()).
+FGSEA_GRID_METHODS    <- c("pca", "nmf", "cogaps", "spca", "ica")
+
+#' Enrichment query-type radio choices for one method -- "fgsea" (batch
+#' Hallmark GSEA) and "gsea"/"ora" (live gprofiler2 OR batch local
+#' fora()/fgsea(), same query_type/cache -- see enrichment_cached()) apply
+#' to every method fgsea_grid covers; "cogaps_fora" (batch CoGAPS
+#' marker-gene ORA) only exists for CoGAPS fits (see
+#' R/ingest_jobs/fgsea_job.R). The two "batch"-only types have no live
+#' g:Profiler equivalent -- see enrich_result()'s qtype branch below.
+enrich_query_choices <- function(method) {
+  if (!(method %in% FGSEA_GRID_METHODS)) return(c("ORA" = "ora", "GSEA" = "gsea"))
+  choices <- c("ORA" = "ora", "GSEA" = "gsea", "Hallmark GSEA (batch)" = "fgsea")
+  if (identical(method, "cogaps")) choices <- c(choices, "CoGAPS marker ORA (batch)" = "cogaps_fora")
+  choices
+}
 
 ## ---- ui ------------------------------------------------------------------
 
@@ -497,13 +527,14 @@ server <- function(input, output, session) {
       cnt <- ov$counts[ov$counts$method == m, ]
       headline <- if (m == "wgcna") {
         if (nrow(ov$wgcna) > 0 && !is.na(ov$wgcna$ari)) sprintf("mean ARI %.2f", ov$wgcna$ari) else "--"
-      } else if (m %in% MASKCV_RANK_METHODS) {
+      } else if (m %in% SCREE_RANK_METHODS) {
         # PCA/sPCA are deterministic given their rank (+ sPCA's para) --
-        # no cross-seed stability metric applies; masking-CV rank
-        # selection is what's still meaningful
-        mc <- maskcv_curve(con, ds(), m)
+        # no cross-seed stability metric applies; lowest in-sample
+        # reconstruction error (the scree-plot minimum) is what's still
+        # meaningful
+        mc <- scree_mse_by_rank(con, ds(), m)
         if (nrow(mc) > 0 && any(!is.na(mc$mse))) {
-          sprintf("best rank (masking-CV): %d", mc$rank[which.min(mc$mse)])
+          sprintf("best rank (lowest MSE): %d", mc$rank[which.min(mc$mse)])
         } else "--"
       } else if (m %in% DIRECT_FIT_METHODS) {
         # CP/Tucker: deterministic, no masking-CV family at all --
@@ -592,17 +623,19 @@ server <- function(input, output, session) {
 
   level1_ui <- function() {
     m <- nav$method
-    if (m %in% MASKCV_RANK_METHODS) {
+    if (m %in% SCREE_RANK_METHODS) {
       # PCA/sPCA are deterministic given their rank (+ sPCA's para) -- no
-      # seed-stability or cross-rank views apply; masking-CV rank
-      # selection still does, plus a plain rank-select (no click-through
-      # plot left to drill via)
+      # seed-stability or cross-rank views apply; a scree-style
+      # reconstruction-error-by-rank plot (in-sample MSE, already
+      # populated per rank in `fits` for every pca/spca fit) stands in for
+      # rank selection, plus a plain rank-select (no click-through plot
+      # left to drill via)
       navset_card_tab(
-        nav_panel("Rank selection (masking-CV)",
-          plotOutput("l1_maskcv", height = "420px"),
+        nav_panel("Reconstruction error by rank",
+          plotOutput("l1_scree", height = "420px"),
           layout_columns(col_widths = c(6, 6),
-            selectInput("l1_maskcv_rank", "Explore rank:", choices = NULL),
-            actionButton("l1_maskcv_go", "Explore this rank", class = "btn-primary btn-sm",
+            selectInput("l1_scree_rank", "Explore rank:", choices = NULL),
+            actionButton("l1_scree_go", "Explore this rank", class = "btn-primary btn-sm",
                          style = "margin-top: 24px;")))
       )
     } else if (m %in% STABILITY_METHODS) {
@@ -610,13 +643,6 @@ server <- function(input, output, session) {
         nav_panel("Seed stability vs rank",
           p("Distribution of matched factor similarity across all seed pairs, per rank. Click a rank to drill in."),
           plotOutput("l1_stability", click = "l1_stability_click", height = "420px")),
-        nav_panel("Rank selection (masking-CV)",
-          plotOutput("l1_maskcv", height = "420px"),
-          p("Defaults to the masking-CV minimum below -- change the selector to explore any other rank instead."),
-          layout_columns(col_widths = c(6, 6),
-            selectInput("l1_stability_rank", "Explore rank:", choices = NULL),
-            actionButton("l1_stability_go", "Explore this rank", class = "btn-primary btn-sm",
-                         style = "margin-top: 24px;"))),
         nav_panel("Reconstruction error across seeds",
           p("Mean reconstruction error (in-sample, seed-sweep family) +/- 1 SD per rank -- a stability question distinct from masking-CV's single fixed mask draw."),
           plotOutput("l1_seed_mse", height = "420px")),
@@ -649,7 +675,10 @@ server <- function(input, output, session) {
           selectInput("l1_wgcna_power", "Drill into power:", choices = NULL),
           actionButton("l1_wgcna_go", "Explore power", class = "btn-primary btn-sm")),
         nav_panel("Modules vs power",
-          plotOutput("l1_wgcna_counts", height = "420px"))
+          plotOutput("l1_wgcna_counts", height = "420px")),
+        nav_panel("Scale-free topology fit",
+          p("WGCNA::pickSoftThreshold()'s diagnostic: does each candidate power actually produce a scale-free network? A signed R² near/above the usual 0.9 reference line (dashed) is the conventional justification for a power choice -- this pipeline otherwise only judges power by the module-stability views in the other two tabs."),
+          plotOutput("l1_wgcna_sft", height = "420px"))
       )
     }
   }
@@ -681,20 +710,23 @@ server <- function(input, output, session) {
     }
   })
 
-  output$l1_maskcv <- renderPlot({
-    d <- maskcv_curve(con, ds(), nav$method); req(nrow(d) > 0)
+  output$l1_scree <- renderPlot({
+    d <- scree_mse_by_rank(con, ds(), nav$method); req(nrow(d) > 0)
     if (all(is.na(d$alpha))) {
       ggplot(d, aes(rank, mse)) + geom_line() + geom_point(size = 2) +
-        labs(title = paste(toupper(nav$method), "masking-CV: held-out reconstruction MSE"),
-             x = "rank", y = "held-out MSE") +
+        labs(title = paste(toupper(nav$method), "-- in-sample reconstruction error by rank (scree plot)"),
+             x = "rank", y = "reconstruction MSE") +
         theme_minimal(base_size = 14)
     } else {
+      # sPCA: `alpha` stores the `para` sparsity penalty crossed with rank
+      # (see fits_at_rank()'s doc) -- facet/color by it since multiple
+      # values exist per rank.
       ggplot(d, aes(factor(rank), factor(alpha), fill = mse)) +
         geom_tile() +
         geom_text(aes(label = ifelse(is.na(mse), "failed", sprintf("%.2f", mse))), size = 3) +
         scale_fill_viridis_c(na.value = "grey70", direction = -1) +
-        labs(title = paste(toupper(nav$method), "masking-CV: held-out MSE by rank x alpha"),
-             x = "rank", y = "alpha") +
+        labs(title = paste(toupper(nav$method), "-- in-sample reconstruction MSE by rank x alpha (para)"),
+             x = "rank", y = "alpha (para)") +
         theme_minimal(base_size = 14)
     }
   })
@@ -726,37 +758,23 @@ server <- function(input, output, session) {
 
   # PCA/sPCA's reduced Level 1: plain rank-select + button (no
   # click-through plot left to drill via, since the stability tabs are
-  # gone). Defaults to the masking-CV minimum -- always overridable via
-  # the same control.
+  # gone). Defaults to the lowest-reconstruction-MSE rank -- always
+  # overridable via the same control.
   observe({
-    req(nav$level == 1, nav$method %in% MASKCV_RANK_METHODS)
-    mc <- maskcv_curve(con, ds(), nav$method)
+    req(nav$level == 1, nav$method %in% SCREE_RANK_METHODS)
+    mc <- scree_mse_by_rank(con, ds(), nav$method)
     ranks <- sort(unique(mc$rank))
     if (length(ranks) == 0) ranks <- distinct_ranks(con, ds(), nav$method)
-    best <- maskcv_best_rank(con, ds(), nav$method)
-    updateSelectInput(session, "l1_maskcv_rank", choices = ranks,
+    best <- scree_best_rank(con, ds(), nav$method)
+    updateSelectInput(session, "l1_scree_rank", choices = ranks,
                        selected = if (!is.na(best) && best %in% ranks) best else ranks[1])
   })
-  observeEvent(input$l1_maskcv_go, {
-    req(input$l1_maskcv_rank)
-    nav$rank <- as.integer(input$l1_maskcv_rank)
+  observeEvent(input$l1_scree_go, {
+    req(input$l1_scree_rank)
+    nav$rank <- as.integer(input$l1_scree_rank)
     nav$level <- 2
   })
 
-  # NMF/CoGAPS: same idea, offered alongside the existing click-to-drill
-  # on the seed-stability plot -- defaults to the masking-CV minimum.
-  observe({
-    req(nav$level == 1, nav$method %in% STABILITY_METHODS)
-    ranks <- distinct_ranks(con, ds(), nav$method)
-    best <- maskcv_best_rank(con, ds(), nav$method)
-    updateSelectInput(session, "l1_stability_rank", choices = ranks,
-                       selected = if (!is.na(best) && best %in% ranks) best else ranks[1])
-  })
-  observeEvent(input$l1_stability_go, {
-    req(input$l1_stability_rank)
-    nav$rank <- as.integer(input$l1_stability_rank)
-    nav$level <- 2
-  })
   output$l1_seed_mse <- renderPlot({
     d <- seed_sweep_mse_by_rank(con, ds(), nav$method); req(nrow(d) > 0)
     ggplot(d, aes(rank, mean_mse)) +
@@ -816,6 +834,27 @@ server <- function(input, output, session) {
            title = "Module count vs power") +
       theme_minimal(base_size = 14)
   })
+  output$l1_wgcna_sft <- renderPlot({
+    d <- wgcna_sft_fit(con, ds())
+    validate(need(nrow(d) > 0,
+      "No scale-free-topology fit computed yet for this dataset -- re-ingest (R/ingest_results.R or R/cache_dataset_matrices.R) to populate it."))
+    # signed R^2 (WGCNA's own diagnostic-plot convention): flips sign so
+    # the curve rises toward 1 for a well-behaved (positive-connectivity-
+    # correlated) fit instead of just reporting the unsigned R^2.
+    d$signed_r_sq <- -sign(d$slope) * d$sft_r_sq
+    long <- rbind(
+      data.frame(power = d$power, panel = "Scale independence (signed R²)", value = d$signed_r_sq),
+      data.frame(power = d$power, panel = "Mean connectivity", value = d$mean_k)
+    )
+    ggplot(long, aes(power, value)) +
+      geom_line() + geom_point(size = 2) +
+      geom_hline(data = data.frame(panel = "Scale independence (signed R²)", yint = 0.9),
+                 aes(yintercept = yint), color = "red", linetype = "dashed") +
+      facet_wrap(~panel, scales = "free_y") +
+      labs(x = "soft-threshold power", y = NULL,
+           title = "WGCNA::pickSoftThreshold() diagnostic (dashed line: conventional R² = 0.9 reference)") +
+      theme_minimal(base_size = 14)
+  })
   observe({
     req(nav$level == 1, nav$method == "wgcna")
     f <- wgcna_fits(con, ds())
@@ -861,8 +900,8 @@ server <- function(input, output, session) {
       # reconciliation, see R/README.md); factor correlation still works
       # generically regardless of what the rows represent. (sPCA used to
       # live in this branch too -- it moved to the rank-selector
-      # FACTORIZATION_METHODS branch below once it got a masking_cv
-      # family; see MASKCV_RANK_METHODS.)
+      # FACTORIZATION_METHODS branch below once it got its own scree-style
+      # rank view; see SCREE_RANK_METHODS.)
       panels <- list(
         nav_panel("Factor correlation (this fit)",
           p("How redundant are this fit's own components with each other -- computed on the SUBJECT-mode scores (not sample-mode; sample-metadata association isn't available yet for tensor methods)."),
@@ -939,7 +978,7 @@ server <- function(input, output, session) {
                          style = "margin-top: 24px;")),
           DTOutput("l2_enrich_overview_table"),
           layout_columns(col_widths = c(4, 4, 4),
-            radioButtons("l2_enrich_overview_type", "Query shown:", c("ORA" = "ora", "GSEA" = "gsea"), inline = TRUE),
+            radioButtons("l2_enrich_overview_type", "Query shown:", enrich_query_choices(m), inline = TRUE),
             radioButtons("l2_enrich_overview_dir", "Direction shown:", c("positive" = "pos", "negative" = "neg"), inline = TRUE),
             actionButton("l2_enrich_overview_view", "View selected factor at Level 3", class = "btn-outline-primary btn-sm",
                          style = "margin-top: 24px;")))
@@ -1281,7 +1320,7 @@ server <- function(input, output, session) {
     dataset_id <- get_fit(con, fit_id)$dataset_id[1]
     L_ens <- remap_to_ensembl(L, ensembl_map_for_dataset(con, dataset_id))
     n_factors <- ncol(L_ens)
-    dirs <- if (method == "pca") c("pos", "neg") else "pos"
+    dirs <- if (method %in% NEG_DIRECTION_METHODS) c("pos", "neg") else "pos"
     combos <- expand.grid(factor_index = seq_len(n_factors), qtype = c("ora", "gsea"),
                            direction = dirs, stringsAsFactors = FALSE)
     n <- nrow(combos)
@@ -1550,7 +1589,7 @@ server <- function(input, output, session) {
         plotOutput("l3_match_scatter", height = "380px")),
       nav_panel("Enrichment",
         layout_columns(col_widths = c(3, 3, 3, 3),
-          radioButtons("l3_enrich_type", "Query:", c("ORA" = "ora", "GSEA" = "gsea"), inline = TRUE),
+          radioButtons("l3_enrich_type", "Query:", enrich_query_choices(nav$method), inline = TRUE),
           radioButtons("l3_enrich_dir", "Loadings:", c("positive" = "pos", "negative" = "neg"), inline = TRUE),
           sliderInput("l3_enrich_topn", "Top genes (ORA):", min = 50, max = 300, value = 100, step = 50),
           actionButton("l3_enrich_go", "Run / load enrichment", class = "btn-primary",
@@ -1558,7 +1597,7 @@ server <- function(input, output, session) {
         navset_card_tab(
           nav_panel("Table", DTOutput("l3_enrichment")),
           nav_panel("Mirror bar",
-            p("Both the positive- and negative-loading direction must be run/loaded (via the button above) for a full mirror; PCA only -- NMF/CoGAPS weights are non-negative, so this shows the single positive side."),
+            p("Both the positive- and negative-loading direction must be run/loaded (via the button above) for a full mirror; PCA/ICA/sPCA only -- NMF/CoGAPS weights are non-negative, so this shows the single positive side."),
             plotOutput("l3_enrich_mirror", height = "560px")),
           nav_panel("Dot plot", plotOutput("l3_enrich_dot", height = "500px"))
         ))
@@ -1647,7 +1686,17 @@ server <- function(input, output, session) {
   enrich_result <- eventReactive(input$l3_enrich_go, {
     req(nav$fit, nav$factor_index)
     qtype <- input$l3_enrich_type
-    direction <- if (nav$method == "pca") input$l3_enrich_dir else "pos"
+    direction <- if (nav$method %in% NEG_DIRECTION_METHODS) input$l3_enrich_dir else "pos"
+
+    if (qtype %in% c("fgsea", "cogaps_fora")) {
+      # Batch-only query types (R/ingest_jobs/fgsea_job.R /
+      # R/ingest_enrichment_results.R) -- no live g:Profiler equivalent, so
+      # just read whatever's already been ingested; never fall through to
+      # the gprofiler2::gost() call below for these.
+      factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
+      return(enrichment_cached(con, factor_id, qtype, direction))
+    }
+
     # also recognizes this factor's loadings as identical to an already-
     # queried PCA factor from a different rank -- see find_or_reuse_enrichment()
     cached <- find_or_reuse_enrichment(nav$fit, nav$factor_index, qtype, direction)
@@ -1691,7 +1740,12 @@ server <- function(input, output, session) {
   output$l3_enrichment <- renderDT({
     d <- enrich_result()
     if (is.null(d) || nrow(d) == 0) {
-      return(datatable(data.frame(note = "No significant terms (or query returned nothing)"), rownames = FALSE))
+      note <- if (isTRUE(input$l3_enrich_type %in% c("fgsea", "cogaps_fora"))) {
+        "Not yet computed for this factor (batch-only query -- run R/ingest_enrichment_results.R for this dataset's fgsea_grid results), or no significant terms were found."
+      } else {
+        "No significant terms (or query returned nothing)"
+      }
+      return(datatable(data.frame(note = note), rownames = FALSE))
     }
     datatable(d, rownames = FALSE, options = list(pageLength = 15)) |>
       formatSignif("p_value", 3)
@@ -1707,7 +1761,7 @@ server <- function(input, output, session) {
     req(nav$fit, nav$factor_index)
     factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
     qtype <- input$l3_enrich_type
-    dirs <- if (nav$method == "pca") c("pos", "neg") else "pos"
+    dirs <- if (nav$method %in% NEG_DIRECTION_METHODS) c("pos", "neg") else "pos"
     res <- lapply(dirs, function(dir) {
       cc <- enrichment_cached(con, factor_id, qtype, dir)
       if (is.null(cc) || nrow(cc) == 0) return(NULL)

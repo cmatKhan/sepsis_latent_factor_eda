@@ -22,7 +22,14 @@
 #
 # Usage:
 #   Rscript R/cache_dataset_matrices.R --datasets datasets.txt \
-#     [--db results/stability.sqlite] [--recache-matrix [id1,id2,...]]
+#     [--db results/stability.sqlite] [--recache-matrix [id1,id2,...]] \
+#     [--recompute-sft [id1,id2,...]]
+#
+# `--recompute-sft` forces WGCNA::pickSoftThreshold()'s scale-free-topology
+# fit diagnostic to recompute for the listed dataset ids (bare = all) even
+# if the configured power grid hasn't changed since the last computation --
+# see R/lib/ingest/ingest_dataset.R::compute_wgcna_sft(). No-ops for
+# datasets with no methods.network.wgcna config.
 #
 # `datasets.txt` is the SAME file used by --stage core: one results-dir
 # path per line (e.g. "/scratch/.../GSE110487_T2_results") -- only its
@@ -39,7 +46,9 @@ option_list <- list(
   make_option("--datasets", type = "character", help = "file listing results dir paths, one per line"),
   make_option("--db", type = "character", default = "results/stability.sqlite"),
   make_option("--recache-matrix", type = "character", default = NULL,
-              help = "bare flag = recache every dataset's matrix; or a comma-separated list of dataset ids")
+              help = "bare flag = recache every dataset's matrix; or a comma-separated list of dataset ids"),
+  make_option("--recompute-sft", type = "character", default = NULL,
+              help = "bare flag = recompute SFT fit for every dataset; or a comma-separated list of dataset ids")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
@@ -63,10 +72,12 @@ parse_flag_list <- function(x) {
   if (nzchar(x)) strsplit(x, ",")[[1]] else TRUE
 }
 recache_matrix <- parse_flag_list(opt$`recache-matrix`)
+recompute_sft <- parse_flag_list(opt$`recompute-sft`)
 
 con <- open_stability_db(opt$db)
 for (i in seq_len(nrow(targets))) {
   force_i <- isTRUE(recache_matrix) || (is.character(recache_matrix) && targets$dataset_id[i] %in% recache_matrix)
+  sft_force_i <- isTRUE(recompute_sft) || (is.character(recompute_sft) && targets$dataset_id[i] %in% recompute_sft)
   ds_yaml <- yaml::read_yaml(targets$config_path[i])
   cache_dataset_matrix(con, targets$dataset_id[i], ds_yaml, opt$db, force = force_i)
   # Also cache sample/feature metadata -- needed so
@@ -75,9 +86,13 @@ for (i in seq_len(nrow(targets))) {
   # raw (laptop-only) paths once it's run on the cluster -- see
   # cache_dataset_metadata()'s header for the full story.
   cache_dataset_metadata(con, targets$dataset_id[i], ds_yaml, opt$db, force = force_i)
+  # compute_wgcna_sft() only needs the matrix just (re)cached above +
+  # WGCNA (available here, wherever this script runs) -- see that
+  # function's header.
+  compute_wgcna_sft(con, targets$dataset_id[i], ds_yaml, opt$db, force = sft_force_i)
 }
 DBI::dbDisconnect(con)
 
-message("\nDone -- cached matrices + sample/feature metadata for ", nrow(targets), " dataset(s) into ",
-        dirname(opt$db), "/stability_artifacts/ and recorded in ", opt$db)
+message("\nDone -- cached matrices + sample/feature metadata + WGCNA scale-free-topology fits for ",
+        nrow(targets), " dataset(s) into ", dirname(opt$db), "/stability_artifacts/ and recorded in ", opt$db)
 message("Sync both of those to the cluster before running create_ingest_slurm_bundle.R there.")

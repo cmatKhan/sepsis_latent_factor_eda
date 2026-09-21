@@ -443,7 +443,7 @@ Semantics (fully decoupled from the app; DB path is always a parameter):
   `cp_grid/`, drop it into the results dir when its jobs finish, re-run
   the same command -- only `cp_grid` gets added.
 - **Overwrite is explicit and whole-family**: `--overwrite` (bare = every
-  family present in the results dir) or `--overwrite nmf_grid,nmf_maskcv`
+  family present in the results dir) or `--overwrite nmf_grid,cogaps_grid`
   deletes and re-ingests those families -- plain replacement, never
   row-level updating.
 - Requires the matching `slurm_bundles/<dataset_id>/_rslurm_<jobname>/params.RDS`
@@ -468,8 +468,12 @@ What gets computed at ingest (see `R/lib/ingest/`):
   this framework doesn't yet have a "same 3-tuple of ranks" concept.
 - **WGCNA**: gene -> module tables; ARI between module assignments for
   every power pair (`mclust::adjustedRandIndex`); module x module Jaccard
-  with Hungarian matching.
-- **Masking-CV** families: rank (x alpha) -> held-out MSE table.
+  with Hungarian matching; `WGCNA::pickSoftThreshold()`'s scale-free-
+  topology fit per configured power (`wgcna_sft` table, one row per
+  dataset x power -- see `compute_wgcna_sft()`, called from
+  `R/ingest_results.R`/`R/cache_dataset_matrices.R` right after the
+  dataset's matrix is cached, never from inside `ingest_core`'s container,
+  which has no WGCNA installed).
 - **CP/Tucker only**: a third, time-mode loading matrix (rows = timepoint
   levels) saved alongside the usual feature-loadings/sample-scores
   artifacts -- `fits.time_loadings_file`. Their "scores" artifact is
@@ -527,16 +531,18 @@ metric toggle switches cosine/Pearson/Spearman everywhere):
 | Level | Scope | Shows | Drill via |
 |---|---|---|---|
 | 0 | dataset | per-method headline stability, fit/failure counts, ingested-family inventory | Explore button |
-| 1 | method | seed-stability-vs-rank boxplots; masking-CV curves; cross-rank persistence heatmap + factor-tracking trajectories (WGCNA: ARI heatmap, module counts) | click a rank / select a power |
+| 1 | method | seed-stability-vs-rank boxplots; scree-style (in-sample MSE) reconstruction-error-by-rank curves for PCA/sPCA; cross-rank persistence heatmap + factor-tracking trajectories (WGCNA: ARI heatmap, module counts, `pickSoftThreshold()` scale-free-topology fit) | click a rank / select a power |
 | 2 | rank/parameter | seed x seed matched-similarity matrix; per-factor stability strips; factor x factor heatmaps with Hungarian matches outlined (WGCNA: module sizes + cross-power Jaccard) | click a factor |
-| 3 | factor | top-loading genes; this factor's Hungarian match in every other fit (all seeds + ranks) with loading scatter; gprofiler2 ORA/GSEA enrichment, run on demand and cached into the DB | -- |
+| 3 | factor | top-loading genes; this factor's Hungarian match in every other fit (all seeds + ranks) with loading scatter; ORA/GSEA enrichment -- either queried live against gprofiler2 on demand, or read from `fgsea_grid`'s batch local `fora()`/`fgsea()` pass (`R/ingest_jobs/fgsea_job.R` + `R/ingest_enrichment_results.R`) if already ingested; both write into the same `enrichment_cache` schema | -- |
 
-PCA has no cross-seed stability (deterministic, one fit per rank) -- its
-Level 1 is reduced to just the masking-CV rank-selection curve, and it
-serves instead as a comparison BASELINE from NMF/CoGAPS's (and WGCNA's)
-Level 2 "Compare to PCA" tab: held-out MSE side by side, signed factor/
+PCA and sPCA have no cross-seed stability (deterministic, one fit per
+rank/para) -- their Level 1 is reduced to just the scree-style
+reconstruction-error-by-rank plot. A separate, standalone "Compare
+methods" screen (top-right toggle, not part of the per-method drill-down
+above) lets you pick any two (method, fit) sides -- e.g. a PCA fit as a
+baseline against an NMF/CoGAPS/WGCNA fit -- and shows signed factor/
 eigengene similarity (Hungarian-matched by absolute value, so a strong
-match to a PCA component's negative side shows up correctly), and a
+match to a PCA component's negative side shows up correctly) and a
 side-by-side listing of whatever enrichment has already been queried for
 each side.
 

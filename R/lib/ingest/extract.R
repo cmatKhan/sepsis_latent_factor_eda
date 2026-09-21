@@ -5,20 +5,15 @@
 # Result shapes (verified against real GSE110487 outputs, or against
 # synthetic data for the newer methods -- see each R/methods/*.R):
 #   pca_grid:      list(rank, seed=NA, mse, rotation, scores)
-#   pca_maskcv:    list(rank, mse)
 #   nmf_grid:      list(rank, seed, mse, W, H)
-#   nmf_maskcv:    list(rank, mse)
 #   cogaps_grid:   list(rank, seed, mse, result = CogapsResult | NULL)
-#   cogaps_maskcv: list(rank, alpha, mse)   -- mse NA when the fit failed
 #   wgcna_grid:    list(power, net = blockwiseModules output, genes,
 #                       samples)   -- `samples` added alongside the
 #                       feature/sample-metadata drill-down work; results
 #                       ingested before that change lack it, so eigengene
 #                       scores are simply NULL for those fits (see below)
 #   spca_grid:     list(rank, mse, loadings, scores)
-#   spca_maskcv:   list(rank, mse)
 #   ica_grid:      list(rank, seed, mse, loadings, scores)
-#   ica_maskcv:    list(rank, mse)
 #   cp_grid:       list(rank, mse, converged, loadings, scores, time_loadings)
 #   tucker_grid:   list(rank_genes, rank_subjects, rank_time, mse, converged,
 #                       loadings, scores, time_loadings, core)
@@ -52,14 +47,8 @@
 PARAM_GRID_METHODS <- c("wgcna", "spca", "cp", "tucker")
 
 classify_jobname <- function(jobname) {
-  method <- sub("_(grid|maskcv)$", "", jobname)
-  family <- if (grepl("_maskcv$", jobname)) {
-    "maskcv"
-  } else if (method %in% PARAM_GRID_METHODS) {
-    "param_grid"
-  } else {
-    "seed_sweep"
-  }
+  method <- sub("_grid$", "", jobname)
+  family <- if (method %in% PARAM_GRID_METHODS) "param_grid" else "seed_sweep"
   list(method = method, family = family)
 }
 
@@ -124,12 +113,6 @@ extract_result <- function(jobname, result, params_row) {
   }
 
   if (!is.null(result$mse)) fit$mse <- as.numeric(result$mse)
-
-  if (family == "maskcv") {
-    if (is.na(fit$mse)) fit$status <- "failed"
-    return(list(fit = fit, method = method, family = family,
-                loadings = NULL, modules = NULL, scores = NULL, time_loadings = NULL))
-  }
 
   if (method == "pca") {
     loadings <- result$rotation

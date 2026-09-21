@@ -7,22 +7,12 @@
 # Requires prepare_loadings()/pair_similarities() from
 # R/lib/ingest/similarity.R to be sourced first (see app.R).
 
-#' Best (min) masking-CV MSE at a given rank, across whatever grid that
-#' method's masking-CV sweeps (CoGAPS: min over alpha; PCA/NMF: the single
-#' value). NA if no masking-CV fit exists at that rank.
-maskcv_best_mse <- function(con, dataset_id, method, rank) {
-  d <- maskcv_curve(con, dataset_id, method)
-  d <- d[!is.na(d$rank) & d$rank == rank, ]
-  if (nrow(d) == 0 || all(is.na(d$mse))) return(NA_real_)
-  min(d$mse, na.rm = TRUE)
-}
-
-#' The rank with the lowest masking-CV MSE (best over the alpha grid too,
-#' for CoGAPS) -- used as the DEFAULT (always overridable) rank selection
-#' for PCA/NMF/CoGAPS, the only methods with a masking_cv family today.
-#' NA if no masking-CV data exists for this method.
-maskcv_best_rank <- function(con, dataset_id, method) {
-  d <- maskcv_curve(con, dataset_id, method)
+#' The rank with the lowest in-sample reconstruction MSE (best over the
+#' alpha/para grid too, for sPCA) -- used as the DEFAULT (always
+#' overridable) rank selection for PCA/sPCA (SCREE_RANK_METHODS, app.R).
+#' NA if no ok fit exists for this method.
+scree_best_rank <- function(con, dataset_id, method) {
+  d <- scree_mse_by_rank(con, dataset_id, method)
   d <- d[!is.na(d$rank) & !is.na(d$mse), ]
   if (nrow(d) == 0) return(NA_integer_)
   best_by_rank <- aggregate(mse ~ rank, data = d, FUN = min)

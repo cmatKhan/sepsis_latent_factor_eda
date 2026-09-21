@@ -130,6 +130,68 @@ cache_dataset_metadata <- function(con, dataset_id, dataset_yaml, db_path, force
   invisible(NULL)
 }
 
+#' Compute (or refresh) WGCNA::pickSoftThreshold()'s scale-free-topology fit
+#' diagnostic for one dataset, over its configured power grid
+#' (methods.network.wgcna.power) -- the tutorial-standard justification for a
+#' soft-threshold power choice, which this pipeline otherwise skips (it
+#' instead sweeps the full grid and judges power only by cross-power module
+#' stability -- see R/methods/wgcna.R's header). A dataset-level diagnostic,
+#' not tied to any one wgcna_grid fit: it needs only the cached input matrix
+#' (cache_dataset_matrix() must have already run) + the power grid, so it's
+#' stored in its own `wgcna_sft` table keyed by dataset_id, not by fit_id.
+#'
+#' Must be called from an ordinary (non-containerized) R session with the
+#' WGCNA package installed -- same constraint as cache_dataset_matrix(),
+#' and for the same reason blockwiseModules() itself needs its own
+#' container (methods.network.wgcna.container): the `ingest_core` slurm
+#' container does not have WGCNA installed. Call this from
+#' R/ingest_results.R or R/cache_dataset_matrices.R (both already
+#' non-containerized, matrix-caching entry points), never from
+#' run_ingest_core_job().
+#'
+#' Silently no-ops if `methods.network.wgcna` isn't configured for this
+#' dataset, or if the matrix hasn't been cached yet. `force = TRUE` always
+#' recomputes; otherwise recomputes only if the configured power grid has
+#' changed since the last computation (replace-on-recompute, like
+#' matrix_file -- not additive).
+compute_wgcna_sft <- function(con, dataset_id, dataset_yaml, db_path, force = FALSE) {
+  wg <- dataset_yaml$methods$network$wgcna
+  if (is.null(wg) || is.null(wg$power)) return(invisible(NULL))
+
+  existing <- DBI::dbGetQuery(con, "SELECT power FROM wgcna_sft WHERE dataset_id = ?",
+                               params = list(dataset_id))$power
+  if (!force && length(existing) > 0 && setequal(existing, as.integer(wg$power))) {
+    return(invisible(NULL))   # already computed for this exact grid
+  }
+
+  mat_row <- DBI::dbGetQuery(con, "SELECT matrix_file FROM datasets WHERE dataset_id = ?",
+                              params = list(dataset_id))
+  if (nrow(mat_row) == 0 || is.na(mat_row$matrix_file)) {
+    message("  no cached matrix for ", dataset_id, " -- run cache_dataset_matrix() first -- skipping SFT fit")
+    return(invisible(NULL))
+  }
+  mat <- as.matrix(readRDS(resolve_artifact(mat_row$matrix_file, db_path)))
+
+  message("  computing scale-free-topology fit for ", dataset_id, " (", length(wg$power), " powers)...")
+  datExpr <- t(mat)
+  gsg <- WGCNA::goodSamplesGenes(datExpr, verbose = 0)   # mirrors run_wgcna_param_job()'s own filter
+  if (!gsg$allOK) datExpr <- datExpr[gsg$goodSamples, gsg$goodGenes, drop = FALSE]
+
+  sft <- WGCNA::pickSoftThreshold(datExpr, powerVector = as.integer(wg$power),
+                                   networkType = wg$networkType %||% "signed", verbose = 0)
+  fi <- sft$fitIndices
+
+  DBI::dbExecute(con, "DELETE FROM wgcna_sft WHERE dataset_id = ?", params = list(dataset_id))
+  DBI::dbWriteTable(con, "wgcna_sft", data.frame(
+    dataset_id = dataset_id, power = fi$Power,
+    sft_r_sq = fi$SFT.R.sq, slope = fi$slope, truncated_r_sq = fi$truncated.R.sq,
+    mean_k = fi$mean.k., median_k = fi$median.k., max_k = fi$max.k.,
+    computed_at = as.character(Sys.time()),
+    stringsAsFactors = FALSE
+  ), append = TRUE)
+  invisible(NULL)
+}
+
 #' Ingest ONE dataset's job-family results (+ redundancy) into `con`.
 #' Identical behavior to what R/ingest_results.R's body used to do inline;
 #' extracted so R/ingest_jobs/ingest_core_job.R can loop this over many
@@ -337,18 +399,12 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
         n_missing <- n_missing + 1L
       }
 
-      if (ext$family == "maskcv") {
-        DBI::dbExecute(con,
-          "INSERT INTO maskcv_results (dataset_id, method, jobname, rank, alpha, mse)
-           VALUES (?, ?, ?, ?, ?, ?)",
-          params = list(dataset_id, ext$method, jobname, fit$rank, fit$alpha, fit$mse))
-      }
     }
     record_ingest(con, dataset_id, jobname, cls$family, cls$method,
                   n_results = length(result_files), results_dir = normalizePath(results_dir))
     DBI::dbExecute(con, "COMMIT")
 
-    if (cls$family != "maskcv" && length(new_ids) > 0) {
+    if (length(new_ids) > 0) {
       key <- cls$method
       new_fits_by_method[[key]] <- c(new_fits_by_method[[key]], new_ids)
     }

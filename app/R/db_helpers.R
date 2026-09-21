@@ -59,11 +59,11 @@ seed_stability_by_rank <- function(con, dataset_id, method) {
 }
 
 #' Mean +/- SD of the seed-sweep family's own (in-sample) reconstruction
-#' `mse` per rank -- distinct from maskcv_curve() (a single fixed mask
-#' draw, no seed dimension at all). Answers "how much does reconstruction
-#' quality vary across random seeds at this rank?", a genuine stability
-#' question masking-CV doesn't address (it answers "which rank
-#' generalizes best," a model-selection question).
+#' `mse` per rank -- distinct from scree_mse_by_rank() (PCA/sPCA have no
+#' seed dimension at all, so there's nothing to average over). Answers
+#' "how much does reconstruction quality vary across random seeds at this
+#' rank?", a genuine stability question a plain scree plot doesn't
+#' address.
 seed_sweep_mse_by_rank <- function(con, dataset_id, method) {
   d <- DBI::dbGetQuery(con,
     "SELECT rank, mse FROM fits
@@ -75,10 +75,17 @@ seed_sweep_mse_by_rank <- function(con, dataset_id, method) {
   out[order(out$rank), ]
 }
 
-maskcv_curve <- function(con, dataset_id, method) {
+#' Scree-plot data for PCA/sPCA (SCREE_RANK_METHODS): each is deterministic
+#' given its rank (+ sPCA's para), one `fits` row per rank already carrying
+#' an in-sample reconstruction `mse` -- no separate masking-CV family
+#' needed (that one was never actually wired up -- see app.R's
+#' SCREE_RANK_METHODS comment). `alpha` is sPCA's `para` sparsity penalty,
+#' crossed with rank; always NA for PCA.
+scree_mse_by_rank <- function(con, dataset_id, method) {
   DBI::dbGetQuery(con,
-    "SELECT rank, alpha, mse FROM maskcv_results
-     WHERE dataset_id = ? AND method = ? ORDER BY rank, alpha",
+    "SELECT rank, alpha, mse FROM fits
+     WHERE dataset_id = ? AND method = ? AND status = 'ok' AND mse IS NOT NULL
+     ORDER BY rank, alpha",
     params = list(dataset_id, method))
 }
 
@@ -122,18 +129,17 @@ distinct_ranks <- function(con, dataset_id, method) {
     params = list(dataset_id, method))$rank
 }
 
-#' `family != 'maskcv'` (rather than hardcoding 'seed_sweep') so this
-#' works for both seed_sweep methods (pca/nmf/cogaps/ica) and sPCA, whose
-#' job family is 'param_grid' (see PARAM_GRID_METHODS in
-#' R/lib/ingest/extract.R) since K/para have no genuine seed dimension --
-#' `alpha` is included because sPCA's `para` value is stored there (see
-#' extract_result()'s spca branch) and is what the app labels sPCA's
-#' per-rank fit selector with (there being no real `seed` to show).
+#' No `family` filter needed here (every ok fit at this rank is a real
+#' fit -- both seed_sweep methods (pca/nmf/cogaps/ica) and sPCA's
+#' 'param_grid' family (see PARAM_GRID_METHODS in R/lib/ingest/extract.R)
+#' since K/para have no genuine seed dimension) -- `alpha` is included
+#' because sPCA's `para` value is stored there (see extract_result()'s
+#' spca branch) and is what the app labels sPCA's per-rank fit selector
+#' with (there being no real `seed` to show).
 fits_at_rank <- function(con, dataset_id, method, rank) {
   DBI::dbGetQuery(con,
     "SELECT fit_id, seed, alpha, mse, n_factors, loadings_file FROM fits
      WHERE dataset_id = ? AND method = ? AND rank = ? AND status = 'ok'
-       AND family != 'maskcv'
      ORDER BY seed, alpha",
     params = list(dataset_id, method, rank))
 }
@@ -409,6 +415,17 @@ wgcna_module_jaccard <- function(con, fit_a, fit_b) {
      SELECT module_b AS module_a, module_a AS module_b, jaccard, matched
      FROM wgcna_module_pairs WHERE fit_a = ?2 AND fit_b = ?1",
     params = list(fit_a, fit_b))
+}
+
+#' WGCNA::pickSoftThreshold()'s scale-free-topology fit per power -- see
+#' R/lib/ingest/ingest_dataset.R::compute_wgcna_sft(). Dataset-level (not
+#' per-fit), populated as a side effect of the normal ingest matrix-caching
+#' step; NULL/empty for datasets ingested before this was added, until
+#' re-ingested.
+wgcna_sft_fit <- function(con, dataset_id) {
+  DBI::dbGetQuery(con,
+    "SELECT power, sft_r_sq, slope, mean_k FROM wgcna_sft WHERE dataset_id = ? ORDER BY power",
+    params = list(dataset_id))
 }
 
 wgcna_module_best_matches <- function(con, dataset_id, fit_id) {

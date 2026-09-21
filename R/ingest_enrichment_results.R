@@ -75,7 +75,17 @@ if (dir.exists(fam_dir)) {
         factor_id <- get_factor_id(fit_id, g$factor_index)
         if (length(factor_id) != 1) next
         rows <- if (!is.null(res) && nrow(res) > 0) {
-          sig <- res[res$padj < 0.05, ]
+          # `res$padj < 0.05` is NA (not FALSE) for any pathway fgsea
+          # couldn't compute a p-value for -- fgsea's own "unbalanced
+          # (positive and negative) gene-level statistic values" case,
+          # confirmed to occur on real data. Indexing a data.frame with a
+          # logical vector containing NA does NOT drop those rows, it
+          # inserts a literal all-NA row per NA (every column, including
+          # factor_id below via recycling into that row), which crashes the
+          # INSERT on enrichment_cache's NOT NULL factor_id -- must exclude
+          # NA explicitly. Same fix applies to every `sig <- res[...]` line
+          # below (fora/local_gsea/local_ora).
+          sig <- res[!is.na(res$padj) & res$padj < 0.05, ]
           if (nrow(sig) == 0) NULL else data.frame(
             factor_id = factor_id, query_type = "fgsea",
             direction = ifelse(sig$NES > 0, "pos", "neg"),
@@ -96,7 +106,7 @@ if (dir.exists(fam_dir)) {
           factor_id <- get_factor_id(fit_id, as.integer(fac_idx_chr))
           if (length(factor_id) != 1) next
           rows <- if (!is.null(res) && nrow(res) > 0) {
-            sig <- res[res$padj < 0.05, ]
+            sig <- res[!is.na(res$padj) & res$padj < 0.05, ]   # see x$gsea's comment above
             if (nrow(sig) == 0) NULL else data.frame(
               factor_id = factor_id, query_type = "cogaps_fora", direction = "pos",
               source = "MSigDB", term_id = sig$pathway, term_name = sig$pathway,
@@ -117,7 +127,7 @@ if (dir.exists(fam_dir)) {
         factor_id <- get_factor_id(fit_id, g$factor_index)
         if (length(factor_id) != 1) next
         rows <- if (!is.null(res) && nrow(res) > 0) {
-          sig <- res[res$padj < 0.05, ]
+          sig <- res[!is.na(res$padj) & res$padj < 0.05, ]   # see x$gsea's comment above
           if (nrow(sig) == 0) NULL else data.frame(
             factor_id = factor_id, query_type = "gsea",
             direction = ifelse(sig$NES > 0, "pos", "neg"),
@@ -141,13 +151,19 @@ if (dir.exists(fam_dir)) {
         factor_id <- get_factor_id(fit_id, o$factor_index)
         if (length(factor_id) != 1) next
         rows <- if (!is.null(res) && nrow(res) > 0) {
-          sig <- res[res$padj < 0.05, ]
+          sig <- res[!is.na(res$padj) & res$padj < 0.05, ]   # see x$gsea's comment above
           if (nrow(sig) == 0) NULL else data.frame(
             factor_id = factor_id, query_type = "ora", direction = o$direction,
             source = o$source, term_id = sig$pathway, term_name = sig$pathway,
             p_value = sig$padj, intersection_size = sig$overlap, term_size = sig$size,
             query_size = o$n_genes %||% NA_integer_,
-            genes = vapply(sig$leadingEdge, paste, character(1), collapse = ","),
+            # fora() output has no `leadingEdge` column (that's GSEA-only,
+            # used above for x$gsea/x$local_gsea) -- fora()'s genes column
+            # is `overlapGenes`. Using leadingEdge here crashed the whole
+            # script on the first ORA hit (character(0) from an always-NULL
+            # column against every other length-N column), silently
+            # aborting every ingest attempt before most rows were written.
+            genes = vapply(sig$overlapGenes, paste, character(1), collapse = ","),
             queried_at = as.character(Sys.time())
           )
         } else NULL

@@ -4,3 +4,4 @@ slurm_bundles/
 logs/
 data/
 datasets.txt
+.env

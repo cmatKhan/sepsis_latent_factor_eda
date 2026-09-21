@@ -55,9 +55,9 @@ slurm:
     sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
     rscript_path: "Rscript"
   cogaps:
-    mem: 30G   # bumped from 10G -- cogaps_maskcv jobs were failing (worker crashes/timeouts); plenty of headroom available, no need to be stingy
+    mem: 30G   # bumped from 10G -- cogaps_grid jobs were failing (worker crashes/timeouts) at the previous limit; plenty of headroom available, no need to be stingy
     cpus_per_task: 10   # also passed through as CoGAPS's distributed nSets / CoGAPS()'s nThreads
-    time: "12:00:00"   # bumped from 06:00:00 -- cogaps_maskcv jobs were hitting the wall-time limit at higher ranks/alphas (nIterations = 15000 across all 10 distributed workers), which cascaded into secondary "wrong args for environment subassignment" crashes during worker teardown
+    time: "12:00:00"   # bumped from 06:00:00 -- cogaps_grid jobs were hitting the wall-time limit at higher ranks/alphas (nIterations = 15000 across all 10 distributed workers), which cascaded into secondary "wrong args for environment subassignment" crashes during worker teardown
     container: "/ref/mblab/containers/chasem/cogaps_sha-3b3e002.sif"
     libPaths: "/ref/mblab/software/chasem/R/4.6.0"
     sh_template: "config/rslurm_templates/submit_sh.txt"

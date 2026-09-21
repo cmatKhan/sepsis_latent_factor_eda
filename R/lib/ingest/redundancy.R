@@ -71,12 +71,20 @@ redundancy_summary <- function(loadings, markers) {
 
 #' One method + dataset -> the fit_id(s) ingest should treat as
 #' "representative" for every non-seed-sweep analysis (redundancy,
-#' enrichment, projectr). PCA collapses to a SINGLE fit (its max
-#' configured rank -- components are nested/prefix-consistent, see
-#' R/methods/pca.R, so every smaller rank's PCs are already contained in
-#' it). nmf/cogaps/ica pick the lowest-mse seed AT EACH rank (mirrors the
-#' app's existing "best seed per rank" convention). spca/cp/tucker/wgcna
-#' have no seed dimension -- every ok fit is already "representative".
+#' enrichment, projectr, pattern-drivers). PCA collapses to a SINGLE fit
+#' (its max configured rank -- components are nested/prefix-consistent,
+#' see R/methods/pca.R, so every smaller rank's PCs are already contained
+#' in it). nmf/cogaps/ica pick the lowest-mse seed AT EACH rank (mirrors
+#' the app's existing "best seed per rank" convention). sPCA has no seed
+#' dimension either, but DOES have its own second swept parameter (`para`,
+#' stored in fits.alpha -- see extract_result()'s spca branch) crossed
+#' with rank/K -- picks the lowest-mse para AT EACH K, same idea as
+#' nmf/cogaps/ica, rather than treating every (K, para) combination as
+#' independently representative (confirmed directly: doing the latter made
+#' sPCA 81.6% of all fgsea_grid rows across this project's real DB --
+#' 1824 of 2236 -- and was the dominant contributor to fgsea_grid tasks
+#' timing out/OOMing on the cluster). cp/tucker/wgcna have no second
+#' parameter to collapse -- every ok fit is already "representative".
 representative_fit_ids <- function(con, dataset_id, method) {
   if (method == "pca") {
     r <- DBI::dbGetQuery(con,
@@ -93,6 +101,17 @@ representative_fit_ids <- function(con, dataset_id, method) {
         "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = ? AND rank = ?
          AND family = 'seed_sweep' AND status = 'ok' ORDER BY mse ASC LIMIT 1",
         params = list(dataset_id, method, rk))$fit_id
+    }, integer(1)))
+  }
+  if (method == "spca") {
+    ks <- DBI::dbGetQuery(con,
+      "SELECT DISTINCT rank FROM fits WHERE dataset_id = ? AND method = 'spca' AND status = 'ok'",
+      params = list(dataset_id))$rank
+    return(vapply(ks, function(k) {
+      DBI::dbGetQuery(con,
+        "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = 'spca' AND rank = ?
+         AND status = 'ok' ORDER BY mse ASC LIMIT 1",
+        params = list(dataset_id, k))$fit_id
     }, integer(1)))
   }
   DBI::dbGetQuery(con, "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = ? AND status = 'ok'",

@@ -153,6 +153,21 @@ run_all_pattern_drivers <- function(con, db_path, dataset_id, mode = "CI", max_f
   }, names(sm))
   if (length(cat_cols) == 0) return(invisible(NULL))
 
+  # One transaction for this whole dataset's combinatorial pass, not one
+  # auto-committed transaction per run_pattern_driver() INSERT -- confirmed
+  # (via a real driver_grid seff report: 54.7% CPU efficiency, low memory,
+  # on a job that still completed) this pass was I/O-wait bound from
+  # exactly that per-row fsync cost, matching ingest_one_dataset()'s own
+  # already-transactional per-family loop (R/lib/ingest/ingest_dataset.R)
+  # which this pass never got. on.exit()'s rollback-if-not-committed guard
+  # ensures an error partway through (however unlikely -- run_pattern_driver()
+  # already tryCatch()es its own real work) never leaves an open
+  # transaction for the NEXT dataset's writes to land inside; the error
+  # still propagates to run_driver_job()'s per-dataset tryCatch as before.
+  DBI::dbExecute(con, "BEGIN")
+  committed <- FALSE
+  on.exit(if (!committed) DBI::dbExecute(con, "ROLLBACK"), add = TRUE)
+
   for (method in c("pca", "nmf", "cogaps", "spca", "ica")) {
     for (fit_id in representative_fit_ids(con, dataset_id, method)) {
       n_factors <- DBI::dbGetQuery(con, "SELECT n_factors FROM fits WHERE fit_id = ?", params = list(fit_id))$n_factors
@@ -169,5 +184,8 @@ run_all_pattern_drivers <- function(con, db_path, dataset_id, mode = "CI", max_f
       }
     }
   }
+
+  DBI::dbExecute(con, "COMMIT")
+  committed <- TRUE
   invisible(NULL)
 }

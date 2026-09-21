@@ -104,15 +104,29 @@ option_list <- list(
   make_option("--recompute-redundancy", type = "character", default = NULL,
               help = "bare flag = recompute for every dataset; or a comma-separated list of dataset ids"),
   make_option("--max-array-size", type = "integer", default = 1000,
-              help = paste("max rows any ONE array task processes sequentially for fgsea_grid/",
-                            "projectr_within_grid/projectr_cross_grid -- a single small array job is",
+              help = paste("max rows any ONE array task processes sequentially for",
+                            "projectr_within_grid/projectr_cross_grid (fgsea_grid has its own",
+                            "--fgsea-max-array-size below -- its per-row cost is minutes of real",
+                            "GSEA/ORA compute, nothing like projectr's cheap per-row cost, so the two",
+                            "were decoupled) -- a single small array job is",
                             "still submitted regardless of total grid size (see submit_job_family()'s",
                             "doc): a 3000-row grid with the default 1000 becomes one 3-task array job,",
                             "not 3000 array tasks (or the old behavior of three separate 1000-task",
                             "array-job submissions). Lower this to shorten each task's runtime, or",
                             "raise it to shrink the array further; it is NOT a Slurm MaxArraySize limit",
                             "to stay under (the resulting array is always small) -- pass 1 to fall back",
-                            "to one row per array task, closest to the pre-2026-09-19 default."))
+                            "to one row per array task, closest to the pre-2026-09-19 default.")),
+  make_option("--fgsea-max-array-size", type = "integer", default = 20,
+              help = paste("same idea as --max-array-size, but for fgsea_grid specifically. Default",
+                            "20 (not 1000): confirmed against this project's real DB that fgsea_grid's",
+                            "row count (~1000-2200, dominated by sPCA before representative_fit_ids()",
+                            "collapsed it per-K) at the old shared default of 1000 became just 2-3",
+                            "array tasks, each sequentially grinding through 700+ fits inside one",
+                            "long-running R process -- the actual cause of observed fgsea_grid",
+                            "timeouts/OOMs, not underprovisioned mem/time. A single 20-factor PCA fit",
+                            "measured ~350s locally; 20 such fits/task stays comfortably inside the",
+                            "slurm config's time/mem budget with real margin, and any one task failing",
+                            "only costs ~20 fits of re-work instead of 700+."))
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 slurm_cfg <- yaml::read_yaml(opt$`slurm-config`)
@@ -384,7 +398,7 @@ if (opt$stage == "core") {
       jobname = "fgsea_grid", global_objects = c(FRAMEWORK_FUNCS, "pathways", "pathways_by_source"),
       pkgs = c("CoGAPS", "BiocParallel", "arrow"),
       cluster_cfg = slurm_cfg$fgsea, output_dir = opt$output,
-      extra_binds = PROJECT_ROOT, max_array_size = opt$`max-array-size`
+      extra_binds = PROJECT_ROOT, max_array_size = opt$`fgsea-max-array-size`
     )
   } else {
     message("No representative fits found for fgsea -- skipping")
