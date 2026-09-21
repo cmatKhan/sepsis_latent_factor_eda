@@ -101,7 +101,12 @@ update_factor_stability <- function(con, dataset_id, method) {
   agg <- aggregate(cbind(cosine, pearson, spearman) ~ fit_id + factor_index,
                    data = long, FUN = median)
 
-  DBI::dbExecute(con, "BEGIN")
+  # No BEGIN/COMMIT here -- this function's one call site
+  # (R/lib/ingest/ingest_dataset.R) always runs it inside that caller's
+  # own wrapping transaction (added alongside compute_wgcna_pairs()/
+  # run_all_redundancy() for the same real-seff-backed reason -- see that
+  # call site's comment); a nested BEGIN here would error ("cannot start
+  # a transaction within a transaction").
   for (r in seq_len(nrow(agg))) {
     DBI::dbExecute(con,
       "UPDATE factors SET stability_cosine = ?, stability_pearson = ?, stability_spearman = ?
@@ -109,7 +114,6 @@ update_factor_stability <- function(con, dataset_id, method) {
       params = list(agg$cosine[r], agg$pearson[r], agg$spearman[r],
                     agg$fit_id[r], agg$factor_index[r]))
   }
-  DBI::dbExecute(con, "COMMIT")
   invisible(NULL)
 }
 

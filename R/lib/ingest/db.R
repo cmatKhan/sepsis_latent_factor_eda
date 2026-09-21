@@ -236,6 +236,15 @@ ensure_schema <- function(con) {
   # sample-level scores/eigengenes artifact, same relative-to-DB-dir
   # convention as loadings_file (see resolve_artifact())
   ensure_column(con, "fits", "scores_file", "TEXT")
+  # is_main_pathway: fgsea::collapsePathways()'s redundancy-reduction result
+  # for 'fgsea'/'gsea' rows (computed at ingest time in
+  # R/ingest_jobs/fgsea_job.R, where the full fgsea() result object +
+  # pathways + ranks are still in scope -- not cheaply reconstructable
+  # later from just this table's summary columns). NULL for 'ora'/
+  # 'cogaps_fora' rows -- collapsePathways() is GSEA-specific, the concept
+  # doesn't apply to ORA hits. 1 = one of collapsePathways()'s "main"
+  # (non-redundant) pathways, 0 = redundant with a more significant one.
+  ensure_column(con, "enrichment_cache", "is_main_pathway", "INTEGER")
   # query_size lets the app compute gene-ratio dot plots (intersection_size /
   # query_size) without re-querying g:Profiler
   ensure_column(con, "enrichment_cache", "query_size", "INTEGER")
@@ -283,6 +292,129 @@ ensure_schema <- function(con) {
   # dataset.symbol_col (display-only override) -- see
   # register_metadata_source()'s doc above.
   ensure_column(con, "dataset_metadata_sources", "symbol_col", "TEXT")
+
+  # Method-specific "diagnostics" artifacts -- one small named-list RDS per
+  # method, bundling exactly the outputs each underlying package's own
+  # documentation (vignette, or ?help when no vignette exists -- confirmed
+  # absent for elasticnet/fastICA/NNLM/rTensor/WGCNA) treats as standard/
+  # important but which extract_result() used to narrow away down to just
+  # loadings/scores/a single mse. Same relative-to-DB-dir artifact
+  # convention as loadings_file (see resolve_artifact()). Each column is
+  # NULL for every OTHER method (e.g. a pca fit's cp_diag_file is always
+  # NULL) -- one column per method rather than one generic blob column,
+  # consistent with this table's existing loadings_file/scores_file/
+  # time_loadings_file/raw_result_file convention.
+  #   cogaps_diag_file: list(loading_sd, factor_sd) -- CogapsResult's
+  #     @loadingStdDev/@factorStdDev posterior-SD matrices (CoGAPS's
+  #     headline uncertainty-quantification feature vs. plain NMF).
+  #   pca_diag_file: list(sdev, center) -- prcomp()'s FULL sdev vector
+  #     (all components, not just the retained `rank` -- rank. truncation
+  #     never shortens sdev) and center vector; sdev is what
+  #     summary.prcomp()/screeplot() need for real per-component/
+  #     cumulative proportion-of-variance-explained.
+  #   spca_diag_file: list(pev, var_all, n_nonzero) -- elasticnet::spca()'s
+  #     own adjusted percent-explained-variance curve + total predictor
+  #     variance (NOT recomputable by naively projecting mat onto
+  #     loadings, since sPCA's components aren't orthogonal -- see
+  #     R/methods/spca.R's own comment) plus realized per-component
+  #     nonzero-loadings count (the standard sparsity-achieved diagnostic
+  #     for sparse=\"penalty\" mode, whose realized sparsity isn't a
+  #     deterministic function of the `para` penalty alone).
+  #   ica_diag_file: list(W, K, prewhiten_sdev) -- fastICA()'s unmixing
+  #     matrix W (orthonormality is a cheap real convergence check the
+  #     package itself doesn't self-report) and whitening matrix K, plus
+  #     the prewhitening prcomp() step's sdev (how much of the original
+  #     variance the n_pcs-dimensional reduction actually retained --
+  #     currently unverifiable after the fact).
+  #   nmf_diag_file: list(n_iteration, target_loss, average_epochs,
+  #     mse_trace, mkl_trace) -- NNLM::nnmf()'s own convergence
+  #     diagnostics; mse_trace/mkl_trace are the full iteration-by-
+  #     iteration loss curves (?nnmf's Value section), not just nmf.R's
+  #     own single final-iteration mse (stored separately in fits.mse).
+  #   cp_diag_file: list(lambdas, all_resids) -- rTensor::cp()'s
+  #     per-component scale (without which the fitted tensor can't be
+  #     reconstructed and loadings have no comparable relative magnitude
+  #     -- R/methods/cp.R's own comment) and iteration residual trace
+  #     (?cp's own example: plot(cpD$all_resids), the standard smooth-
+  #     convergence check). `all_resids` is NULL until R/methods/cp.R is
+  #     updated to return it (a re-fit, not just a re-ingest).
+  #   tucker_diag_file: list(core, all_resids) -- rTensor::tucker()'s core
+  #     tensor (the one Tucker-specific object with no CP analogue --
+  #     encodes cross-mode interactions via its non-diagonal structure,
+  #     standard/expected output per ?tucker, not optional decoration) and
+  #     the same iteration residual trace as CP. `all_resids` is NULL
+  #     until R/methods/tucker.R is updated to return it.
+  ensure_column(con, "fits", "cogaps_diag_file", "TEXT")
+  ensure_column(con, "fits", "pca_diag_file", "TEXT")
+  ensure_column(con, "fits", "spca_diag_file", "TEXT")
+  ensure_column(con, "fits", "ica_diag_file", "TEXT")
+  ensure_column(con, "fits", "nmf_diag_file", "TEXT")
+  ensure_column(con, "fits", "cp_diag_file", "TEXT")
+  ensure_column(con, "fits", "tucker_diag_file", "TEXT")
+  # CP/Tucker only -- both already compute this correctly (rTensor's own
+  # `conv` field) but it used to be consulted ONLY to decide `status` in
+  # the corner case where loadings are ALSO NULL, so a fit that hit
+  # max_iter without converging but still produced usable loadings was
+  # silently reported as status='ok' with no persisted trace of the
+  # non-convergence. NULL for every other method.
+  ensure_column(con, "fits", "converged", "INTEGER")
+
+  # WGCNA intramodular connectivity / module membership (kME) --
+  # WGCNA::signedKME(datExpr, MEs), computable entirely from data already
+  # persisted elsewhere (the cached per-dataset matrix + this fit's own
+  # module-eigengene scores_file) rather than needing to re-run
+  # blockwiseModules(). Confirmed via ?blockwiseModules's own Details
+  # section: kME is computed INTERNALLY during module trimming/merging
+  # (minKMEtoStay/minCoreKME/reassignThreshold) but never returned by the
+  # function -- the standard mechanism for identifying hub genes (highest
+  # |kme| within their assigned module) per WGCNA::signedKME's own doc.
+  # See R/lib/ingest/ingest_dataset.R::compute_wgcna_kme().
+  ensure_table_if_not_exists <- function(con, sql) DBI::dbExecute(con, sql)
+  ensure_table_if_not_exists(con, "CREATE TABLE IF NOT EXISTS wgcna_kme (
+       fit_id INTEGER NOT NULL REFERENCES fits(fit_id),
+       gene TEXT NOT NULL,
+       module INTEGER NOT NULL,
+       kme REAL
+     )")
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_wgcna_kme_fit ON wgcna_kme(fit_id)")
+  # WGCNA Gene Significance (GS) -- per-gene correlation of expression
+  # against each sample-metadata trait, dataset-level (not per fit --
+  # GS doesn't depend on module assignment, only on the expression matrix
+  # + sample metadata, both already cached). Combined with wgcna_kme
+  # above, reconstructs the classic GS-vs-MM hub-gene scatter the WGCNA
+  # workflow is built around, which neither table alone supports. See
+  # R/lib/ingest/ingest_dataset.R::compute_wgcna_gene_significance().
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS wgcna_gene_significance (
+       dataset_id TEXT NOT NULL,
+       gene TEXT NOT NULL,
+       field TEXT NOT NULL,
+       statistic REAL,
+       p_value REAL
+     )")
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_wgcna_gs_dataset ON wgcna_gene_significance(dataset_id)")
+
+  # fgsea's NES (normalized enrichment score -- the standard cross-pathway-
+  # comparable magnitude fgsea's own vignette reports and ranks by
+  # alongside pval/padj) and ES (raw enrichment score) -- previously
+  # reduced to just a pos/neg `direction` sign at ingest time
+  # (R/ingest_enrichment_results.R), discarding the magnitude the
+  # normalization was specifically designed to make comparable.
+  # log2err is fgsea's own accuracy-diagnostic column tied to its `eps`
+  # parameter (the vignette recommends checking it before trusting very
+  # small p-values) -- never captured at all previously.
+  ensure_column(con, "enrichment_cache", "nes", "REAL")
+  ensure_column(con, "enrichment_cache", "es", "REAL")
+  ensure_column(con, "enrichment_cache", "log2err", "REAL")
+
+  # projectR's `pval` (per-sample/pattern projection significance) and
+  # `pvar` (prcomp-mode: % variance in the TARGET data explained by each
+  # projected PC) -- both already computed by projectR(..., full=TRUE)
+  # and saved whole in each row's projection_file artifact, just never
+  # summarized into a queryable column the way mean/median_r_squared are.
+  ensure_column(con, "projections", "mean_pval", "REAL")
+  ensure_column(con, "projections", "median_pval", "REAL")
+  ensure_column(con, "projections", "mean_pvar", "REAL")
+  ensure_column(con, "projections", "median_pvar", "REAL")
 
   # wTO removed entirely (never had any ingested fits in practice) --
   # drop its table/columns outright rather than leaving dead schema

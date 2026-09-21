@@ -41,7 +41,10 @@ run_tucker_job <- function(rank_genes, rank_subjects, rank_time) {
   list(rank_genes = rank_genes, rank_subjects = rank_subjects, rank_time = rank_time,
        mse = 1 - result$norm_percent / 100, converged = result$conv,
        loadings = gene_loadings, scores = subject_loadings, time_loadings = time_loadings,
-       core = result$Z)
+       # core -- the one Tucker-specific object with no CP analogue.
+       # all_resids -- same iteration-by-iteration residual-norm trace as
+       # CP's own (?tucker's own recommended convergence check).
+       core = result$Z, all_resids = result$all_resids)
 }
 
 tucker_registry <- list(

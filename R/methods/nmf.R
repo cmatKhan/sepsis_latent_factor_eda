@@ -3,17 +3,25 @@
 # `k` is nnmf()'s real rank argument. `seed` has no nnmf() equivalent --
 # this framework calls `set.seed(seed)` before `nnmf()` itself. The job
 # function takes `...` so any nnmf() argument not explicitly named as a
-# formal here (alpha, beta, method, loss, max.iter, ...) still passes
-# through if you add it to `defaults`/`build_grid` below and wire it into
-# the `expand.grid()` call -- see R/README.md's "Adding a new method".
+# formal here (alpha, beta, method, loss, ...) still passes through if
+# you add it to `defaults`/`build_grid` below and wire it into the
+# `expand.grid()` call -- see R/README.md's "Adding a new method".
+#
+# `n.threads` defaults to `slurm.nmf.cpus_per_task` (via
+# `resource_defaults` below) unless set explicitly in `defaults`/config --
+# same convention as WGCNA's `nThreads` (R/methods/wgcna.R). nnmf() has
+# real OpenMP-based internal multithreading here (confirmed via
+# `args(NNLM::nnmf)`), previously never wired through -- with
+# `cpus_per_task: 1` this was a no-op, not a wasted request, but raising
+# `cpus_per_task` now actually speeds up each fit.
 #
 # Operates on the single matrix `mat_nn` (non-negative-shifted, set as a
 # global object by the orchestrator script) -- there is no basis argument.
 
-run_nmf_seed_sweep_job <- function(k, seed, max.iter = 10000, verbose = 0L, ...) {
+run_nmf_seed_sweep_job <- function(k, seed, max.iter = 10000, verbose = 0L, n.threads = 1L, ...) {
   library(NNLM)
   set.seed(seed)
-  fit <- nnmf(mat_nn, k = k, max.iter = max.iter, verbose = verbose, ...)
+  fit <- nnmf(mat_nn, k = k, max.iter = max.iter, verbose = verbose, n.threads = n.threads, ...)
   rownames(fit$W) <- rownames(mat_nn)
   colnames(fit$W) <- paste0("Pattern_", seq_len(ncol(fit$W)))
   colnames(fit$H) <- colnames(mat_nn)
@@ -38,5 +46,9 @@ nmf_registry <- list(
   fn = run_nmf_seed_sweep_job,
   pkgs = "NNLM",
   defaults = list(k = 5:20, seed = c(42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210)),
-  build_grid = function(p) expand.grid(k = p$k, seed = p$seed, stringsAsFactors = FALSE)
+  resource_defaults = function(p, slurm_cfg) {
+    if (is.null(p[["n.threads"]])) p$n.threads <- slurm_cfg$cpus_per_task
+    p
+  },
+  build_grid = function(p) expand.grid(k = p$k, seed = p$seed, n.threads = p$n.threads, stringsAsFactors = FALSE)
 )

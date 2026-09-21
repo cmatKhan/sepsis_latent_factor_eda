@@ -192,6 +192,134 @@ compute_wgcna_sft <- function(con, dataset_id, dataset_yaml, db_path, force = FA
   invisible(NULL)
 }
 
+#' Compute WGCNA intramodular connectivity / module membership (kME) for
+#' every already-ingested WGCNA fit of this dataset that has module
+#' eigengenes (fits.scores_file -- see extract.R's wgcna branch; older
+#' fits ingested before `samples` was captured have none and are silently
+#' skipped). `WGCNA::signedKME(datExpr, MEs)` correlates every gene's
+#' expression against every module eigengene -- this is the standard
+#' mechanism for identifying hub genes (highest |kME| within their
+#' assigned module) that `blockwiseModules()` computes INTERNALLY during
+#' module trimming/merging but never returns (confirmed via
+#' ?blockwiseModules's Details section) -- so it must be recomputed
+#' separately, exactly like compute_wgcna_sft() recomputes the SFT fit
+#' blockwiseModules() also never returns.
+#'
+#' Per-FIT (not per-dataset, unlike SFT/gene-significance below): each
+#' power's module structure/eigengenes differ, so kME differs per fit.
+#' Same non-containerized login-node constraint as compute_wgcna_sft() --
+#' needs WGCNA installed and the cached matrix already on disk.
+#'
+#' `force = TRUE` recomputes for every fit even if wgcna_kme already has
+#' rows for it; otherwise only fits with zero existing rows are computed
+#' (additive across fits, unlike matrix_file/wgcna_sft's replace-on-
+#' recompute -- a NEW wgcna fit ingested later just adds its own rows).
+compute_wgcna_kme <- function(con, dataset_id, dataset_yaml, db_path, force = FALSE) {
+  wg <- dataset_yaml$methods$network$wgcna
+  if (is.null(wg)) return(invisible(NULL))
+
+  mat_row <- DBI::dbGetQuery(con, "SELECT matrix_file FROM datasets WHERE dataset_id = ?",
+                              params = list(dataset_id))
+  if (nrow(mat_row) == 0 || is.na(mat_row$matrix_file)) {
+    message("  no cached matrix for ", dataset_id, " -- skipping WGCNA kME")
+    return(invisible(NULL))
+  }
+  datExpr_full <- t(as.matrix(readRDS(resolve_artifact(mat_row$matrix_file, db_path))))
+
+  fits <- DBI::dbGetQuery(con,
+    "SELECT fit_id, scores_file FROM fits
+     WHERE dataset_id = ? AND method = 'wgcna' AND status = 'ok' AND scores_file IS NOT NULL",
+    params = list(dataset_id))
+  if (nrow(fits) == 0) return(invisible(NULL))
+
+  for (i in seq_len(nrow(fits))) {
+    fit_id <- fits$fit_id[i]
+    n_existing <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM wgcna_kme WHERE fit_id = ?",
+                                   params = list(fit_id))$n
+    if (!force && n_existing > 0) next
+
+    MEs <- as.matrix(readRDS(resolve_artifact(fits$scores_file[i], db_path)))
+    common_samples <- intersect(rownames(datExpr_full), rownames(MEs))
+    if (length(common_samples) < 3) next
+    datExpr <- datExpr_full[common_samples, , drop = FALSE]
+    MEs <- MEs[common_samples, , drop = FALSE]
+
+    kme <- WGCNA::signedKME(datExpr, as.data.frame(MEs), outputColumnName = "kME")
+    module_ids <- suppressWarnings(as.integer(sub("^ME", "", colnames(MEs))))
+
+    message("  [wgcna_kme] fit_id ", fit_id, ": ", ncol(datExpr), " genes x ", ncol(MEs), " modules")
+    DBI::dbExecute(con, "DELETE FROM wgcna_kme WHERE fit_id = ?", params = list(fit_id))
+    DBI::dbWriteTable(con, "wgcna_kme", data.frame(
+      fit_id = fit_id,
+      gene = rep(colnames(datExpr), times = ncol(kme)),
+      module = rep(module_ids, each = nrow(kme)),
+      kme = as.vector(as.matrix(kme)),
+      stringsAsFactors = FALSE
+    ), append = TRUE)
+  }
+  invisible(NULL)
+}
+
+#' Compute WGCNA Gene Significance (GS) -- per-gene correlation of
+#' expression against each sample-metadata trait -- for this dataset.
+#' Dataset-level, not per-fit: GS depends only on the cached expression
+#' matrix + registered sample metadata, neither of which varies by
+#' module/power choice, unlike kME above. Combined with kME, reconstructs
+#' the classic GS-vs-MM hub-gene scatter the WGCNA workflow is built
+#' around (a plot neither table alone supports).
+#'
+#' Reuses app/R/metadata_helpers.R's generic_association_scan() (Spearman
+#' for numeric fields, Kruskal-Wallis otherwise, no field names hardcoded)
+#' verbatim -- passing the full expression matrix in place of a
+#' factor/module scores matrix works unchanged, since that function only
+#' ever treats its first argument as "samples x things to correlate
+#' against metadata," genes being no different from factors/eigengenes
+#' for that purpose. Sourced lazily (once) since the ingest pipeline
+#' doesn't otherwise depend on any app/R file.
+#'
+#' Same non-containerized login-node constraint as compute_wgcna_sft()/
+#' compute_wgcna_kme() (needs the cached matrix + registered metadata
+#' pointer already on disk here). `force = TRUE` always recomputes;
+#' otherwise no-ops if this dataset already has any rows (replace-on-
+#' recompute like matrix_file/wgcna_sft, not additive).
+compute_wgcna_gene_significance <- function(con, dataset_id, dataset_yaml, db_path, force = FALSE) {
+  wg <- dataset_yaml$methods$network$wgcna
+  if (is.null(wg)) return(invisible(NULL))
+  if (!exists("generic_association_scan")) {
+    source(here::here("app/R/metadata_helpers.R"))
+  }
+
+  n_existing <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM wgcna_gene_significance WHERE dataset_id = ?",
+                                 params = list(dataset_id))$n
+  if (!force && n_existing > 0) return(invisible(NULL))
+
+  mat_row <- DBI::dbGetQuery(con, "SELECT matrix_file FROM datasets WHERE dataset_id = ?",
+                              params = list(dataset_id))
+  if (nrow(mat_row) == 0 || is.na(mat_row$matrix_file)) {
+    message("  no cached matrix for ", dataset_id, " -- skipping WGCNA gene significance")
+    return(invisible(NULL))
+  }
+  datExpr <- t(as.matrix(readRDS(resolve_artifact(mat_row$matrix_file, db_path))))
+
+  meta <- dataset_metadata(con, dataset_id, "sample")
+  if (is.null(meta)) {
+    message("  no sample metadata registered for ", dataset_id, " -- skipping WGCNA gene significance")
+    return(invisible(NULL))
+  }
+
+  message("  computing WGCNA gene significance for ", dataset_id, " (", ncol(datExpr), " genes x ",
+          length(setdiff(names(meta), "sample_id")), " fields)...")
+  gs <- generic_association_scan(datExpr, meta, id_col = "sample_id")
+  if (nrow(gs) == 0) return(invisible(NULL))
+
+  DBI::dbExecute(con, "DELETE FROM wgcna_gene_significance WHERE dataset_id = ?", params = list(dataset_id))
+  DBI::dbWriteTable(con, "wgcna_gene_significance", data.frame(
+    dataset_id = dataset_id, gene = gs$component, field = gs$field,
+    statistic = gs$statistic, p_value = gs$p_value, stringsAsFactors = FALSE
+  ), append = TRUE)
+  invisible(NULL)
+}
+
 #' Ingest ONE dataset's job-family results (+ redundancy) into `con`.
 #' Identical behavior to what R/ingest_results.R's body used to do inline;
 #' extracted so R/ingest_jobs/ingest_core_job.R can loop this over many
@@ -358,16 +486,37 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
         raw_result_file <- file.path("stability_artifacts", dataset_id, fname)
       }
 
+      # method-specific diagnostics bundle (see db.R's *_diag_file
+      # columns / extract_result()'s `diag`) -- one small named-list
+      # artifact per method, saved into the ONE column that method uses;
+      # every other method's *_diag_file column stays NULL for this row.
+      diag_cols <- c(cogaps = "cogaps_diag_file", pca = "pca_diag_file",
+                      spca = "spca_diag_file", ica = "ica_diag_file",
+                      nmf = "nmf_diag_file", cp = "cp_diag_file", tucker = "tucker_diag_file")
+      diag_file_val <- list(cogaps_diag_file = NA_character_, pca_diag_file = NA_character_,
+                             spca_diag_file = NA_character_, ica_diag_file = NA_character_,
+                             nmf_diag_file = NA_character_, cp_diag_file = NA_character_,
+                             tucker_diag_file = NA_character_)
+      if (!is.null(ext$diag) && ext$method %in% names(diag_cols)) {
+        fname <- sprintf("%s_task%03d_diag.rds", jobname, task)
+        saveRDS(ext$diag, file.path(art_dir, fname))
+        diag_file_val[[diag_cols[[ext$method]]]] <- file.path("stability_artifacts", dataset_id, fname)
+      }
+
       DBI::dbExecute(con,
         "INSERT INTO fits (dataset_id, method, family, jobname, rank, seed, alpha, power,
                            rank_genes, rank_subjects, rank_time,
-                           mse, n_factors, status, loadings_file, scores_file, time_loadings_file, raw_result_file)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           mse, n_factors, status, converged, loadings_file, scores_file, time_loadings_file, raw_result_file,
+                           cogaps_diag_file, pca_diag_file, spca_diag_file, ica_diag_file, nmf_diag_file, cp_diag_file, tucker_diag_file)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params = list(dataset_id, ext$method, ext$family, jobname,
                       fit$rank, fit$seed, fit$alpha, fit$power,
                       fit$rank_genes, fit$rank_subjects, fit$rank_time,
-                      fit$mse, fit$n_factors, fit$status, loadings_file, scores_file, time_loadings_file,
-                      raw_result_file))
+                      fit$mse, fit$n_factors, fit$status, fit$converged, loadings_file, scores_file, time_loadings_file,
+                      raw_result_file,
+                      diag_file_val$cogaps_diag_file, diag_file_val$pca_diag_file, diag_file_val$spca_diag_file,
+                      diag_file_val$ica_diag_file, diag_file_val$nmf_diag_file, diag_file_val$cp_diag_file,
+                      diag_file_val$tucker_diag_file))
       fit_id <- DBI::dbGetQuery(con, "SELECT last_insert_rowid() AS id")$id
 
       if (fit$status == "ok") {
@@ -413,6 +562,25 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
     message("  [", jobname, "] ", report[[jobname]])
   }
 
+  # Wrapped in ONE transaction: compute_wgcna_pairs()'s full pairwise
+  # double loop (R/lib/ingest/pairs.R) and run_all_redundancy()'s
+  # per-representative-fit loop (R/lib/ingest/redundancy.R) both issue
+  # many small autocommit dbExecute()/dbWriteTable() calls with no
+  # batching of their own -- confirmed the real cause of a genuinely
+  # measured ingest_core seff report showing only 28.42% CPU efficiency
+  # over a 1h19m single-core run (i.e. ~56 minutes of the wall-clock spent
+  # blocked on per-statement fsyncs, not computing) -- same "death by a
+  # thousand fsyncs" pattern already diagnosed and fixed for driver_grid
+  # earlier (see run_all_pattern_drivers()'s own transaction-wrapping
+  # comment in driver.R for the original real-seff-backed diagnosis this
+  # mirrors). on.exit()'s rollback-if-not-committed guard ensures an
+  # error partway through never leaves an open transaction for the NEXT
+  # dataset's writes (run_ingest_core_job() loops many datasets against
+  # the same connection) to land inside.
+  DBI::dbExecute(con, "BEGIN")
+  pairs_committed <- FALSE
+  on.exit(if (!pairs_committed) DBI::dbExecute(con, "ROLLBACK"), add = TRUE)
+
   for (method in names(new_fits_by_method)) {
     ids <- new_fits_by_method[[method]]
     message("  [pairs:", method, "] computing similarities for ", length(ids), " new fits ...")
@@ -427,6 +595,9 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
 
   run_all_redundancy(con, db_path, dataset_id, force = recompute_redundancy, project_root = project_root)
 
+  DBI::dbExecute(con, "COMMIT")
+  pairs_committed <- TRUE
+
   # Differential feature identification (projectR::projectionDriveR(), see
   # R/lib/ingest/driver.R) -- batch pass over representative fits x
   # 2-4-level categorical sample-metadata columns. Silently no-ops if the
@@ -436,8 +607,14 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
   # (see this function's @param doc) -- staged as its own driver_grid job
   # family instead in that case.
   if (run_pattern_drivers) {
-    tryCatch(run_all_pattern_drivers(con, db_path, dataset_id),
-             error = function(e) message("  pattern-driver pass failed for ", dataset_id, ": ", conditionMessage(e)))
+    # CI (default) and PV are the projectR fork's own paired standard
+    # modes (its vignette runs both) -- see R/ingest_jobs/driver_job.R's
+    # matching comment for why PV is a second, independently useful pass
+    # rather than a redundant re-run of CI.
+    for (mode in c("CI", "PV")) {
+      tryCatch(run_all_pattern_drivers(con, db_path, dataset_id, mode = mode),
+               error = function(e) message("  pattern-driver pass (", mode, ") failed for ", dataset_id, ": ", conditionMessage(e)))
+    }
   }
 
   invisible(dataset_id)

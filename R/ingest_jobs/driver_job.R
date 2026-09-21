@@ -49,10 +49,20 @@ run_driver_job <- function() {
       message("  no cached sample metadata for ", dataset_id, " -- skipping pattern-driver pass")
       next
     }
-    tryCatch(
-      run_all_pattern_drivers(con, db_path, dataset_id, sample_metadata = sm, id_col = id_col),
-      error = function(e) message("  pattern-driver pass failed for ", dataset_id, ": ", conditionMessage(e))
-    )
+    # CI (default) and PV are the fork's own paired standard modes (its
+    # vignette's "7 Differential features identification" section runs
+    # both) -- PV mode's `sig_genes$PV_significant_shared_genes` is
+    # explicitly meant to feed a follow-up fgsea() call, a genuinely
+    # different analysis from CI's confidence-interval-based gene set, not
+    # a redundant re-run. Both passes are independently idempotent
+    # (pattern_drivers' UNIQUE constraint includes `mode`), so running PV
+    # here never disturbs CI's already-computed rows.
+    for (mode in c("CI", "PV")) {
+      tryCatch(
+        run_all_pattern_drivers(con, db_path, dataset_id, mode = mode, sample_metadata = sm, id_col = id_col),
+        error = function(e) message("  pattern-driver pass (", mode, ") failed for ", dataset_id, ": ", conditionMessage(e))
+      )
+    }
   }
   DBI::dbDisconnect(con)
   invisible(NULL)

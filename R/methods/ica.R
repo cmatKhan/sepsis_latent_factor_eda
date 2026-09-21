@@ -49,7 +49,18 @@ run_ica_seed_sweep_job <- function(n.comp, alpha = 1, seed, fun = "logcosh",
   recon <- sweep(recon_pc %*% t(pcfit$rotation), 2, pcfit$center, "+")   # samples x genes
   mse <- mean((t(mat) - recon)^2)
 
-  list(rank = n.comp, seed = seed, mse = mse, loadings = loadings, scores = scores)
+  list(rank = n.comp, seed = seed, mse = mse, loadings = loadings, scores = scores,
+       # W (unmixing matrix): fastICA's own output has no self-reported
+       # convergence/quality diagnostic -- W's orthonormality is the cheap
+       # real check (a genuinely converged W should be close to
+       # orthonormal). K (whitening matrix): the other half of fastICA's
+       # own return value, kept for the same reason. pcfit$sdev: the
+       # prewhitening PCA step's full spectrum -- the only way to verify
+       # how much variance the n_pcs-dimensional reduction (this file's
+       # header comment calls it "a standard, well-precedented
+       # approximation") actually retained for a given dataset/rank,
+       # currently unverifiable after the fact.
+       W = fit$W, K = fit$K, prewhiten_sdev = pcfit$sdev)
 }
 
 ica_registry <- list(

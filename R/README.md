@@ -473,7 +473,10 @@ What gets computed at ingest (see `R/lib/ingest/`):
   dataset x power -- see `compute_wgcna_sft()`, called from
   `R/ingest_results.R`/`R/cache_dataset_matrices.R` right after the
   dataset's matrix is cached, never from inside `ingest_core`'s container,
-  which has no WGCNA installed).
+  which has no WGCNA installed); module ORA against msigdbr collections
+  for every module of every WGCNA fit (`wgcna_ora_grid`, `R/ingest_jobs/
+  wgcna_ora_job.R` -- no GSEA equivalent, modules have no continuous
+  ranking to run preranked GSEA against).
 - **CP/Tucker only**: a third, time-mode loading matrix (rows = timepoint
   levels) saved alongside the usual feature-loadings/sample-scores
   artifacts -- `fits.time_loadings_file`. Their "scores" artifact is
@@ -485,7 +488,7 @@ Artifact paths are stored relative to the DB file's directory, so the DB
 and its `stability_artifacts/` folder move together as a unit.
 
 **Cross-dataset gene identifier mapping** (`R/lib/ingest/symbol_mapping.R`):
-`fgsea_grid`/`projectr_within_grid`/`projectr_cross_grid`
+`fgsea_grid`/`wgcna_ora_grid`/`projectr_within_grid`/`projectr_cross_grid`
 all compare/project matrices whose rownames are otherwise each dataset's
 own native platform id (Illumina/Affymetrix probe, Entrez GeneID, Ensembl
 feature_id). **Ensembl gene id (version-stripped, e.g.
@@ -533,7 +536,7 @@ metric toggle switches cosine/Pearson/Spearman everywhere):
 | 0 | dataset | per-method headline stability, fit/failure counts, ingested-family inventory | Explore button |
 | 1 | method | seed-stability-vs-rank boxplots; scree-style (in-sample MSE) reconstruction-error-by-rank curves for PCA/sPCA; cross-rank persistence heatmap + factor-tracking trajectories (WGCNA: ARI heatmap, module counts, `pickSoftThreshold()` scale-free-topology fit) | click a rank / select a power |
 | 2 | rank/parameter | seed x seed matched-similarity matrix; per-factor stability strips; factor x factor heatmaps with Hungarian matches outlined (WGCNA: module sizes + cross-power Jaccard) | click a factor |
-| 3 | factor | top-loading genes; this factor's Hungarian match in every other fit (all seeds + ranks) with loading scatter; ORA/GSEA enrichment -- either queried live against gprofiler2 on demand, or read from `fgsea_grid`'s batch local `fora()`/`fgsea()` pass (`R/ingest_jobs/fgsea_job.R` + `R/ingest_enrichment_results.R`) if already ingested; both write into the same `enrichment_cache` schema | -- |
+| 3 | factor | top-loading genes; this factor's Hungarian match in every other fit (all seeds + ranks) with loading scatter; ORA/GSEA enrichment -- purely a read of whatever the cluster ingest pipeline has already computed (`R/ingest_jobs/fgsea_job.R` for loadings-bearing methods, `R/ingest_jobs/wgcna_ora_job.R` for WGCNA modules, both via `R/ingest_enrichment_results.R`); this app has no live-compute enrichment path at all | -- |
 
 PCA and sPCA have no cross-seed stability (deterministic, one fit per
 rank/para) -- their Level 1 is reduced to just the scree-style
@@ -552,17 +555,6 @@ each side.
   `family` column accommodates it later).
 - Multi-dataset comparison views in the app (schema-ready via `dataset_id`).
 - Fetching parquet files directly from the HF Hub (local paths only for now).
-- **App (Stage 3) UI for sPCA/CP/Tucker**: stage 1 (setup) and stage 2
-  (ingest) fully support all three (verified end to end against real
-  GSE110487 data), but `app/app.R` doesn't have Level 1/2/3 views wired up
-  for them yet -- a method card would appear at Level 0 once ingested
-  (method/fit counts are queried live from the DB), but "Explore" won't do
-  anything (no `open_<method>` observer registered). CP/Tucker in
-  particular need real design work before that's straightforward: their
-  factor view has a THIRD (time-mode) matrix the current Level 3
-  "Loadings"/"Sample scores" pair doesn't have a slot for, and their
-  `scores` artifact is subject-mode rather than sample-mode (see the
-  ingest section above).
 - CP/Tucker container images (`slurm.{spca,cp,tucker}.container` is
   `"TODO"` in every dataset config) -- `elasticnet`/`rTensor` are only
   confirmed available in local/interactive R for now.

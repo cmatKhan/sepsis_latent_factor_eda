@@ -45,6 +45,7 @@ source(here("R/lib/ingest/projectr_pairs.R"))
 source(here("R/lib/submit.R"))
 source(here("R/ingest_jobs/ingest_core_job.R"))
 source(here("R/ingest_jobs/fgsea_job.R"))
+source(here("R/ingest_jobs/wgcna_ora_job.R"))
 source(here("R/ingest_jobs/projectr_job.R"))
 source(here("R/ingest_jobs/driver_job.R"))
 
@@ -315,9 +316,16 @@ if (opt$stage == "core") {
     resolve_artifact(f, opt$db)
   }
 
-  # ---- fgsea (+ local ORA/GSEA replacing gprofiler_grid): representative fits only ----
+  # ---- fgsea (+ local ORA/GSEA replacing gprofiler_grid): representative
+  # fits only. Includes cp/tucker (added when the app's live-compute
+  # enrichment path was retired -- they have the same loadings-based
+  # shape as every other method here and representative_fit_ids() already
+  # has a working fallback for them: "every ok fit is representative",
+  # same idea as sPCA before it got its own per-K collapse, appropriate
+  # since cp/tucker grids are small). WGCNA is NOT here -- no loadings to
+  # rank, see R/ingest_jobs/wgcna_ora_job.R's separate job family below. ----
   rep_rows <- do.call(rbind, lapply(all_dataset_ids, function(ds) {
-    do.call(rbind, lapply(c("pca", "nmf", "cogaps", "spca", "ica"), function(m) {
+    do.call(rbind, lapply(c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker"), function(m) {
       fids <- representative_fit_ids(con, ds, m)
       if (length(fids) == 0) return(NULL)
       f <- DBI::dbGetQuery(con, sprintf("SELECT fit_id, loadings_file FROM fits WHERE fit_id IN (%s)",
@@ -389,9 +397,10 @@ if (opt$stage == "core") {
     # block's `pathways_by_source` comment above for why that's now folded
     # into fgsea_grid instead (local fora()/fgsea() against the same
     # msigdbr collections, no API rate limit, no separate container image).
-    # The app's own per-factor, on-demand gprofiler2 queries (app/app.R)
-    # are unaffected -- those remain the one intentionally-kept live
-    # g:Profiler call site.
+    # The app's own per-factor, on-demand enrichment path (app/app.R) was
+    # retired ENTIRELY, not just switched off gprofiler2 -- the app is now
+    # a pure read-only viewer of whatever this pipeline has already
+    # computed; see app/app.R's FGSEA_GRID_METHODS comment.
     submit_job_family(
       f = run_fgsea_job,
       jobs_df = rep_rows[, c("dataset_id", "method", "fit_id", "loadings_file", "ensembl_map", "cogaps_marker_genes")],
@@ -402,6 +411,44 @@ if (opt$stage == "core") {
     )
   } else {
     message("No representative fits found for fgsea -- skipping")
+  }
+
+  # ---- wgcna_ora: every WGCNA fit's every module, ORA only (no loadings
+  # to rank, so no GSEA equivalent -- see R/ingest_jobs/wgcna_ora_job.R's
+  # header). Reuses the SAME pathways_by_source built above for fgsea_grid.
+  wgcna_fits_df <- DBI::dbGetQuery(con,
+    "SELECT fit_id, dataset_id FROM fits WHERE method = 'wgcna' AND status = 'ok'")
+  if (nrow(wgcna_fits_df) > 0 && exists("pathways_by_source", inherits = FALSE)) {
+    wgcna_rows <- wgcna_fits_df
+    # module 0 = WGCNA's "unassigned" -- excluded as a queryable gene set
+    # (never gets a `factors` row either, see ingest_dataset.R), but its
+    # genes still belong in the universe (real tested network genes).
+    wgcna_rows$module_genes <- lapply(wgcna_rows$fit_id, function(fid) {
+      mods <- DBI::dbGetQuery(con, "SELECT gene, module FROM wgcna_modules WHERE fit_id = ? AND module != 0",
+                               params = list(fid))
+      if (nrow(mods) == 0) return(NULL)
+      split(mods$gene, mods$module)
+    })
+    wgcna_rows$universe_genes <- lapply(wgcna_rows$fit_id, function(fid) {
+      DBI::dbGetQuery(con, "SELECT DISTINCT gene FROM wgcna_modules WHERE fit_id = ?", params = list(fid))$gene
+    })
+    wgcna_rows <- wgcna_rows[lengths(wgcna_rows$module_genes) > 0, ]
+    wgcna_rows$ensembl_map <- lapply(wgcna_rows$dataset_id, function(ds) ensembl_maps[[ds]])
+
+    if (nrow(wgcna_rows) > 0) {
+      submit_job_family(
+        f = run_wgcna_ora_job,
+        jobs_df = wgcna_rows[, c("dataset_id", "fit_id", "module_genes", "universe_genes", "ensembl_map")],
+        jobname = "wgcna_ora_grid", global_objects = c(FRAMEWORK_FUNCS, "pathways_by_source"),
+        pkgs = c("BiocParallel"),
+        cluster_cfg = slurm_cfg$wgcna_ora, output_dir = opt$output,
+        extra_binds = PROJECT_ROOT, max_array_size = opt$`fgsea-max-array-size`
+      )
+    } else {
+      message("No non-empty WGCNA module sets found -- skipping wgcna_ora")
+    }
+  } else {
+    message("No WGCNA fits found (or fgsea_grid was skipped, so pathways_by_source was never built) -- skipping wgcna_ora")
   }
 
   # ---- projectr: reduced all-pairs, two explicitly-named families ----

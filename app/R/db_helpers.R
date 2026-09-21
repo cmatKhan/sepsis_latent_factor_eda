@@ -293,10 +293,11 @@ load_time_loadings <- function(con, fit_id) {
 ## (pattern_drivers table) plus a self-contained on-demand runner for
 ## combinations that pass wasn't scoped to cover (arbitrary grouping
 ## column / factor / mode) -- deliberately NOT sourcing R/lib/ingest/
-## driver.R itself, mirroring how the app keeps its own duplicated,
-## on-demand gprofiler2::gost() query logic (app.R) fully decoupled from
-## the ingest-time enrichment pass (R/ingest_jobs/fgsea_job.R's local
-## fora()/fgsea() ORA/GSEA) rather than sourcing/sharing it directly.
+## driver.R itself. Unlike enrichment (all computed by the cluster ingest
+## pipeline now, R/ingest_jobs/fgsea_job.R -- this app has no live-compute
+## enrichment path at all), pattern-driver combinations genuinely can't
+## all be pre-enumerated at ingest time (arbitrary grouping column x level
+## pair x factor), so this one on-demand runner stays.
 
 #' Already-cached projectionDriveR() results for one fit -- populates a
 #' selector of (factor, grouping column, level pair, mode) combinations
@@ -441,6 +442,10 @@ wgcna_module_best_matches <- function(con, dataset_id, fit_id) {
 }
 
 ## ---- enrichment cache ---------------------------------------------------------
+## Read-only from this app's side -- all enrichment computation happens in
+## the cluster ingest pipeline (R/ingest_jobs/fgsea_job.R,
+## R/ingest_jobs/wgcna_ora_job.R + R/ingest_enrichment_results.R), which
+## writes enrichment_cache/enrichment_queried directly.
 
 enrichment_cached <- function(con, factor_id, query_type, direction) {
   hit <- DBI::dbGetQuery(con,
@@ -449,29 +454,9 @@ enrichment_cached <- function(con, factor_id, query_type, direction) {
     params = list(factor_id, query_type, direction))$n > 0
   if (!hit) return(NULL)
   DBI::dbGetQuery(con,
-    "SELECT source, term_id, term_name, p_value, intersection_size, term_size, query_size
+    "SELECT source, term_id, term_name, p_value, intersection_size, term_size, query_size, is_main_pathway
      FROM enrichment_cache
      WHERE factor_id = ? AND query_type = ? AND direction = ?
      ORDER BY p_value",
     params = list(factor_id, query_type, direction))
-}
-
-enrichment_store <- function(con, factor_id, query_type, direction, gost_result) {
-  DBI::dbExecute(con,
-    "INSERT OR REPLACE INTO enrichment_queried (factor_id, query_type, direction, queried_at)
-     VALUES (?, ?, ?, datetime('now'))",
-    params = list(factor_id, query_type, direction))
-  if (!is.null(gost_result) && !is.null(gost_result$result) && nrow(gost_result$result) > 0) {
-    r <- gost_result$result
-    DBI::dbWriteTable(con, "enrichment_cache", data.frame(
-      factor_id = factor_id, query_type = query_type, direction = direction,
-      source = r$source, term_id = r$term_id, term_name = r$term_name,
-      p_value = r$p_value, intersection_size = r$intersection_size,
-      term_size = r$term_size,
-      query_size = if (!is.null(r$query_size)) r$query_size else NA_integer_,
-      genes = if (!is.null(r$intersection)) as.character(r$intersection) else NA_character_,
-      queried_at = as.character(Sys.time())
-    ), append = TRUE)
-  }
-  invisible(NULL)
 }

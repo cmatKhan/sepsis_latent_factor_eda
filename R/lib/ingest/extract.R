@@ -63,7 +63,7 @@ extract_result <- function(jobname, result, params_row) {
   fit <- list(
     rank = NA_integer_, seed = NA_integer_, alpha = NA_real_, power = NA_integer_,
     rank_genes = NA_integer_, rank_subjects = NA_integer_, rank_time = NA_integer_,
-    mse = NA_real_, n_factors = NA_integer_, status = "ok"
+    mse = NA_real_, n_factors = NA_integer_, status = "ok", converged = NA_integer_
   )
 
   # method-specific: params.RDS's column shape differs by method (see file
@@ -105,11 +105,12 @@ extract_result <- function(jobname, result, params_row) {
   modules  <- NULL
   scores   <- NULL
   time_loadings <- NULL
+  diag     <- NULL   # method-specific diagnostics bundle -- see db.R's *_diag_file columns
 
   if (is.null(result)) {
     fit$status <- "missing"
     return(list(fit = fit, method = method, family = family,
-                loadings = NULL, modules = NULL, scores = NULL, time_loadings = NULL))
+                loadings = NULL, modules = NULL, scores = NULL, time_loadings = NULL, diag = NULL))
   }
 
   if (!is.null(result$mse)) fit$mse <- as.numeric(result$mse)
@@ -117,6 +118,15 @@ extract_result <- function(jobname, result, params_row) {
   if (method == "pca") {
     loadings <- result$rotation
     scores   <- result$scores
+    if (!is.null(result$sdev)) {
+      # sdev: prcomp()'s FULL per-component spectrum (all components, not
+      # just the retained rank -- rank. truncation never shortens sdev),
+      # the only way to get real per-component/cumulative proportion-of-
+      # variance-explained (what summary.prcomp()/screeplot() report).
+      # center: needed alongside sdev/rotation to reconstruct a real
+      # `prcomp`-classed object (R/methods/pca.R's own comment).
+      diag <- list(sdev = result$sdev, center = result$center)
+    }
   } else if (method == "nmf") {
     loadings <- result$W
     if (!is.null(result$H)) scores <- t(result$H)  # patterns x samples -> samples x patterns
@@ -126,6 +136,11 @@ extract_result <- function(jobname, result, params_row) {
     } else {
       loadings <- result$result@featureLoadings
       scores   <- result$result@sampleFactors
+      # CoGAPS's headline uncertainty-quantification feature vs. plain NMF
+      # (see db.R's cogaps_diag_file comment) -- posterior-SD matrices,
+      # same shape as featureLoadings/sampleFactors.
+      diag <- list(loading_sd = result$result@loadingStdDev,
+                   factor_sd  = result$result@factorStdDev)
     }
   } else if (method == "wgcna") {
     if (is.null(result$net) || is.null(result$net$colors)) {
@@ -148,19 +163,58 @@ extract_result <- function(jobname, result, params_row) {
   } else if (method == "spca") {
     loadings <- result$loadings
     scores   <- result$scores
+    if (!is.null(loadings)) {
+      # pev/var.all: elasticnet's own adjusted-variance bookkeeping, NOT
+      # recomputable by naively projecting mat onto loadings (sPCA's
+      # components aren't orthogonal -- see R/methods/spca.R's own
+      # comment). n_nonzero: realized per-component sparsity, not a
+      # deterministic function of the `para` penalty alone.
+      diag <- list(pev = result$pev, var_all = result$var.all,
+                   n_nonzero = colSums(as.matrix(loadings) != 0))
+    }
   } else if (method == "ica") {
     loadings <- result$loadings
     scores   <- result$scores
+    if (!is.null(result$W)) {
+      # W/K: fastICA's own unmixing/whitening matrices -- W's
+      # orthonormality is a cheap real convergence/quality check fastICA
+      # doesn't self-report. prewhiten_sdev: the prewhitening PCA step's
+      # full spectrum, the only way to verify how much variance that
+      # dimensionality reduction actually retained (R/methods/ica.R's own
+      # comment).
+      diag <- list(W = result$W, K = result$K, prewhiten_sdev = result$prewhiten_sdev)
+    }
   } else if (method %in% c("cp", "tucker")) {
+    fit$converged <- if (is.null(result$converged)) NA_integer_ else as.integer(isTRUE(result$converged))
     if (isFALSE(result$converged) && is.null(result$loadings)) {
       fit$status <- "failed"
     } else {
       loadings      <- result$loadings
       scores        <- result$scores        # SUBJECT-mode, not sample-mode -- see file header
       time_loadings <- result$time_loadings
+      if (method == "cp") {
+        # lambdas: per-component scale -- U's columns are unit-norm, so
+        # without this the fitted tensor can't be reconstructed and
+        # loadings have no comparable relative magnitude (R/methods/cp.R's
+        # own comment). all_resids: iteration-by-iteration residual-norm
+        # trace, rTensor's own recommended convergence check.
+        diag <- list(lambdas = result$lambdas, all_resids = result$all_resids)
+      } else {
+        # core: the one Tucker-specific object with no CP analogue --
+        # encodes cross-mode interactions via its non-diagonal structure.
+        # all_resids: same convergence-trace rationale as CP's own.
+        diag <- list(core = result$core, all_resids = result$all_resids)
+      }
     }
   } else {
     stop("no extractor for method: ", method)
+  }
+  if (method == "nmf" && !is.null(result$n.iteration)) {
+    # NNLM::nnmf()'s own convergence diagnostics (?nnmf's Value section) --
+    # tell whether nnmf() actually converged or just hit max.iter, not
+    # recoverable from W/H alone (R/methods/nmf.R's own comment)
+    diag <- list(n_iteration = result$n.iteration, target_loss = result$target.loss,
+                 average_epochs = result$average.epochs)
   }
 
   if (!is.null(loadings)) {
@@ -189,5 +243,6 @@ extract_result <- function(jobname, result, params_row) {
   }
 
   list(fit = fit, method = method, family = family,
-       loadings = loadings, modules = modules, scores = scores, time_loadings = time_loadings)
+       loadings = loadings, modules = modules, scores = scores, time_loadings = time_loadings,
+       diag = diag)
 }

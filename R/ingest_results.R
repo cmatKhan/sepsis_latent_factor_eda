@@ -9,7 +9,7 @@
 # Usage (CLI):
 #   Rscript R/ingest_results.R <dataset_config.yml> <results_dir> <db_path> \
 #     [--overwrite [jobname,...]] [--recache-matrix] [--recompute-redundancy] \
-#     [--recompute-sft]
+#     [--recompute-sft] [--recompute-kme] [--recompute-gs]
 #
 # `--overwrite` (bare = every family present in <results_dir>; or
 # `--overwrite jobname1,jobname2` = just those) deletes and re-ingests --
@@ -22,14 +22,25 @@
 # fit diagnostic to recompute even if the dataset's configured power grid
 # hasn't changed (see compute_wgcna_sft()). No-ops for datasets with no
 # methods.network.wgcna config.
+# `--recompute-kme` forces WGCNA::signedKME() module-membership recompute
+# for every wgcna fit of this dataset, even for fits that already have
+# wgcna_kme rows (see compute_wgcna_kme()) -- otherwise only NEW fits (zero
+# existing rows) get computed, additive across fits.
+# `--recompute-gs` forces WGCNA Gene Significance (per-gene x sample-trait
+# correlation) to recompute even if this dataset already has
+# wgcna_gene_significance rows (see compute_wgcna_gene_significance()) --
+# otherwise a no-op once any rows exist, replace-on-recompute like SFT.
 #
 # (`--run-enrichment`/R/lib/ingest/enrichment.R's run_all_enrichment(), a
 # legacy whole-DB gprofiler2 ORA/GSEA pass, was retired 2026-09-19 alongside
 # the slurm pipeline's gprofiler_grid job family -- both had the same
 # gprofiler2-API-rate-limit scaling problem; see R/ingest_jobs/fgsea_job.R's
 # header for the local fora()/fgsea()-based replacement, now folded into
-# fgsea_grid. The app's own per-factor, on-demand gprofiler2 queries in
-# app/app.R are unaffected and remain the one live g:Profiler call site.)
+# fgsea_grid. The app's own per-factor, on-demand queries in app/app.R were
+# later retired ENTIRELY (not just switched off gprofiler2) -- the app has
+# no live-compute enrichment path at all now, it only ever reads what this
+# ingest pipeline has already computed, so gprofiler2 is no longer called
+# anywhere in this project.)
 #
 # Usage (interactive): set `ingest_config_path`, `ingest_results_dir`,
 # `ingest_db_path` (and optionally `ingest_overwrite`, `ingest_recache_matrix`,
@@ -80,6 +91,12 @@ if (!exists("ingest_recompute_redundancy")) {
 if (!exists("ingest_recompute_sft")) {
   ingest_recompute_sft <- "--recompute-sft" %in% args
 }
+if (!exists("ingest_recompute_kme")) {
+  ingest_recompute_kme <- "--recompute-kme" %in% args
+}
+if (!exists("ingest_recompute_gs")) {
+  ingest_recompute_gs <- "--recompute-gs" %in% args
+}
 
 con <- open_stability_db(ingest_db_path)
 # cache_dataset_matrix() sources preprocessing_script by path and reads
@@ -95,8 +112,17 @@ cache_dataset_matrix(con, dataset_yaml_for_cache$dataset$id, dataset_yaml_for_ca
 # from inside ingest_core's container.
 compute_wgcna_sft(con, dataset_yaml_for_cache$dataset$id, dataset_yaml_for_cache,
                    ingest_db_path, force = ingest_recompute_sft)
+# kME needs each wgcna fit's scores_file (module eigengenes) to already be
+# ingested, so it runs AFTER ingest_one_dataset() below, not alongside SFT.
+# Gene significance only needs the cached matrix + registered metadata
+# (both already in place by this point), so its ordering doesn't matter --
+# kept next to kME for readability.
 ingest_one_dataset(con, ingest_config_path, ingest_results_dir, ingest_db_path,
                     overwrite = ingest_overwrite, recompute_redundancy = ingest_recompute_redundancy)
+compute_wgcna_kme(con, dataset_yaml_for_cache$dataset$id, dataset_yaml_for_cache,
+                   ingest_db_path, force = ingest_recompute_kme)
+compute_wgcna_gene_significance(con, dataset_yaml_for_cache$dataset$id, dataset_yaml_for_cache,
+                                 ingest_db_path, force = ingest_recompute_gs)
 
 dataset_id <- yaml::read_yaml(ingest_config_path)$dataset$id
 message("\n===== ingest report: ", dataset_id, " -> ", ingest_db_path, " =====")
@@ -105,6 +131,8 @@ counts <- DBI::dbGetQuery(con, "
   UNION ALL SELECT 'factors', COUNT(*) FROM factors f JOIN fits ft ON ft.fit_id = f.fit_id WHERE ft.dataset_id = :d
   UNION ALL SELECT 'factor_pairs', COUNT(*) FROM factor_pairs fp JOIN fits ft ON ft.fit_id = fp.fit_a WHERE ft.dataset_id = :d
   UNION ALL SELECT 'wgcna_sft', COUNT(*) FROM wgcna_sft WHERE dataset_id = :d
+  UNION ALL SELECT 'wgcna_kme', COUNT(*) FROM wgcna_kme wk JOIN fits ft ON ft.fit_id = wk.fit_id WHERE ft.dataset_id = :d
+  UNION ALL SELECT 'wgcna_gene_significance', COUNT(*) FROM wgcna_gene_significance WHERE dataset_id = :d
   UNION ALL SELECT 'wgcna_fit_pairs', COUNT(*) FROM wgcna_fit_pairs wp JOIN fits ft ON ft.fit_id = wp.fit_a WHERE ft.dataset_id = :d
   UNION ALL SELECT 'fit_redundancy', COUNT(*) FROM fit_redundancy fr JOIN fits ft ON ft.fit_id = fr.fit_id WHERE ft.dataset_id = :d",
   params = list(d = dataset_id))

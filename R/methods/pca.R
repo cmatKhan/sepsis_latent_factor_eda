@@ -20,7 +20,17 @@ run_pca_seed_sweep_job <- function(rank) {
   recon <- sweep(recon, 2, fit$center, "+")
   mse <- mean((t(mat) - recon)^2)
 
-  list(rank = rank, seed = NA_integer_, mse = mse, rotation = fit$rotation, scores = fit$x)
+  list(rank = rank, seed = NA_integer_, mse = mse, rotation = fit$rotation, scores = fit$x,
+       # sdev: prcomp()'s FULL per-component spectrum, regardless of
+       # rank. truncation -- the only way to get real per-component/
+       # cumulative proportion-of-variance-explained (what
+       # summary.prcomp()/screeplot() report), never recoverable after
+       # the fact from the rank-truncated rotation/scores alone. center:
+       # needed alongside sdev/rotation to reconstruct a real `prcomp`-
+       # classed object for projectR's PCA-mode dispatch (see
+       # R/ingest_jobs/projectr_job.R's pca branch, which currently
+       # recomputes an equivalent by hand from the cached matrix instead).
+       sdev = fit$sdev, center = fit$center)
 }
 
 pca_registry <- list(

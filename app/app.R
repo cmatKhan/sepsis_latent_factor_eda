@@ -108,19 +108,23 @@ SAMPLE_SCORE_METHODS  <- c("pca", "nmf", "cogaps", "spca", "ica", "wgcna")
 # neg-direction ORA/GSEA rows for ica/spca are computed but unreachable
 # from the app.
 NEG_DIRECTION_METHODS <- c("pca", "ica", "spca")
-# Methods R/create_ingest_slurm_bundle.R's --stage enrichment actually
-# stages fgsea_grid for (representative fits only) -- never cp/tucker
-# (no representative_fit_ids() concept the same way) or wgcna (its own
-# separate ORA-only path, see run_wgcna_enrich_all_modules_core()).
-FGSEA_GRID_METHODS    <- c("pca", "nmf", "cogaps", "spca", "ica")
+# Methods R/create_ingest_slurm_bundle.R's --stage enrichment stages
+# fgsea_grid for -- every loadings-bearing method, including cp/tucker
+# (representative_fit_ids() falls through to "every ok fit" for those,
+# same as sPCA used to before it got its own per-K collapse). WGCNA is
+# NOT in this list -- it has no loadings to rank, so it gets its own
+# separate batch job family instead (R/ingest_jobs/wgcna_ora_job.R,
+# whole-module ORA only, no GSEA).
+FGSEA_GRID_METHODS    <- c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker")
 
-#' Enrichment query-type radio choices for one method -- "fgsea" (batch
-#' Hallmark GSEA) and "gsea"/"ora" (live gprofiler2 OR batch local
-#' fora()/fgsea(), same query_type/cache -- see enrichment_cached()) apply
-#' to every method fgsea_grid covers; "cogaps_fora" (batch CoGAPS
-#' marker-gene ORA) only exists for CoGAPS fits (see
-#' R/ingest_jobs/fgsea_job.R). The two "batch"-only types have no live
-#' g:Profiler equivalent -- see enrich_result()'s qtype branch below.
+#' Enrichment query-type radio choices for one method -- ALL of "ora"/
+#' "gsea"/"fgsea"/"cogaps_fora" are computed exclusively by the cluster
+#' ingest pipeline now (R/ingest_jobs/fgsea_job.R + R/ingest_enrichment_
+#' results.R) -- this app never computes enrichment live, only reads
+#' whatever's already cached (see enrichment_cached()). "fgsea" (batch
+#' Hallmark GSEA) and "gsea"/"ora" apply to every method fgsea_grid
+#' covers; "cogaps_fora" (batch CoGAPS marker-gene ORA) only exists for
+#' CoGAPS fits (see R/ingest_jobs/fgsea_job.R).
 enrich_query_choices <- function(method) {
   if (!(method %in% FGSEA_GRID_METHODS)) return(c("ORA" = "ora", "GSEA" = "gsea"))
   choices <- c("ORA" = "ora", "GSEA" = "gsea", "Hallmark GSEA (batch)" = "fgsea")
@@ -337,8 +341,7 @@ server <- function(input, output, session) {
         h6("Cluster A x cluster B contingency table:"),
         tableOutput("cmp_crosstab")),
       nav_panel("Enrichment cross-reference",
-        p("Reflects only what's already been queried via each factor's enrichment view (or the WGCNA module view) -- click below to retrieve/refresh enrichment for every factor (or module) of BOTH selected fits at once, same as each side's own \"Run enrichment for all factors\" button."),
-        actionButton("cmp_enrich_go", "Retrieve enrichment results for both sides", class = "btn-primary btn-sm", style = "margin-bottom: 12px;"),
+        p("Reflects whatever enrichment has already been computed for these fits by the cluster ingest pipeline (R/ingest_jobs/fgsea_job.R + R/ingest_enrichment_results.R) -- all enrichment computation happens there now, never live in this app."),
         layout_columns(col_widths = c(6, 6),
           tagList(strong("Side A"), DTOutput("cmp_enrich_a")),
           tagList(strong("Side B"), DTOutput("cmp_enrich_b"))))
@@ -370,7 +373,6 @@ server <- function(input, output, session) {
   cmp_method_b <- reactive({ req(input$cmp_method_b); input$cmp_method_b })
   cmp_fit_a <- reactive({ req(input$cmp_fit_a); as.integer(input$cmp_fit_a) })
   cmp_fit_b <- reactive({ req(input$cmp_fit_b); as.integer(input$cmp_fit_b) })
-  cmp_enrich_refresh <- reactiveVal(0)   # bumped after "Retrieve enrichment results" below to invalidate cmp_enrich_a/b
 
   # ---- gene-set (Jaccard) comparison ----
 
@@ -474,45 +476,20 @@ server <- function(input, output, session) {
   }, rownames = FALSE)
 
   # ---- enrichment cross-reference ----
-
-  #' Dispatches to whichever "run every factor/module" core applies for
-  #' this side's method -- run_wgcna_enrich_all_modules_core() for wgcna,
-  #' run_enrich_all_factors_core() (defined further below, but that's fine
-  #' -- see its own header) for every loadings-bearing method. Both share
-  #' the same on_progress(detail, frac) contract, so a caller can drive
-  #' one combined progress bar across both sides just by halving frac.
-  run_side_enrichment <- function(fit_id, method, on_progress) {
-    if (method == "wgcna") {
-      run_wgcna_enrich_all_modules_core(fit_id, on_progress = on_progress)
-    } else {
-      run_enrich_all_factors_core(fit_id, topn = 100, method = method, on_progress = on_progress)
-    }
-  }
-
-  observeEvent(input$cmp_enrich_go, {
-    req(cmp_fit_a(), cmp_fit_b(), cmp_method_a(), cmp_method_b())
-    withProgress(message = "Retrieving enrichment for both sides...", value = 0, {
-      run_side_enrichment(cmp_fit_a(), cmp_method_a(), function(detail, frac) {
-        incProgress(frac / 2, detail = paste("Side A:", detail))
-      })
-      run_side_enrichment(cmp_fit_b(), cmp_method_b(), function(detail, frac) {
-        incProgress(frac / 2, detail = paste("Side B:", detail))
-      })
-    })
-    showNotification("Finished retrieving enrichment for both sides.", type = "message")
-    cmp_enrich_refresh(cmp_enrich_refresh() + 1)
-  }, ignoreInit = TRUE)
+  # Purely a read of whatever the cluster ingest pipeline has already
+  # computed (R/ingest_jobs/fgsea_job.R + R/ingest_enrichment_results.R,
+  # or R/ingest_jobs/wgcna_ora_job.R for WGCNA) -- no live compute, no
+  # refresh trigger needed; these just re-render whenever the selected
+  # fits change.
 
   output$cmp_enrich_a <- renderDT({
-    cmp_enrich_refresh()
     d <- cached_enrichment_summary(con, cmp_fit_a())
-    if (nrow(d) == 0) return(datatable(data.frame(note = "Nothing queried yet"), rownames = FALSE))
+    if (nrow(d) == 0) return(datatable(data.frame(note = "Nothing computed yet"), rownames = FALSE))
     datatable(d, rownames = FALSE, options = list(pageLength = 8, dom = "tp")) |> formatSignif("min_p_value", 3)
   })
   output$cmp_enrich_b <- renderDT({
-    cmp_enrich_refresh()
     d <- cached_enrichment_summary(con, cmp_fit_b())
-    if (nrow(d) == 0) return(datatable(data.frame(note = "Nothing queried yet"), rownames = FALSE))
+    if (nrow(d) == 0) return(datatable(data.frame(note = "Nothing computed yet"), rownames = FALSE))
     datatable(d, rownames = FALSE, options = list(pageLength = 8, dom = "tp")) |> formatSignif("min_p_value", 3)
   })
 
@@ -551,20 +528,7 @@ server <- function(input, output, session) {
           p(tags$span(style = "font-size:1.6rem;", headline)),
           p(sprintf("%d fits ok / %d failed / %d missing",
                     cnt$n_ok, cnt$n_failed, cnt$n_missing)),
-          actionButton(paste0("open_", m), "Explore", class = "btn-primary btn-sm"),
-          # STABILITY_METHODS only (nmf/cogaps/ica) -- these are the
-          # methods with a genuine seed dimension where "best seed by
-          # reconstruction error" is a meaningful choice; PCA/sPCA have
-          # no seed to pick between (one fit per rank/para already), and
-          # WGCNA has its own per-power "run all modules" button at
-          # Level 2 instead (no rank sweep in the same sense).
-          if (m %in% STABILITY_METHODS) {
-            tagList(
-              tags$br(),
-              actionButton(paste0("enrich_best_seed_", m), "Run enrichment (best seed/rank)",
-                           class = "btn-outline-primary btn-sm", style = "margin-top: 6px;")
-            )
-          }
+          actionButton(paste0("open_", m), "Explore", class = "btn-primary btn-sm")
         )
       )
     })
@@ -602,17 +566,6 @@ server <- function(input, output, session) {
       observeEvent(input[[paste0("open_", m_local)]], {
         nav$method <- m_local
         nav$level <- 1
-      }, ignoreInit = TRUE)
-    })
-  }
-  # Level 0 "Run enrichment (best seed/rank)" buttons -- STABILITY_METHODS
-  # only, see level0_ui(). Stays on Level 0 (nav$level/nav$method
-  # untouched) -- this is a fire-and-forget batch action, not navigation.
-  for (m in STABILITY_METHODS) {
-    local({
-      m_local <- m
-      observeEvent(input[[paste0("enrich_best_seed_", m_local)]], {
-        run_enrich_best_seed_all_ranks(m_local)
       }, ignoreInit = TRUE)
     })
   }
@@ -912,11 +865,7 @@ server <- function(input, output, session) {
       )
       panels <- c(panels, list(
         nav_panel("Enrichment overview",
-          p("Run functional enrichment for every factor in this fit at once -- ORA and GSEA, positive direction (this method has no meaningful negative side) -- then jump straight to any one factor's full detail via Level 3's Enrichment tab."),
-          layout_columns(col_widths = c(6, 6),
-            sliderInput("l2_direct_enrich_all_topn", "Top genes (ORA):", min = 50, max = 300, value = 100, step = 50),
-            actionButton("l2_direct_enrich_all_go", "Run enrichment for all factors", class = "btn-primary",
-                         style = "margin-top: 24px;")),
+          p("Whatever functional enrichment the cluster ingest pipeline has already computed for every factor in this fit -- ORA and GSEA, positive direction (this method has no meaningful negative side). Jump straight to any one factor's full detail via Level 3's Enrichment tab."),
           DTOutput("l2_direct_enrich_overview_table"),
           layout_columns(col_widths = c(6, 6),
             radioButtons("l2_direct_enrich_overview_type", "Query shown:", c("ORA" = "ora", "GSEA" = "gsea"), inline = TRUE),
@@ -970,12 +919,8 @@ server <- function(input, output, session) {
           selectInput("l2_assoc_fit", "Fit:", choices = seed_choices),
           plotOutput("l2_assoc_heatmap", height = "440px")),
         nav_panel("Enrichment overview",
-          p("Run functional enrichment for every factor in this fit at once -- ORA and GSEA, and (for PCA) both loading directions -- then jump straight to any one factor's full detail via Level 3's Enrichment tab."),
+          p("Whatever functional enrichment the cluster ingest pipeline has already computed for every factor in this fit -- ORA and GSEA, and (for PCA/ICA/sPCA) both loading directions. Jump straight to any one factor's full detail via Level 3's Enrichment tab."),
           selectInput("l2_enrich_all_fit", "Fit:", choices = seed_choices),
-          layout_columns(col_widths = c(6, 6),
-            sliderInput("l2_enrich_all_topn", "Top genes (ORA):", min = 50, max = 300, value = 100, step = 50),
-            actionButton("l2_enrich_all_go", "Run enrichment for all factors", class = "btn-primary",
-                         style = "margin-top: 24px;")),
           DTOutput("l2_enrich_overview_table"),
           layout_columns(col_widths = c(4, 4, 4),
             radioButtons("l2_enrich_overview_type", "Query shown:", enrich_query_choices(m), inline = TRUE),
@@ -1009,8 +954,7 @@ server <- function(input, output, session) {
           selectInput("l2_wgcna_assoc_fit", "Power:", choices = power_choices),
           plotOutput("l2_wgcna_assoc_heatmap", height = "440px")),
         nav_panel("Enrichment overview",
-          p("Run ORA for every module in this power at once (WGCNA has no GSEA/direction side -- see the Level 3 module view), then jump straight to any one module's full detail."),
-          actionButton("l2_wgcna_enrich_all_go", "Run enrichment for all modules", class = "btn-primary"),
+          p("ORA already computed by the cluster ingest pipeline (R/ingest_jobs/wgcna_ora_job.R) for every module in this power (WGCNA has no GSEA/direction side -- see the Level 3 module view). Jump straight to any one module's full detail."),
           DTOutput("l2_wgcna_enrich_overview_table"),
           actionButton("l2_wgcna_enrich_overview_view", "View selected module at Level 3", class = "btn-outline-primary btn-sm"))
       )
@@ -1228,22 +1172,26 @@ server <- function(input, output, session) {
     nav$level <- 3
   })
 
-  # ---- Level 2: "Enrichment overview" -- run every factor's enrichment at
-  # once (all query-type/direction combinations a single factor's Level 3
-  # Enrichment tab could produce), with progress feedback, then browse a
-  # cheap (no-API-call) summary and jump to any one factor's full detail. ----
+  # ---- Level 2: "Enrichment overview" -- browse whatever the cluster
+  # ingest pipeline has already computed for every factor of a fit, and
+  # jump to any one factor's full detail. No live compute anywhere in this
+  # app -- see R/ingest_jobs/fgsea_job.R / R/ingest_jobs/wgcna_ora_job.R +
+  # R/ingest_enrichment_results.R for where enrichment actually gets
+  # computed now. ----
 
   #' Cache lookup for one factor's enrichment that also recognizes a
-  #' numerically-identical loading vector already queried under a
+  #' numerically-identical loading vector already cached under a
   #' DIFFERENT fit_id. PCA gets a distinct fit_id per rank, but
   #' prcomp(rank. = k) just truncates the same underlying SVD (see
   #' R/methods/pca.R) -- so PC 3 at rank 7 and PC 3 at rank 10 are
-  #' byte-identical. Without this, re-running "all factors" (or a single
-  #' factor from Level 3) at a higher rank would needlessly re-query
-  #' g:Profiler for every lower factor index all over again. Restricted to
-  #' PCA since that's the only method with this guarantee -- NMF/CoGAPS/
-  #' sPCA/CP/Tucker fits are never numerically identical to one another,
-  #' so the search below would just waste time looking.
+  #' byte-identical. fgsea_grid's representative_fit_ids() only ever
+  #' computes enrichment for PCA's single max-rank fit (R/lib/ingest/
+  #' redundancy.R), so every OTHER PCA rank's factors would otherwise show
+  #' nothing at all -- this is a pure read-time lookup (no DB write) that
+  #' finds the equivalent factor's already-computed result instead.
+  #' Restricted to PCA since that's the only method with this guarantee --
+  #' NMF/CoGAPS/sPCA/CP/Tucker fits are never numerically identical to one
+  #' another, so the search below would just waste time looking.
   find_or_reuse_enrichment <- function(fit_id, factor_index, qtype, direction) {
     factor_id <- get_factor_id(con, fit_id, factor_index)
     cached <- enrichment_cached(con, factor_id, qtype, direction)
@@ -1252,7 +1200,7 @@ server <- function(input, output, session) {
     fit <- get_fit(con, fit_id)
     if (nrow(fit) == 0 || fit$method != "pca") return(NULL)
 
-    v <- load_loadings(con, fit_id); req(!is.null(v))
+    v <- load_loadings(con, fit_id); if (is.null(v)) return(NULL)
     v <- v[, factor_index]
     siblings <- DBI::dbGetQuery(con,
       "SELECT fit_id FROM fits
@@ -1268,33 +1216,10 @@ server <- function(input, output, session) {
         if (!isTRUE(all.equal(as.numeric(v), as.numeric(v2), tolerance = 1e-8))) next
         other_factor_id <- get_factor_id(con, other_fit, fi2)
         hit <- enrichment_cached(con, other_factor_id, qtype, direction)
-        if (!is.null(hit)) {
-          copy_enrichment(factor_id, qtype, direction, hit)
-          return(hit)
-        }
+        if (!is.null(hit)) return(hit)
       }
     }
     NULL
-  }
-
-  #' Records a factor as queried and copies another factor's already-cached
-  #' rows onto it, without calling g:Profiler again -- see
-  #' find_or_reuse_enrichment() above.
-  copy_enrichment <- function(factor_id, qtype, direction, cached_rows) {
-    DBI::dbExecute(con,
-      "INSERT OR REPLACE INTO enrichment_queried (factor_id, query_type, direction, queried_at)
-       VALUES (?, ?, ?, datetime('now'))",
-      params = list(factor_id, qtype, direction))
-    if (nrow(cached_rows) > 0) {
-      DBI::dbWriteTable(con, "enrichment_cache", data.frame(
-        factor_id = factor_id, query_type = qtype, direction = direction,
-        source = cached_rows$source, term_id = cached_rows$term_id, term_name = cached_rows$term_name,
-        p_value = cached_rows$p_value, intersection_size = cached_rows$intersection_size,
-        term_size = cached_rows$term_size, genes = NA_character_,
-        queried_at = as.character(Sys.time()), query_size = cached_rows$query_size
-      ), append = TRUE)
-    }
-    invisible(NULL)
   }
 
   #' Core work for "run every (factor, query type, direction) combination
@@ -1305,114 +1230,22 @@ server <- function(input, output, session) {
   #' off `nav$method` so this is safely callable from contexts where
   #' nav$method isn't (yet) the target method -- e.g. the Level 0
   #' "best seed per rank" button below, which never navigates at all.
-  #' `on_progress(detail, frac)`, if given, is called once per combo with
-  #' a human-readable status string and this combo's fractional share
-  #' (1/n_combos) of THIS fit's own work -- callers decide how to use
-  #' that (see run_enrich_all_factors() vs. run_enrich_best_seed_all_ranks()).
-  run_enrich_all_factors_core <- function(fit_id, topn, method, on_progress = NULL) {
-    L <- load_loadings(con, fit_id); req(!is.null(L))
-    # Ensembl-remap ONCE for the whole fit (not per factor/combo) -- THE
-    # canonical cross-dataset identifier for enrichment queries, same as
-    # the slurm fgsea_grid pipeline (its local fora()/fgsea() pass -- gprofiler_grid itself was retired 2026-09-19); see
-    # app/R/metadata_helpers.R::ensembl_map_for_dataset()'s header for why
-    # this matters (gprofiler2::gost() often can't recognize raw native
-    # platform ids at all).
-    dataset_id <- get_fit(con, fit_id)$dataset_id[1]
-    L_ens <- remap_to_ensembl(L, ensembl_map_for_dataset(con, dataset_id))
-    n_factors <- ncol(L_ens)
-    dirs <- if (method %in% NEG_DIRECTION_METHODS) c("pos", "neg") else "pos"
-    combos <- expand.grid(factor_index = seq_len(n_factors), qtype = c("ora", "gsea"),
-                           direction = dirs, stringsAsFactors = FALSE)
-    n <- nrow(combos)
-    for (i in seq_len(n)) {
-      fi <- combos$factor_index[i]; qt <- combos$qtype[i]; dr <- combos$direction[i]
-      if (!is.null(on_progress)) {
-        on_progress(sprintf("factor %d/%d -- %s/%s (%d of %d)", fi, n_factors, toupper(qt), dr, i, n), 1 / n)
-      }
-      if (!is.null(find_or_reuse_enrichment(fit_id, fi, qt, dr))) next   # already run, or reused from an equivalent factor
-      factor_id <- get_factor_id(con, fit_id, fi)
-      v <- L_ens[, fi]
-      genes <- if (qt == "ora") {
-        if (dr == "neg") names(sort(v))[seq_len(min(topn, length(v)))]
-        else names(sort(v, decreasing = TRUE))[seq_len(min(topn, length(v)))]
-      } else {
-        if (dr == "neg") names(sort(v)) else names(sort(v, decreasing = TRUE))
-      }
-      res <- tryCatch(
-        gprofiler2::gost(
-          query = genes, organism = "hsapiens", significant = TRUE,
-          ordered_query = (qt == "gsea"), correction_method = "fdr",
-          sources = c("GO:BP", "GO:MF", "REAC", "KEGG", "WP")),
-        error = function(e) {
-          showNotification(paste0("g:Profiler query failed for factor ", fi, " (", qt, "/", dr, "): ", conditionMessage(e)), type = "error")
-          NULL
-        })
-      enrichment_store(con, factor_id, qt, dr, res)
-    }
-    invisible(NULL)
-  }
-
-  #' Single-fit wrapper used by the Level 2 "Enrichment overview" buttons
-  #' -- one progress bar tracking this fit's own combos.
-  run_enrich_all_factors <- function(fit_id, topn, method) {
-    withProgress(message = "Running enrichment for all factors...", value = 0, {
-      run_enrich_all_factors_core(fit_id, topn, method, on_progress = function(detail, frac) {
-        incProgress(frac, detail = detail)
-      })
-    })
-    showNotification("Finished running enrichment for all factors.", type = "message")
-  }
-
-  #' Level 0 "Run enrichment (best seed/rank)" button (STABILITY_METHODS
-  #' only -- see level0_ui()): for every rank this method currently has
-  #' in the db, picks the single lowest-reconstruction-error (mse) seed's
-  #' fit (ties broken arbitrarily by whichever the DB returns first) and
-  #' runs the full all-factor/all-query-type/direction enrichment sweep
-  #' on just that one fit -- there's no reason to compare enrichment
-  #' across seeds at a given rank, so only ever one fit per rank is used.
-  #' One combined progress bar across all ranks (the bar advances once
-  #' per rank; per-combo detail text still updates continuously via
-  #' incProgress(0, ...), which moves the text without moving the bar).
-  run_enrich_best_seed_all_ranks <- function(method, topn = 100) {
-    ranks <- distinct_ranks(con, ds(), method)
-    if (length(ranks) == 0) {
-      showNotification(paste("No", toupper(method), "fits found for this dataset."), type = "warning")
-      return(invisible(NULL))
-    }
-    withProgress(message = paste0("Running enrichment for ", toupper(method), " -- best seed per rank..."), value = 0, {
-      for (i in seq_along(ranks)) {
-        rk <- ranks[i]
-        best <- DBI::dbGetQuery(con,
-          "SELECT fit_id FROM fits
-           WHERE dataset_id = ? AND method = ? AND rank = ? AND family = 'seed_sweep' AND status = 'ok'
-           ORDER BY mse ASC LIMIT 1",
-          params = list(ds(), method, rk))
-        if (nrow(best) == 0) {
-          incProgress(1 / length(ranks), detail = paste0("rank ", rk, ": no ok fits -- skipped"))
-          next
-        }
-        run_enrich_all_factors_core(best$fit_id[1], topn, method, on_progress = function(detail, frac) {
-          incProgress(0, detail = paste0("rank ", rk, " (", i, "/", length(ranks), ", best-seed fit) -- ", detail))
-        })
-        incProgress(1 / length(ranks))
-      }
-    })
-    showNotification(paste0("Finished running enrichment for ", toupper(method), " -- best seed per rank, all ranks."), type = "message")
-  }
-
-  #' Cheap (cache-only, no API calls) per-factor summary for one query
+  #' Cheap (cache-only, no computation) per-factor summary for one query
   #' type/direction -- shared by both the seed-selector and direct-fit
-  #' "Enrichment overview" panels.
+  #' "Enrichment overview" panels. Purely a read of whatever
+  #' R/ingest_jobs/fgsea_job.R + R/ingest_enrichment_results.R have
+  #' already computed on the cluster -- all enrichment computation happens
+  #' there now, never live in this app.
   enrich_overview_table <- function(fit_id, qtype, direction) {
     L <- load_loadings(con, fit_id); req(!is.null(L))
     rows <- lapply(seq_len(ncol(L)), function(fi) {
       factor_id <- get_factor_id(con, fit_id, fi)
       cc <- enrichment_cached(con, factor_id, qtype, direction)
       if (is.null(cc)) {
-        data.frame(factor = fi, status = "not queried", n_terms = NA_integer_,
+        data.frame(factor = fi, status = "not computed yet", n_terms = NA_integer_,
                    top_term = NA_character_, min_p_value = NA_real_)
       } else if (nrow(cc) == 0) {
-        data.frame(factor = fi, status = "queried -- no significant terms", n_terms = 0L,
+        data.frame(factor = fi, status = "computed -- no significant terms", n_terms = 0L,
                    top_term = NA_character_, min_p_value = NA_real_)
       } else {
         data.frame(factor = fi, status = "ok", n_terms = nrow(cc),
@@ -1422,15 +1255,8 @@ server <- function(input, output, session) {
     do.call(rbind, rows)
   }
 
-  # factorization methods (pca/nmf/cogaps) -- fit chosen via seed selector
-  enrich_all_refresh <- reactiveVal(0)
-  observeEvent(input$l2_enrich_all_go, {
-    req(input$l2_enrich_all_fit)
-    run_enrich_all_factors(as.integer(input$l2_enrich_all_fit), input$l2_enrich_all_topn %||% 100, nav$method)
-    enrich_all_refresh(enrich_all_refresh() + 1)
-  })
+  # factorization methods (pca/nmf/cogaps/spca/ica) -- fit chosen via seed selector
   l2_enrich_overview_data <- reactive({
-    enrich_all_refresh()
     req(input$l2_enrich_all_fit)
     enrich_overview_table(as.integer(input$l2_enrich_all_fit),
                            input$l2_enrich_overview_type %||% "ora",
@@ -1451,14 +1277,7 @@ server <- function(input, output, session) {
   })
 
   # sPCA/CP/Tucker -- single fit already chosen at Level 1 (nav$fit)
-  direct_enrich_all_refresh <- reactiveVal(0)
-  observeEvent(input$l2_direct_enrich_all_go, {
-    req(nav$fit)
-    run_enrich_all_factors(nav$fit, input$l2_direct_enrich_all_topn %||% 100, nav$method)
-    direct_enrich_all_refresh(direct_enrich_all_refresh() + 1)
-  })
   l2_direct_enrich_overview_data <- reactive({
-    direct_enrich_all_refresh()
     req(nav$fit)
     enrich_overview_table(nav$fit, input$l2_direct_enrich_overview_type %||% "ora", "pos")
   })
@@ -1476,64 +1295,20 @@ server <- function(input, output, session) {
   })
 
   # WGCNA -- ORA only, whole module membership (no topN/direction, matching
-  # the single-module enrichment at Level 3)
-
-  #' Core work for "run ORA for every module of one WGCNA fit that isn't
-  #' already cached" -- extracted from the Level 2 button below so the
-  #' Compare-methods "Retrieve enrichment results" button (see
-  #' run_side_enrichment() near cmp_enrich_a/b) can drive it too, sharing
-  #' the same on_progress(detail, frac) contract run_enrich_all_factors_core()
-  #' uses.
-  run_wgcna_enrich_all_modules_core <- function(fit_id, on_progress = NULL) {
-    sizes <- wgcna_module_sizes(con, fit_id)
-    n <- nrow(sizes)
-    if (n == 0) return(invisible(NULL))
-    dataset_id <- get_fit(con, fit_id)$dataset_id[1]
-    ensembl_map <- ensembl_map_for_dataset(con, dataset_id)
-    for (i in seq_len(n)) {
-      mod <- sizes$module[i]
-      if (!is.null(on_progress)) on_progress(sprintf("module %s (%d of %d)", mod, i, n), 1 / n)
-      factor_id <- get_factor_id(con, fit_id, mod)
-      if (length(factor_id) != 1) next
-      if (!is.null(enrichment_cached(con, factor_id, "ora", "pos"))) next   # already run
-      genes <- DBI::dbGetQuery(con, "SELECT gene FROM wgcna_modules WHERE fit_id = ? AND module = ?",
-                                params = list(fit_id, mod))$gene
-      genes_ens <- remap_genes_to_ensembl(genes, ensembl_map)
-      res <- tryCatch(
-        gprofiler2::gost(
-          query = genes_ens, organism = "hsapiens", significant = TRUE,
-          ordered_query = FALSE, correction_method = "fdr",
-          sources = c("GO:BP", "GO:MF", "REAC", "KEGG", "WP")),
-        error = function(e) {
-          showNotification(paste0("g:Profiler query failed for module ", mod, ": ", conditionMessage(e)), type = "error")
-          NULL
-        })
-      enrichment_store(con, factor_id, "ora", "pos", res)
-    }
-    invisible(NULL)
-  }
-
-  wgcna_enrich_all_refresh <- reactiveVal(0)
-  observeEvent(input$l2_wgcna_enrich_all_go, {
-    req(nav$wgcna_fit)
-    withProgress(message = "Running enrichment for all modules...", value = 0, {
-      run_wgcna_enrich_all_modules_core(nav$wgcna_fit, on_progress = function(detail, frac) incProgress(frac, detail = detail))
-    })
-    showNotification("Finished running enrichment for all modules.", type = "message")
-    wgcna_enrich_all_refresh(wgcna_enrich_all_refresh() + 1)
-  })
+  # the single-module enrichment at Level 3). Purely a read of whatever
+  # R/ingest_jobs/wgcna_ora_job.R + R/ingest_enrichment_results.R have
+  # already computed on the cluster -- no live compute in this app.
   l2_wgcna_enrich_overview_data <- reactive({
-    wgcna_enrich_all_refresh()
     req(nav$wgcna_fit)
     sizes <- wgcna_module_sizes(con, nav$wgcna_fit)
     rows <- lapply(sizes$module, function(mod) {
       factor_id <- get_factor_id(con, nav$wgcna_fit, mod)
       cc <- if (length(factor_id) == 1) enrichment_cached(con, factor_id, "ora", "pos") else NULL
       if (is.null(cc)) {
-        data.frame(module = mod, status = "not queried", n_terms = NA_integer_,
+        data.frame(module = mod, status = "not computed yet", n_terms = NA_integer_,
                    top_term = NA_character_, min_p_value = NA_real_)
       } else if (nrow(cc) == 0) {
-        data.frame(module = mod, status = "queried -- no significant terms", n_terms = 0L,
+        data.frame(module = mod, status = "computed -- no significant terms", n_terms = 0L,
                    top_term = NA_character_, min_p_value = NA_real_)
       } else {
         data.frame(module = mod, status = "ok", n_terms = nrow(cc),
@@ -1571,8 +1346,7 @@ server <- function(input, output, session) {
         ),
         nav_panel(
           "Enrichment (ORA)",
-          p("GSEA doesn't apply here -- a WGCNA module is an unranked gene set, not a continuous loading to order by."),
-          actionButton("l3_wgcna_enrich_go", "Run / load enrichment", class = "btn-primary"),
+          p("GSEA doesn't apply here -- a WGCNA module is an unranked gene set, not a continuous loading to order by. Shows whatever the cluster ingest pipeline (R/ingest_jobs/wgcna_ora_job.R) has already computed."),
           DTOutput("l3_wgcna_enrichment")
         )
       ))
@@ -1588,16 +1362,14 @@ server <- function(input, output, session) {
         DTOutput("l3_matches"),
         plotOutput("l3_match_scatter", height = "380px")),
       nav_panel("Enrichment",
-        layout_columns(col_widths = c(3, 3, 3, 3),
+        p("Shows whatever the cluster ingest pipeline (R/ingest_jobs/fgsea_job.R + R/ingest_enrichment_results.R) has already computed for this factor -- no live compute in this app."),
+        layout_columns(col_widths = c(4, 4, 4),
           radioButtons("l3_enrich_type", "Query:", enrich_query_choices(nav$method), inline = TRUE),
-          radioButtons("l3_enrich_dir", "Loadings:", c("positive" = "pos", "negative" = "neg"), inline = TRUE),
-          sliderInput("l3_enrich_topn", "Top genes (ORA):", min = 50, max = 300, value = 100, step = 50),
-          actionButton("l3_enrich_go", "Run / load enrichment", class = "btn-primary",
-                       style = "margin-top: 24px;")),
+          radioButtons("l3_enrich_dir", "Loadings:", c("positive" = "pos", "negative" = "neg"), inline = TRUE)),
         navset_card_tab(
           nav_panel("Table", DTOutput("l3_enrichment")),
           nav_panel("Mirror bar",
-            p("Both the positive- and negative-loading direction must be run/loaded (via the button above) for a full mirror; PCA/ICA/sPCA only -- NMF/CoGAPS weights are non-negative, so this shows the single positive side."),
+            p("Both the positive- and negative-loading direction need to already be computed for a full mirror; PCA/ICA/sPCA only -- NMF/CoGAPS weights are non-negative, so this shows the single positive side."),
             plotOutput("l3_enrich_mirror", height = "560px")),
           nav_panel("Dot plot", plotOutput("l3_enrich_dot", height = "500px"))
         ))
@@ -1683,69 +1455,31 @@ server <- function(input, output, session) {
       readable_factor_theme(15)
   })
 
-  enrich_result <- eventReactive(input$l3_enrich_go, {
+  #' Pure read of whatever the cluster ingest pipeline has already
+  #' computed for this factor -- no live compute anywhere in this app (see
+  #' R/ingest_jobs/fgsea_job.R / R/ingest_enrichment_results.R). A plain
+  #' reactive (not eventReactive/a button) so it just updates whenever the
+  #' selected factor/query type/direction changes.
+  enrich_result <- reactive({
     req(nav$fit, nav$factor_index)
     qtype <- input$l3_enrich_type
     direction <- if (nav$method %in% NEG_DIRECTION_METHODS) input$l3_enrich_dir else "pos"
+    factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
 
     if (qtype %in% c("fgsea", "cogaps_fora")) {
-      # Batch-only query types (R/ingest_jobs/fgsea_job.R /
-      # R/ingest_enrichment_results.R) -- no live g:Profiler equivalent, so
-      # just read whatever's already been ingested; never fall through to
-      # the gprofiler2::gost() call below for these.
-      factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
+      # Hallmark GSEA / CoGAPS marker-gene ORA are only ever computed for
+      # representative fits at ingest time -- no PCA-cross-rank reuse
+      # concept applies to these two.
       return(enrichment_cached(con, factor_id, qtype, direction))
     }
-
-    # also recognizes this factor's loadings as identical to an already-
-    # queried PCA factor from a different rank -- see find_or_reuse_enrichment()
-    cached <- find_or_reuse_enrichment(nav$fit, nav$factor_index, qtype, direction)
-    if (!is.null(cached)) return(cached)
-
-    factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
-    v <- l3_loadings()
-    # Ensembl-remap before gene extraction -- THE canonical cross-dataset
-    # identifier for enrichment queries (see app/R/metadata_helpers.R::
-    # ensembl_map_for_dataset()'s header). remap_to_ensembl() is matrix-
-    # shaped; wrap/unwrap this single factor's named vector through a
-    # 1-column matrix rather than duplicating its collapse-by-id logic.
-    dataset_id <- get_fit(con, nav$fit)$dataset_id[1]
-    ensembl_map <- ensembl_map_for_dataset(con, dataset_id)
-    if (!is.null(ensembl_map) && length(ensembl_map) > 0) {
-      v_mat <- remap_to_ensembl(matrix(v, ncol = 1, dimnames = list(names(v), "v")), ensembl_map)
-      v <- setNames(v_mat[, 1], rownames(v_mat))
-    }
-    genes <- if (qtype == "ora") {
-      n <- input$l3_enrich_topn
-      if (direction == "neg") names(sort(v))[seq_len(min(n, length(v)))]
-      else names(sort(v, decreasing = TRUE))[seq_len(min(n, length(v)))]
-    } else {
-      if (direction == "neg") names(sort(v)) else names(sort(v, decreasing = TRUE))
-    }
-    res <- withProgress(message = "Querying g:Profiler ...", {
-      tryCatch(
-        gprofiler2::gost(
-          query = genes, organism = "hsapiens", significant = TRUE,
-          ordered_query = (qtype == "gsea"),
-          correction_method = "fdr",
-          sources = c("GO:BP", "GO:MF", "REAC", "KEGG", "WP")),
-        error = function(e) {
-          showNotification(paste("g:Profiler query failed:", conditionMessage(e)), type = "error")
-          NULL
-        })
-    })
-    enrichment_store(con, factor_id, qtype, direction, res)
-    enrichment_cached(con, factor_id, qtype, direction)
+    find_or_reuse_enrichment(nav$fit, nav$factor_index, qtype, direction)
   })
   output$l3_enrichment <- renderDT({
     d <- enrich_result()
     if (is.null(d) || nrow(d) == 0) {
-      note <- if (isTRUE(input$l3_enrich_type %in% c("fgsea", "cogaps_fora"))) {
-        "Not yet computed for this factor (batch-only query -- run R/ingest_enrichment_results.R for this dataset's fgsea_grid results), or no significant terms were found."
-      } else {
-        "No significant terms (or query returned nothing)"
-      }
-      return(datatable(data.frame(note = note), rownames = FALSE))
+      return(datatable(data.frame(
+        note = "Not yet computed for this factor (all enrichment is computed by the cluster ingest pipeline -- see R/ingest_jobs/fgsea_job.R + R/ingest_enrichment_results.R), or no significant terms were found."
+      ), rownames = FALSE))
     }
     datatable(d, rownames = FALSE, options = list(pageLength = 15)) |>
       formatSignif("p_value", 3)
@@ -1755,9 +1489,8 @@ server <- function(input, output, session) {
   # meaningful negative side; NMF/CoGAPS weights are non-negative so this
   # degenerates to just "pos") -- independent of which single direction the
   # radio button currently has selected, so a mirror plot can show both
-  # sides once each has been run at least once
+  # sides once each has been computed
   enrich_both <- reactive({
-    input$l3_enrich_go  # re-check cache whenever a run/load happens
     req(nav$fit, nav$factor_index)
     factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
     qtype <- input$l3_enrich_type
@@ -1842,34 +1575,20 @@ server <- function(input, output, session) {
     }
     datatable(data.frame(gene = genes, label = label), rownames = FALSE, options = list(pageLength = 20))
   })
-  wgcna_enrich_result <- eventReactive(input$l3_wgcna_enrich_go, {
+  #' Pure read of whatever R/ingest_jobs/wgcna_ora_job.R +
+  #' R/ingest_enrichment_results.R have already computed for this module --
+  #' no live compute in this app.
+  wgcna_enrich_result <- reactive({
     req(nav$method == "wgcna", nav$fit, nav$factor_index)
     factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
     validate(need(length(factor_id) == 1,
       "This WGCNA fit predates module-level enrichment support -- re-ingest this family with --overwrite (see R/ingest_results.R) to enable it."))
-    cached <- enrichment_cached(con, factor_id, "ora", "pos")
-    if (!is.null(cached)) return(cached)
-    genes <- l3_wgcna_genes_reactive()
-    dataset_id <- get_fit(con, nav$fit)$dataset_id[1]
-    genes_ens <- remap_genes_to_ensembl(genes, ensembl_map_for_dataset(con, dataset_id))
-    res <- withProgress(message = "Querying g:Profiler ...", {
-      tryCatch(
-        gprofiler2::gost(
-          query = genes_ens, organism = "hsapiens", significant = TRUE,
-          ordered_query = FALSE, correction_method = "fdr",
-          sources = c("GO:BP", "GO:MF", "REAC", "KEGG", "WP")),
-        error = function(e) {
-          showNotification(paste("g:Profiler query failed:", conditionMessage(e)), type = "error")
-          NULL
-        })
-    })
-    enrichment_store(con, factor_id, "ora", "pos", res)
     enrichment_cached(con, factor_id, "ora", "pos")
   })
   output$l3_wgcna_enrichment <- renderDT({
     d <- wgcna_enrich_result()
     if (is.null(d) || nrow(d) == 0) {
-      return(datatable(data.frame(note = "No significant terms (or query returned nothing)"), rownames = FALSE))
+      return(datatable(data.frame(note = "Not yet computed for this module (see R/ingest_jobs/wgcna_ora_job.R), or no significant terms were found."), rownames = FALSE))
     }
     datatable(d, rownames = FALSE, options = list(pageLength = 15)) |>
       formatSignif("p_value", 3)

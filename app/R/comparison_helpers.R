@@ -202,7 +202,7 @@ cluster_and_ari <- function(con, fit_a, fit_b, k = 4) {
 #' Everything already cached (via Level 3, or the WGCNA module view) for
 #' one fit's factors -- per factor/direction/query_type, count of
 #' significant terms + the smallest p-value seen. Purely a live read of
-#' what's already been queried; never triggers new g:Profiler calls.
+#' what's already been queried; never triggers new enrichment computation.
 cached_enrichment_summary <- function(con, fit_id) {
   DBI::dbGetQuery(con,
     "SELECT f.factor_index, q.query_type, q.direction,

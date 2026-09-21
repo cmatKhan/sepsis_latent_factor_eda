@@ -43,6 +43,22 @@ fgsea:
   sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
   rscript_path: "Rscript"
 
+# WGCNA module ORA (R/ingest_jobs/wgcna_ora_job.R) -- added when the app's
+# live-compute WGCNA enrichment path was retired. Much lighter than fgsea:
+# fora() is a plain hypergeometric test, no permutation testing at all
+# (unlike fgsea()'s fgseaMultilevel()/collapsePathways(), which is what
+# makes the `fgsea:` entry above need 80G/24h) -- smaller resource
+# footprint reflects that.
+wgcna_ora:
+  mem: 8G
+  cpus_per_task: 4
+  time: "02:00:00"
+  container: "/ref/mblab/containers/chasem/sepsis_timecourse_factors_eda.sif"
+  libPaths: "/ref/mblab/software/chasem/R/4.6.0"
+  sh_template: "config/rslurm_templates/submit_sh.txt"
+  sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
+  rscript_path: "Rscript"
+
 # gprofiler_grid (its own job family + the r-arrow_r-gprofiler2_*.sif image
 # above) was retired 2026-09-19 -- gprofiler2's live, rate-limited
 # g:Profiler API calls (47,517+ requests for this project's grid) were
@@ -53,8 +69,9 @@ fgsea:
 # g:Profiler itself confirmed (via their own FAQ) that they don't offer a
 # self-hosted/local instance for high query volumes, ruling out a "point
 # gprofiler2 at a local mirror" fix. The app's own per-factor, on-demand
-# gprofiler2::gost() calls (app/app.R) are untouched and remain the one
-# live g:Profiler call site in this project.
+# queries (app/app.R) were ALSO since switched from gprofiler2::gost() to
+# the same local fora()/fgsea() approach (see app/R/local_enrichment.R) --
+# gprofiler2 isn't called anywhere in this project anymore.
 
 projectr:
   mem: 4G

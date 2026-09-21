@@ -35,8 +35,10 @@ run_cp_job <- function(num_components) {
        loadings = gene_loadings, scores = subject_loadings, time_loadings = time_loadings,
        # lambdas -- the per-component scaling; U's columns are unit-norm, so
        # without this the fitted tensor can't be reconstructed and the
-       # loadings have no real relative magnitude
-       lambdas = result$lambdas)
+       # loadings have no real relative magnitude. all_resids -- the
+       # iteration-by-iteration residual-norm trace, rTensor's own
+       # recommended convergence check (?cp's example: plot(cpD$all_resids)).
+       lambdas = result$lambdas, all_resids = result$all_resids)
 }
 
 cp_registry <- list(

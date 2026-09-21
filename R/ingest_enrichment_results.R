@@ -1,22 +1,25 @@
-# Phase-2 results -> DB: reads fgsea_grid's plain results_*.RDS files
-# (written by R/ingest_jobs/fgsea_job.R, staged by
-# R/create_ingest_slurm_bundle.R --stage enrichment) and writes them into
-# enrichment_cache/enrichment_queried -- the SAME tables/shape the app's
-# own live, on-demand gprofiler2 queries (app/app.R) already use, so
-# nothing downstream (app, "Compare methods" screen) needs to know which
-# route produced a given row. Never touches a compute node -- this runs on
-# the login node after the job family has finished.
+# Phase-2 results -> DB: reads fgsea_grid's AND wgcna_ora_grid's plain
+# results_*.RDS files (written by R/ingest_jobs/fgsea_job.R /
+# R/ingest_jobs/wgcna_ora_job.R, staged by R/create_ingest_slurm_bundle.R
+# --stage enrichment) and writes them into enrichment_cache/
+# enrichment_queried. This is now the ONLY place enrichment is computed in
+# this project -- the app (app/app.R) has no live-compute enrichment path
+# at all, it only ever reads what's already here. Never touches a compute
+# node -- this runs on the login node after the job families have
+# finished.
 #
 # gprofiler_grid (a separate job family that made live, rate-limited
-# gprofiler2::gost() API calls) and R/lib/ingest/enrichment.R's legacy
-# whole-DB --run-enrichment CLI path (same API, same scaling problem) were
-# both retired 2026-09-19: fgsea_job.R now runs the equivalent ORA/GSEA
-# passes locally via fora()/fgsea() against msigdbr collections instead
-# (see that file's header) -- `x$local_gsea`/`x$local_ora` below are that
-# replacement's output, written under the SAME `query_type` values
-# ("gsea"/"ora") the app's live queries already use, distinguished by the
-# `source` column (GO:BP/GO:MF/KEGG/REAC/WP/HALLMARK) exactly like
-# gprofiler2's own `result$source` field did.
+# gprofiler2::gost() API calls), R/lib/ingest/enrichment.R's legacy
+# whole-DB --run-enrichment CLI path (same API, same scaling problem), and
+# the app's own former live/on-demand gprofiler2::gost() queries were all
+# retired: fgsea_grid runs the equivalent ORA/GSEA passes locally via
+# fora()/fgsea() against msigdbr collections instead (see that file's
+# header) -- `x$local_gsea`/`x$local_ora` below are that replacement's
+# output, written under `query_type` values ("gsea"/"ora") distinguished
+# by the `source` column (GO:BP/GO:MF/KEGG/REAC/WP/HALLMARK). WGCNA
+# (module ORA only, no ranking to do GSEA on) was never part of
+# fgsea_grid's scope and gets its own wgcna_ora_grid job family instead --
+# see the second half of this file.
 #
 # Usage:
 #   Rscript R/ingest_enrichment_results.R --bundle-dir slurm_bundles/ingest --db results/stability.sqlite
@@ -93,6 +96,17 @@ if (dir.exists(fam_dir)) {
             p_value = sig$padj, intersection_size = lengths(sig$leadingEdge), term_size = sig$size,
             query_size = NA_integer_,
             genes = vapply(sig$leadingEdge, paste, character(1), collapse = ","),
+            # fgsea_job.R's main_pathways_for() -- see R/lib/ingest/db.R's
+            # enrichment_cache.is_main_pathway comment.
+            is_main_pathway = as.integer(sig$pathway %in% (g$main_pathways %||% character(0))),
+            # NES: the standard cross-pathway-comparable enrichment
+            # magnitude (fgsea's own vignette) -- previously reduced to
+            # just `direction`'s sign, discarding the magnitude the
+            # normalization exists to make comparable. ES: raw enrichment
+            # score. log2err: fgsea's own accuracy diagnostic tied to its
+            # `eps` param -- its vignette recommends checking it before
+            # trusting very small p-values.
+            nes = sig$NES, es = sig$ES, log2err = sig$log2err,
             queried_at = as.character(Sys.time())
           )
         } else NULL
@@ -111,7 +125,10 @@ if (dir.exists(fam_dir)) {
               factor_id = factor_id, query_type = "cogaps_fora", direction = "pos",
               source = "MSigDB", term_id = sig$pathway, term_name = sig$pathway,
               p_value = sig$padj, intersection_size = sig$overlap, term_size = sig$size,
-              query_size = NA_integer_, genes = NA_character_, queried_at = as.character(Sys.time())
+              query_size = NA_integer_, genes = NA_character_,
+              is_main_pathway = NA_integer_,   # collapsePathways() is GSEA-specific -- doesn't apply to ORA
+              nes = NA_real_, es = NA_real_, log2err = NA_real_,   # fora() is ORA, not GSEA -- no NES/ES/log2err
+              queried_at = as.character(Sys.time())
             )
           } else NULL
           store_enrichment(factor_id, "cogaps_fora", "pos", rows)
@@ -119,9 +136,10 @@ if (dir.exists(fam_dir)) {
       }
 
       # ---- local GSEA/ORA replacing gprofiler_grid (see this file's header
-      # and R/ingest_jobs/fgsea_job.R's header) -- written under the same
-      # query_type values ("gsea"/"ora") the app's live gprofiler2 queries
-      # already use, one `source` per msigdbr collection.
+      # and R/ingest_jobs/fgsea_job.R's header) -- one `source` per
+      # msigdbr collection, under query_type "gsea"/"ora" (the app reads
+      # these directly; it never computes them itself, see this file's
+      # header).
       for (g in x$local_gsea %||% list()) {
         res <- g$result
         factor_id <- get_factor_id(fit_id, g$factor_index)
@@ -135,6 +153,8 @@ if (dir.exists(fam_dir)) {
             p_value = sig$padj, intersection_size = lengths(sig$leadingEdge), term_size = sig$size,
             query_size = NA_integer_,
             genes = vapply(sig$leadingEdge, paste, character(1), collapse = ","),
+            is_main_pathway = as.integer(sig$pathway %in% (g$main_pathways %||% character(0))),
+            nes = sig$NES, es = sig$ES, log2err = sig$log2err,
             queried_at = as.character(Sys.time())
           )
         } else NULL
@@ -164,6 +184,8 @@ if (dir.exists(fam_dir)) {
             # column against every other length-N column), silently
             # aborting every ingest attempt before most rows were written.
             genes = vapply(sig$overlapGenes, paste, character(1), collapse = ","),
+            is_main_pathway = NA_integer_,   # collapsePathways() is GSEA-specific -- doesn't apply to ORA
+            nes = NA_real_, es = NA_real_, log2err = NA_real_,   # fora() is ORA, not GSEA -- no NES/ES/log2err
             queried_at = as.character(Sys.time())
           )
         } else NULL
@@ -174,6 +196,53 @@ if (dir.exists(fam_dir)) {
   message("fgsea_grid: ", n_entries, " fit-level result(s) across those file(s)")
 } else {
   message("fgsea_grid: no results dir found, skipping")
+}
+
+## ---- wgcna_ora_grid -----------------------------------------------------------
+# Same file-discovery/unwrapping pattern as fgsea_grid above -- see
+# R/ingest_jobs/wgcna_ora_job.R's header for why WGCNA gets its own job
+# family (no loadings to rank, so no GSEA; never part of fgsea_grid's
+# scope). Always query_type = "ora", direction = "pos" (WGCNA modules
+# have no direction concept at all).
+
+wgcna_fam_dir <- file.path(opt$`bundle-dir`, "_rslurm_wgcna_ora_grid")
+if (dir.exists(wgcna_fam_dir)) {
+  wgcna_result_files <- list.files(wgcna_fam_dir, pattern = "^results_\\d+\\.RDS$", full.names = TRUE)
+  message("wgcna_ora_grid: ", length(wgcna_result_files), " result file(s)")
+  wgcna_n_entries <- 0
+  for (f in wgcna_result_files) {
+    x <- readRDS(f)
+    entries <- if (!is.null(x$fit_id)) list(x) else x
+    wgcna_n_entries <- wgcna_n_entries + length(entries)
+
+    for (x in entries) {
+      fit_id <- x$fit_id
+      if (is.null(fit_id)) next
+
+      for (o in x$ora %||% list()) {
+        res <- o$result
+        factor_id <- get_factor_id(fit_id, o$module)
+        if (length(factor_id) != 1) next
+        rows <- if (!is.null(res) && nrow(res) > 0) {
+          sig <- res[!is.na(res$padj) & res$padj < 0.05, ]   # see fgsea_grid's x$gsea comment above
+          if (nrow(sig) == 0) NULL else data.frame(
+            factor_id = factor_id, query_type = "ora", direction = "pos",
+            source = o$source, term_id = sig$pathway, term_name = sig$pathway,
+            p_value = sig$padj, intersection_size = sig$overlap, term_size = sig$size,
+            query_size = o$n_genes %||% NA_integer_,
+            genes = vapply(sig$overlapGenes, paste, character(1), collapse = ","),
+            is_main_pathway = NA_integer_,   # collapsePathways() is GSEA-specific -- doesn't apply to ORA
+            nes = NA_real_, es = NA_real_, log2err = NA_real_,   # fora() is ORA, not GSEA -- no NES/ES/log2err
+            queried_at = as.character(Sys.time())
+          )
+        } else NULL
+        store_enrichment(factor_id, "ora", "pos", rows)
+      }
+    }
+  }
+  message("wgcna_ora_grid: ", wgcna_n_entries, " fit-level result(s) across those file(s)")
+} else {
+  message("wgcna_ora_grid: no results dir found, skipping")
 }
 
 DBI::dbDisconnect(con)
