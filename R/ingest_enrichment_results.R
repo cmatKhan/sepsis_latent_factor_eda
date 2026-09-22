@@ -35,6 +35,20 @@ option_list <- list(
 opt <- parse_args(OptionParser(option_list = option_list))
 con <- open_stability_db(opt$db)
 
+# Accepts EITHER rslurm's own raw `_rslurm_<jobname>` naming (pass the
+# directory that CONTAINS it) OR a directory that already IS the results
+# folder itself, OR a shared parent with a plain `<jobname>/` subfolder
+# (results_*.RDS directly inside, no `_rslurm_` prefix) -- confirmed in
+# practice this project's actual cluster output can land any of these
+# ways depending on how it's collected/organized after a job completes.
+# Same fallback pattern as R/ingest_core_results.R.
+resolve_family_dir <- function(bundle_dir, jobname) {
+  candidates <- c(file.path(bundle_dir, paste0("_rslurm_", jobname)), file.path(bundle_dir, jobname))
+  for (d in candidates) if (length(list.files(d, pattern = "^results_\\d+\\.RDS$")) > 0) return(d)
+  if (length(list.files(bundle_dir, pattern = "^results_\\d+\\.RDS$")) > 0) return(bundle_dir)
+  NA_character_
+}
+
 get_factor_id <- function(fit_id, factor_index) {
   DBI::dbGetQuery(con, "SELECT factor_id FROM factors WHERE fit_id = ? AND factor_index = ?",
                    params = list(fit_id, factor_index))$factor_id
@@ -52,8 +66,8 @@ store_enrichment <- function(factor_id, query_type, direction, rows) {
 
 ## ---- fgsea_grid --------------------------------------------------------------
 
-fam_dir <- file.path(opt$`bundle-dir`, "_rslurm_fgsea_grid")
-if (dir.exists(fam_dir)) {
+fam_dir <- resolve_family_dir(opt$`bundle-dir`, "fgsea_grid")
+if (!is.na(fam_dir)) {
   result_files <- list.files(fam_dir, pattern = "^results_\\d+\\.RDS$", full.names = TRUE)
   message("fgsea_grid: ", length(result_files), " result file(s)")
   n_entries <- 0
@@ -205,8 +219,8 @@ if (dir.exists(fam_dir)) {
 # scope). Always query_type = "ora", direction = "pos" (WGCNA modules
 # have no direction concept at all).
 
-wgcna_fam_dir <- file.path(opt$`bundle-dir`, "_rslurm_wgcna_ora_grid")
-if (dir.exists(wgcna_fam_dir)) {
+wgcna_fam_dir <- resolve_family_dir(opt$`bundle-dir`, "wgcna_ora_grid")
+if (!is.na(wgcna_fam_dir)) {
   wgcna_result_files <- list.files(wgcna_fam_dir, pattern = "^results_\\d+\\.RDS$", full.names = TRUE)
   message("wgcna_ora_grid: ", length(wgcna_result_files), " result file(s)")
   wgcna_n_entries <- 0

@@ -15,9 +15,23 @@ option_list <- list(
 opt <- parse_args(OptionParser(option_list = option_list))
 con <- open_stability_db(opt$db)
 
+# Accepts EITHER rslurm's own raw `_rslurm_<jobname>` naming (pass the
+# directory that CONTAINS it) OR a directory that already IS the results
+# folder itself, OR a shared parent with a plain `<jobname>/` subfolder
+# (results_*.RDS directly inside, no `_rslurm_` prefix) -- confirmed in
+# practice this project's actual cluster output can land any of these
+# ways depending on how it's collected/organized after a job completes.
+# Same fallback pattern as R/ingest_core_results.R.
+resolve_family_dir <- function(bundle_dir, jobname) {
+  candidates <- c(file.path(bundle_dir, paste0("_rslurm_", jobname)), file.path(bundle_dir, jobname))
+  for (d in candidates) if (length(list.files(d, pattern = "^results_\\d+\\.RDS$")) > 0) return(d)
+  if (length(list.files(bundle_dir, pattern = "^results_\\d+\\.RDS$")) > 0) return(bundle_dir)
+  NA_character_
+}
+
 for (jobname in c("projectr_within_grid", "projectr_cross_grid")) {
-  fam_dir <- file.path(opt$`bundle-dir`, paste0("_rslurm_", jobname))
-  if (!dir.exists(fam_dir)) { message(jobname, ": no results dir found, skipping"); next }
+  fam_dir <- resolve_family_dir(opt$`bundle-dir`, jobname)
+  if (is.na(fam_dir)) { message(jobname, ": no results dir found, skipping"); next }
   result_files <- list.files(fam_dir, pattern = "^results_\\d+\\.RDS$", full.names = TRUE)
   message(jobname, ": ", length(result_files), " result file(s)")
 
