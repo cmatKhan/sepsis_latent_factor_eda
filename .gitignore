@@ -5,3 +5,6 @@ logs/
 data/
 datasets.txt
 .env
+Rplots.pdf
+**.squash
+session.txt
