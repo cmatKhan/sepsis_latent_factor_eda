@@ -277,11 +277,20 @@ compute_wgcna_kme <- function(con, dataset_id, dataset_yaml, db_path, force = FA
 #' for that purpose. Sourced lazily (once) since the ingest pipeline
 #' doesn't otherwise depend on any app/R file.
 #'
-#' Same non-containerized login-node constraint as compute_wgcna_sft()/
-#' compute_wgcna_kme() (needs the cached matrix + registered metadata
-#' pointer already on disk here). `force = TRUE` always recomputes;
-#' otherwise no-ops if this dataset already has any rows (replace-on-
-#' recompute like matrix_file/wgcna_sft, not additive).
+#' Reads the CACHED sample-metadata artifact (`datasets.sample_metadata_file`,
+#' populated by cache_dataset_metadata() -- see that function's header)
+#' rather than `dataset_metadata()`'s live re-read of the raw
+#' `sample_metadata_path` -- unlike the app (which deliberately always
+#' reflects the raw file's current contents), this needs to run correctly
+#' from wherever compute_wgcna_kme() etc. already run (a plain `Rscript`
+#' invocation via `srun`, possibly in a container -- the raw HuggingFace
+#' path commonly resolves only on whichever machine holds the raw data,
+#' not necessarily there), and the cached copy is exactly what's already
+#' guaranteed reachable everywhere else in this pipeline.
+#'
+#' `force = TRUE` always recomputes; otherwise no-ops if this dataset
+#' already has any rows (replace-on-recompute like matrix_file/wgcna_sft,
+#' not additive).
 compute_wgcna_gene_significance <- function(con, dataset_id, dataset_yaml, db_path, force = FALSE) {
   wg <- dataset_yaml$methods$network$wgcna
   if (is.null(wg)) return(invisible(NULL))
@@ -301,15 +310,22 @@ compute_wgcna_gene_significance <- function(con, dataset_id, dataset_yaml, db_pa
   }
   datExpr <- t(as.matrix(readRDS(resolve_artifact(mat_row$matrix_file, db_path))))
 
-  meta <- dataset_metadata(con, dataset_id, "sample")
-  if (is.null(meta)) {
-    message("  no sample metadata registered for ", dataset_id, " -- skipping WGCNA gene significance")
+  sm_row <- DBI::dbGetQuery(con, "SELECT sample_metadata_file FROM datasets WHERE dataset_id = ?",
+                             params = list(dataset_id))
+  if (nrow(sm_row) == 0 || is.na(sm_row$sample_metadata_file)) {
+    message("  no cached sample metadata for ", dataset_id, " -- run cache_dataset_metadata() first -- skipping WGCNA gene significance")
+    return(invisible(NULL))
+  }
+  meta <- readRDS(resolve_artifact(sm_row$sample_metadata_file, db_path))
+  id_col <- dataset_yaml$dataset$sample_id_col %||% "sample_id"
+  if (!(id_col %in% names(meta))) {
+    message("  cached sample metadata for ", dataset_id, " has no '", id_col, "' column -- skipping WGCNA gene significance")
     return(invisible(NULL))
   }
 
   message("  computing WGCNA gene significance for ", dataset_id, " (", ncol(datExpr), " genes x ",
-          length(setdiff(names(meta), "sample_id")), " fields)...")
-  gs <- generic_association_scan(datExpr, meta, id_col = "sample_id")
+          length(setdiff(names(meta), id_col)), " fields)...")
+  gs <- generic_association_scan(datExpr, meta, id_col = id_col)
   if (nrow(gs) == 0) return(invisible(NULL))
 
   DBI::dbExecute(con, "DELETE FROM wgcna_gene_significance WHERE dataset_id = ?", params = list(dataset_id))
