@@ -116,6 +116,21 @@ cache_dataset_metadata <- function(con, dataset_id, dataset_yaml, db_path, force
     message("  ", if (force) "force-recaching" else if (stale) "recaching (stale)" else "caching",
             " ", kind, " metadata for ", dataset_id, "...")
     df <- as.data.frame(arrow::read_parquet(raw_path))
+    # Force every column to materialize as a plain R vector -- confirmed
+    # directly (2026-09-22) that as.data.frame() on an arrow Table does
+    # NOT strip Arrow's own ALTREP wrapper from string columns (class()
+    # reports "character", but the real representation stays an
+    # `arrow::array_string_vector`). saveRDS()-ing that wrapper produces a
+    # file that silently corrupts to a LENGTH-ZERO vector when read back
+    # from any R session without the `arrow` package installed (e.g. the
+    # dedicated WGCNA container R/compute_wgcna_diagnostics.R needs to run
+    # in) -- readRDS() only warns "cannot unserialize ALTVEC object", it
+    # does not error, so this was silently producing zero rows downstream
+    # (compute_wgcna_gene_significance()'s id-column merge finding no
+    # overlap) rather than a visible failure. Re-indexing forces real
+    # materialization (confirmed: strips the ALTREP class tag) --
+    # harmless no-op for columns that were never ALTREP to begin with.
+    df[] <- lapply(df, function(x) x[seq_along(x)])
     fname <- paste0(kind, "_metadata.rds")
     saveRDS(df, file.path(art_dir, fname))
     rel_path <- file.path("stability_artifacts", dataset_id, fname)
@@ -295,7 +310,13 @@ compute_wgcna_gene_significance <- function(con, dataset_id, dataset_yaml, db_pa
   wg <- dataset_yaml$methods$network$wgcna
   if (is.null(wg)) return(invisible(NULL))
   if (!exists("generic_association_scan")) {
-    source(here::here("app/R/metadata_helpers.R"))
+    # Plain relative path, not here::here() -- the `here` package isn't
+    # installed in the dedicated WGCNA container this function's only
+    # caller (R/compute_wgcna_diagnostics.R) needs to run in (confirmed
+    # directly, 2026-09-22: a minimal biocontainers-style image with
+    # WGCNA/DBI/RSQLite/yaml but not `here`/`optparse`/`arrow`). Callers
+    # are always invoked from the project root (see that script's header).
+    source("app/R/metadata_helpers.R")
   }
 
   n_existing <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM wgcna_gene_significance WHERE dataset_id = ?",

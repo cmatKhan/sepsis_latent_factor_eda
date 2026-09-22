@@ -37,22 +37,44 @@
 # no-op-if-already-present) own semantics -- see their headers in
 # R/lib/ingest/ingest_dataset.R.
 
-library(here); library(optparse); library(yaml); library(DBI)
-source(here("R/lib/matrices.R"))
-source(here("R/lib/ingest/db.R"))
-source(here("R/lib/ingest/ingest_dataset.R"))   # compute_wgcna_kme()/compute_wgcna_gene_significance()
+# Deliberately does NOT `library(here)`/`library(optparse)` -- confirmed
+# directly (2026-09-22) that the dedicated WGCNA container this script
+# needs (r-wgcna, a minimal biocontainers-style image -- see this file's
+# header) has WGCNA/DBI/RSQLite/yaml but NOT `here` or `optparse`
+# (`library(here)` failing immediately was the actual, reproduced error).
+# Hand-rolled arg parsing instead, same idiom as R/ingest_results.R's
+# `--overwrite` handling. Also no longer sources R/lib/matrices.R --
+# compute_wgcna_kme()/compute_wgcna_gene_significance() never call
+# anything from it (that file exists for cache_dataset_matrix(), a
+# different step entirely -- see this file's header), so it was dead
+# weight that would ALSO have needed `arrow` (missing from this container
+# too) the moment any of its functions were actually invoked.
+library(yaml); library(DBI)
+source("R/lib/ingest/db.R")
+source("R/lib/ingest/ingest_dataset.R")   # compute_wgcna_kme()/compute_wgcna_gene_significance()
 
-option_list <- list(
-  make_option("--datasets", type = "character", help = "file listing results dir paths, one per line"),
-  make_option("--db", type = "character", default = "results/stability.sqlite"),
-  make_option("--recompute-kme", type = "character", default = NULL,
-              help = "bare flag = recompute kME for every dataset; or a comma-separated list of dataset ids"),
-  make_option("--recompute-gs", type = "character", default = NULL,
-              help = "bare flag = recompute gene significance for every dataset; or a comma-separated list of dataset ids")
-)
-opt <- parse_args(OptionParser(option_list = option_list))
+args <- commandArgs(trailingOnly = TRUE)
+get_opt <- function(flag, default = NULL) {
+  i <- which(args == flag)
+  if (length(i) == 1 && i < length(args)) args[[i + 1]] else default
+}
+get_bare_or_list <- function(flag) {
+  i <- which(args == flag)
+  if (length(i) != 1) return(FALSE)
+  nxt <- if (i < length(args)) args[[i + 1]] else ""
+  if (nzchar(nxt) && !startsWith(nxt, "--")) strsplit(nxt, ",")[[1]] else TRUE
+}
 
-result_dirs <- readLines(opt$datasets) |> trimws()
+datasets_file <- get_opt("--datasets")
+if (is.null(datasets_file)) {
+  stop("Usage: Rscript R/compute_wgcna_diagnostics.R --datasets datasets.txt ",
+       "[--db results/stability.sqlite] [--recompute-kme [id1,id2,...]] [--recompute-gs [id1,id2,...]]")
+}
+db_path <- get_opt("--db", "results/stability.sqlite")
+recompute_kme <- get_bare_or_list("--recompute-kme")
+recompute_gs  <- get_bare_or_list("--recompute-gs")
+
+result_dirs <- readLines(datasets_file) |> trimws()
 result_dirs <- result_dirs[nzchar(result_dirs)]
 targets <- data.frame(
   results_dir = result_dirs,
@@ -67,24 +89,17 @@ targets$config_path <- ifelse(is.na(cfg_match), NA_character_, file.path("config
 missing_cfg <- is.na(targets$config_path)
 if (any(missing_cfg)) stop("No config found for: ", paste(targets$dataset_id[missing_cfg], collapse = ", "))
 
-parse_flag_list <- function(x) {
-  if (is.null(x)) return(FALSE)
-  if (nzchar(x)) strsplit(x, ",")[[1]] else TRUE
-}
-recompute_kme <- parse_flag_list(opt$`recompute-kme`)
-recompute_gs  <- parse_flag_list(opt$`recompute-gs`)
-
-con <- open_stability_db(opt$db)
+con <- open_stability_db(db_path)
 for (i in seq_len(nrow(targets))) {
   dataset_id <- targets$dataset_id[i]
   kme_force_i <- isTRUE(recompute_kme) || (is.character(recompute_kme) && dataset_id %in% recompute_kme)
   gs_force_i  <- isTRUE(recompute_gs)  || (is.character(recompute_gs)  && dataset_id %in% recompute_gs)
   ds_yaml <- yaml::read_yaml(targets$config_path[i])
   message("dataset: ", dataset_id)
-  compute_wgcna_kme(con, dataset_id, ds_yaml, opt$db, force = kme_force_i)
-  compute_wgcna_gene_significance(con, dataset_id, ds_yaml, opt$db, force = gs_force_i)
+  compute_wgcna_kme(con, dataset_id, ds_yaml, db_path, force = kme_force_i)
+  compute_wgcna_gene_significance(con, dataset_id, ds_yaml, db_path, force = gs_force_i)
 }
 DBI::dbDisconnect(con)
 
 message("\nDone -- computed WGCNA kME + gene significance for ", nrow(targets),
-        " dataset(s) into ", opt$db)
+        " dataset(s) into ", db_path)
