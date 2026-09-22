@@ -147,7 +147,7 @@ cache_dataset_metadata <- function(con, dataset_id, dataset_yaml, db_path, force
 #' container does not have WGCNA installed. Call this from
 #' R/ingest_results.R or R/cache_dataset_matrices.R (both already
 #' non-containerized, matrix-caching entry points), never from
-#' run_ingest_core_job().
+#' run_ingest_core_compute_job() (its container lacks WGCNA).
 #'
 #' Silently no-ops if `methods.network.wgcna` isn't configured for this
 #' dataset, or if the matrix hasn't been cached yet. `force = TRUE` always
@@ -320,51 +320,68 @@ compute_wgcna_gene_significance <- function(con, dataset_id, dataset_yaml, db_pa
   invisible(NULL)
 }
 
-#' Ingest ONE dataset's job-family results (+ redundancy) into `con`.
-#' Identical behavior to what R/ingest_results.R's body used to do inline;
-#' extracted so R/ingest_jobs/ingest_core_job.R can loop this over many
-#' datasets in a single slurm job (one SQLite writer, avoiding concurrent
-#' writes -- see R/README.md's ingest-slurm design).
+#' Compute ONE dataset's full ingest bundle -- everything ingest_one_dataset()
+#' used to do LIVE against a writer connection, EXCEPT the actual DB writes,
+#' so this can run inside a parallel slurm ARRAY task with no shared writer
+#' at all (see R/ingest_jobs/ingest_core_job.R::run_ingest_core_compute_job()
+#' and R/create_ingest_slurm_bundle.R's `--stage core`). Returns a `bundle`
+#' list consumed by write_ingest_bundle() below.
 #'
-#' NOTE: deliberately does NOT call cache_dataset_matrix() -- that function
-#' runs `preprocessing_script`/`load_input_matrix()`, which `source()`s a
-#' project-relative file path and reads the raw parquet trio. Neither is
-#' reachable from inside the ingest_core slurm job's container (only
-#' slurm_bundles/ingest/ is bind-mounted). cache_dataset_matrix() must be
-#' called on the LOGIN NODE instead, before staging ingest_core -- see
-#' R/create_ingest_slurm_bundle.R's --stage core.
+#' Every fit-referencing id in the bundle uses this convention: POSITIVE =
+#' a real, already-merged `fits.fit_id` (read from the DB); NEGATIVE =
+#' `-local_id`, a placeholder for one of THIS bundle's own new fits, which
+#' doesn't have a real fit_id yet (only assigned once write_ingest_bundle()
+#' actually INSERTs it). `bundle$fits$local_id` itself is always a small
+#' positive integer (1, 2, 3, ... in insertion order within this bundle) --
+#' `write_ingest_bundle()` inserts fits in that exact order and remaps
+#' `-local_id` references to the real fit_id each INSERT returns.
+#'
+#' Opens its own DB connection to `db_path`, but ONLY for reads (existing
+#' fits/pairs/redundancy-cache lookups needed for "new x existing"
+#' comparisons and incremental staleness checks -- see
+#' R/lib/ingest/pairs.R/redundancy.R's `_from_universe` functions) --
+#' never issues BEGIN/INSERT/UPDATE/DELETE. This is safe to run from many
+#' concurrent array tasks against the SAME db_path at once: SQLite's WAL
+#' mode allows unlimited concurrent readers, and no writer lock is ever
+#' requested here (see R/lib/ingest/db.R's WAL/busy_timeout pragmas and
+#' this project's own audit of SQLite's documented WAL concurrency model).
+#'
+#' Cross-dataset coupling is a non-issue -- every artifact path, SQL
+#' filter, and pair/redundancy comparison here is scoped to THIS ONE
+#' dataset_id, so one array task per dataset never needs to see another
+#' task's in-flight work (confirmed directly: compute_factor_pairs()/
+#' compute_wgcna_pairs() only ever compare fits WITHIN the same dataset).
 #'
 #' @param overwrite FALSE, TRUE (every family), or a character vector of
-#'   jobnames to replace.
-#' @param recompute_redundancy passed straight through to
-#'   run_all_redundancy()'s `force` argument.
-#' @param run_pattern_drivers whether to also run the
-#'   projectR::projectionDriveR()-based pattern-driver pass (see
-#'   R/lib/ingest/driver.R) inline. Default TRUE for R/ingest_results.R's
-#'   direct (non-slurm) CLI use, where projectR is just whatever's in that
-#'   R session. FALSE for run_ingest_core_job() specifically -- ingest_core
-#'   runs inside a container that does NOT have projectR installed (a
-#'   different image than the one it needs -- see config/
-#'   ingest_slurm_config.yml's `driver:` entry); the pattern-driver pass is
-#'   staged as its own `driver_grid` job family instead, during
-#'   --stage enrichment (see R/ingest_jobs/driver_job.R).
-#' @param project_root absolute project-root path, used (a) as the
-#'   fallback location for this dataset's rslurm bundle when it isn't
-#'   colocated with results_dir -- see bundle_dir below -- and (b) to
-#'   locate redundancy.R's own source file for staleness detection (see
-#'   run_all_redundancy()). Defaults to getwd(), correct for
-#'   R/ingest_results.R's direct CLI use (run from the project root).
-#'   run_ingest_core_job() passes the container's bind-mounted PROJECT_ROOT
-#'   explicitly instead, since its own cwd is rslurm's bundle directory,
-#'   NOT the project root (see that function's header for why cwd can't
-#'   just be overridden to fix this the other way around).
-ingest_one_dataset <- function(con, config_path, results_dir, db_path,
-                                overwrite = FALSE, recompute_redundancy = FALSE,
-                                run_pattern_drivers = TRUE, project_root = getwd()) {
+#'   jobnames to replace -- same semantics as the old ingest_one_dataset().
+#'   The actual delete_family() call (a write) is deferred to
+#'   write_ingest_bundle(); this function only records WHICH families need
+#'   it in `bundle$families[[jobname]]$overwrite`.
+#' @param recompute_redundancy passed through to the same staleness/force
+#'   logic run_all_redundancy() used to apply, now inlined here since it
+#'   needs the read-only `con` this function already holds.
+#' @param project_root see run_all_redundancy()'s matching doc -- used
+#'   identically here for redundancy.R's own staleness mtime check.
+compute_ingest_bundle <- function(config_path, results_dir, db_path,
+                                    overwrite = FALSE, recompute_redundancy = FALSE,
+                                    project_root = getwd()) {
   dataset_yaml <- yaml::read_yaml(config_path)
   dataset_id <- dataset_yaml$dataset$id
   stopifnot(!is.null(dataset_id))
   message("dataset: ", dataset_id)
+
+  bundle <- list(dataset_id = dataset_id,
+                 description = dataset_yaml$dataset$description %||% NA_character_,
+                 sample_metadata = dataset_yaml$dataset[c("sample_metadata_path", "sample_id_col")],
+                 feature_metadata = list(path = dataset_yaml$dataset$feature_metadata_path,
+                                         id_col = dataset_yaml$dataset$feature_id_col,
+                                         ensembl_col = dataset_yaml$dataset$ensembl_col %||% "ensembl",
+                                         symbol_col = dataset_yaml$dataset$symbol_col %||% NA_character_),
+                 families = list(), report = list(),
+                 fits = NULL, factors = NULL, wgcna_modules = NULL,
+                 factor_pairs = NULL, wgcna_fit_pairs = NULL, wgcna_module_pairs = NULL,
+                 factor_stability_updates = NULL,
+                 fit_redundancy = NULL, pattern_markers = NULL, redundancy_deletes = integer(0))
 
   family_dirs <- Filter(
     function(d) length(list.files(d, pattern = "^results_\\d+\\.RDS$")) > 0,
@@ -372,65 +389,49 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
   )
   if (length(family_dirs) == 0) {
     message("  no job family subdirectories with results_*.RDS in ", results_dir, " -- skipping")
-    return(invisible(dataset_id))
+    return(invisible(bundle))
   }
   jobnames <- basename(family_dirs)
   message("  families found: ", paste(jobnames, collapse = ", "))
 
-  # Each family's ORIGINAL rslurm bundle (_rslurm_<jobname>/params.RDS) --
-  # NOT the same tree as family_dirs/results_dir above (that's where
-  # RESULTS landed; the bundle is where params.RDS/f.RDS/etc. that
-  # PRODUCED those results still live). Two conventions in the wild here:
-  # (1) results_dir's own sibling, dropping its "_results" suffix -- e.g.
-  # /scratch/.../GSE110487_T2_results (results) next to /scratch/.../
-  # GSE110487_T2 (bundle) -- what R/lib/submit_all_script.R's rsync
-  # workflow actually produces when deployed to a cluster, one dataset's
-  # bundle/results copied in as two independent top-level directories; (2)
-  # project_root/slurm_bundles/<dataset_id> -- what R/create_slurm_bundle.R
-  # writes locally when bundle-building and ingest happen from the SAME
-  # project checkout, never separately relocated. Try (1) first since it's
-  # colocated with results_dir (the input we actually have in hand), (2) as
-  # a fallback for co-located/local use.
+  # See ingest_one_dataset()'s original comment (now here) for the two
+  # bundle_dir conventions this tries.
   bundle_dir <- sub("_results$", "", results_dir)
   if (!dir.exists(bundle_dir)) bundle_dir <- file.path(project_root, "slurm_bundles", dataset_id)
 
-  ensure_dataset(con, dataset_id, dataset_yaml$dataset$description %||% NA_character_)
   art_dir <- artifacts_dir(db_path, dataset_id)
   dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
 
-  ds_cfg <- dataset_yaml$dataset
-  register_metadata_source(con, dataset_id, "sample", ds_cfg$sample_metadata_path, ds_cfg$sample_id_col)
-  register_metadata_source(con, dataset_id, "feature", ds_cfg$feature_metadata_path, ds_cfg$feature_id_col,
-                            ensembl_col = ds_cfg$ensembl_col %||% "ensembl",
-                            symbol_col = ds_cfg$symbol_col %||% NA_character_)
+  con <- open_stability_db(db_path)   # READ-ONLY IN PRACTICE -- see this function's header
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
 
   overwrite_requested <- function(jobname) {
     isTRUE(overwrite) || (is.character(overwrite) && jobname %in% overwrite)
   }
 
-  new_fits_by_method <- list()
-  report <- list()
+  local_counter <- 0L
+  fits_rows <- list(); factors_rows <- list(); wgcna_modules_rows <- list()
+  new_local_ids_by_method <- list()
 
   for (k in seq_along(jobnames)) {
     jobname <- jobnames[k]
     fam_dir <- family_dirs[k]
     cls <- classify_jobname(jobname)
 
-    if (family_already_ingested(con, dataset_id, jobname)) {
-      if (overwrite_requested(jobname)) {
-        message("  [", jobname, "] already ingested -- OVERWRITING")
-        delete_family(con, db_path, dataset_id, jobname)
-      } else {
+    already <- family_already_ingested(con, dataset_id, jobname)
+    if (already) {
+      if (!overwrite_requested(jobname)) {
         message("  [", jobname, "] already ingested -- skipping (use overwrite = '", jobname, "' to replace)")
-        report[[jobname]] <- "skipped"
+        bundle$report[[jobname]] <- "skipped"
         next
       }
+      message("  [", jobname, "] already ingested -- will OVERWRITE at merge time")
     }
 
     params_path <- file.path(bundle_dir, paste0("_rslurm_", jobname), "params.RDS")
     if (!file.exists(params_path)) {
       message("  [", jobname, "] bundle params not found at ", params_path, " -- skipping this family")
-      report[[jobname]] <- "skipped (no params.RDS)"
+      bundle$report[[jobname]] <- "skipped (no params.RDS)"
       next
     }
     params <- readRDS(params_path)
@@ -438,10 +439,12 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
     result_files <- list.files(fam_dir, pattern = "^results_\\d+\\.RDS$", full.names = TRUE)
     task_ids <- as.integer(sub("^results_(\\d+)\\.RDS$", "\\1", basename(result_files)))
 
-    n_ok <- 0L; n_failed <- 0L; n_missing <- 0L; n_scores <- 0L
-    new_ids <- integer(0)
+    bundle$families[[jobname]] <- list(family = cls$family, method = cls$method,
+                                        overwrite = already, n_results = length(result_files),
+                                        results_dir = normalizePath(results_dir))
 
-    DBI::dbExecute(con, "BEGIN")
+    n_ok <- 0L; n_failed <- 0L; n_missing <- 0L
+
     for (task in seq_len(nrow(params)) - 1L) {
       params_row <- params[task + 1L, , drop = FALSE]
       f <- result_files[match(task, task_ids)]
@@ -503,43 +506,36 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
         diag_file_val[[diag_cols[[ext$method]]]] <- file.path("stability_artifacts", dataset_id, fname)
       }
 
-      DBI::dbExecute(con,
-        "INSERT INTO fits (dataset_id, method, family, jobname, rank, seed, alpha, power,
-                           rank_genes, rank_subjects, rank_time,
-                           mse, n_factors, status, converged, loadings_file, scores_file, time_loadings_file, raw_result_file,
-                           cogaps_diag_file, pca_diag_file, spca_diag_file, ica_diag_file, nmf_diag_file, cp_diag_file, tucker_diag_file)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        params = list(dataset_id, ext$method, ext$family, jobname,
-                      fit$rank, fit$seed, fit$alpha, fit$power,
-                      fit$rank_genes, fit$rank_subjects, fit$rank_time,
-                      fit$mse, fit$n_factors, fit$status, fit$converged, loadings_file, scores_file, time_loadings_file,
-                      raw_result_file,
-                      diag_file_val$cogaps_diag_file, diag_file_val$pca_diag_file, diag_file_val$spca_diag_file,
-                      diag_file_val$ica_diag_file, diag_file_val$nmf_diag_file, diag_file_val$cp_diag_file,
-                      diag_file_val$tucker_diag_file))
-      fit_id <- DBI::dbGetQuery(con, "SELECT last_insert_rowid() AS id")$id
+      local_counter <- local_counter + 1L
+      local_id <- local_counter
+      fits_rows[[length(fits_rows) + 1]] <- data.frame(
+        local_id = local_id, dataset_id = dataset_id, method = ext$method, family = ext$family,
+        jobname = jobname, rank = fit$rank, seed = fit$seed, alpha = fit$alpha, power = fit$power,
+        rank_genes = fit$rank_genes, rank_subjects = fit$rank_subjects, rank_time = fit$rank_time,
+        mse = fit$mse, n_factors = fit$n_factors, status = fit$status, converged = fit$converged,
+        loadings_file = loadings_file, scores_file = scores_file, time_loadings_file = time_loadings_file,
+        raw_result_file = raw_result_file,
+        cogaps_diag_file = diag_file_val$cogaps_diag_file, pca_diag_file = diag_file_val$pca_diag_file,
+        spca_diag_file = diag_file_val$spca_diag_file, ica_diag_file = diag_file_val$ica_diag_file,
+        nmf_diag_file = diag_file_val$nmf_diag_file, cp_diag_file = diag_file_val$cp_diag_file,
+        tucker_diag_file = diag_file_val$tucker_diag_file,
+        stringsAsFactors = FALSE)
 
       if (fit$status == "ok") {
         n_ok <- n_ok + 1L
-        if (!is.na(scores_file)) n_scores <- n_scores + 1L
-        new_ids <- c(new_ids, fit_id)
+        new_local_ids_by_method[[ext$method]] <- c(new_local_ids_by_method[[ext$method]], -local_id)
         if (!is.null(ext$loadings)) {
-          DBI::dbWriteTable(con, "factors", data.frame(
-            fit_id = fit_id, factor_index = seq_len(ncol(ext$loadings)),
-            stability_cosine = NA_real_, stability_pearson = NA_real_,
-            stability_spearman = NA_real_
-          ), append = TRUE)
+          factors_rows[[length(factors_rows) + 1]] <- data.frame(
+            fit_ref = -local_id, factor_index = seq_len(ncol(ext$loadings)),
+            stability_cosine = NA_real_, stability_pearson = NA_real_, stability_spearman = NA_real_)
         }
         if (!is.null(ext$modules)) {
-          DBI::dbWriteTable(con, "wgcna_modules",
-                            cbind(fit_id = fit_id, ext$modules), append = TRUE)
+          wgcna_modules_rows[[length(wgcna_modules_rows) + 1]] <- cbind(fit_ref = -local_id, ext$modules)
           mod_ids <- setdiff(sort(unique(ext$modules$module)), 0L)
           if (length(mod_ids) > 0) {
-            DBI::dbWriteTable(con, "factors", data.frame(
-              fit_id = fit_id, factor_index = mod_ids,
-              stability_cosine = NA_real_, stability_pearson = NA_real_,
-              stability_spearman = NA_real_
-            ), append = TRUE)
+            factors_rows[[length(factors_rows) + 1]] <- data.frame(
+              fit_ref = -local_id, factor_index = mod_ids,
+              stability_cosine = NA_real_, stability_pearson = NA_real_, stability_spearman = NA_real_)
           }
         }
       } else if (fit$status == "failed") {
@@ -547,65 +543,302 @@ ingest_one_dataset <- function(con, config_path, results_dir, db_path,
       } else {
         n_missing <- n_missing + 1L
       }
-
     }
-    record_ingest(con, dataset_id, jobname, cls$family, cls$method,
-                  n_results = length(result_files), results_dir = normalizePath(results_dir))
-    DBI::dbExecute(con, "COMMIT")
-
-    if (length(new_ids) > 0) {
-      key <- cls$method
-      new_fits_by_method[[key]] <- c(new_fits_by_method[[key]], new_ids)
-    }
-    report[[jobname]] <- sprintf("ingested (%d ok, %d failed, %d missing of %d tasks)",
-                                  n_ok, n_failed, n_missing, nrow(params))
-    message("  [", jobname, "] ", report[[jobname]])
+    bundle$report[[jobname]] <- sprintf("ingested (%d ok, %d failed, %d missing of %d tasks)",
+                                         n_ok, n_failed, n_missing, nrow(params))
+    message("  [", jobname, "] ", bundle$report[[jobname]])
   }
 
-  # Wrapped in ONE transaction: compute_wgcna_pairs()'s full pairwise
-  # double loop (R/lib/ingest/pairs.R) and run_all_redundancy()'s
-  # per-representative-fit loop (R/lib/ingest/redundancy.R) both issue
-  # many small autocommit dbExecute()/dbWriteTable() calls with no
-  # batching of their own -- confirmed the real cause of a genuinely
-  # measured ingest_core seff report showing only 28.42% CPU efficiency
-  # over a 1h19m single-core run (i.e. ~56 minutes of the wall-clock spent
-  # blocked on per-statement fsyncs, not computing) -- same "death by a
-  # thousand fsyncs" pattern already diagnosed and fixed for driver_grid
-  # earlier (see run_all_pattern_drivers()'s own transaction-wrapping
-  # comment in driver.R for the original real-seff-backed diagnosis this
-  # mirrors). on.exit()'s rollback-if-not-committed guard ensures an
-  # error partway through never leaves an open transaction for the NEXT
-  # dataset's writes (run_ingest_core_job() loops many datasets against
-  # the same connection) to land inside.
-  DBI::dbExecute(con, "BEGIN")
-  pairs_committed <- FALSE
-  on.exit(if (!pairs_committed) DBI::dbExecute(con, "ROLLBACK"), add = TRUE)
+  bundle$fits <- if (length(fits_rows)) do.call(rbind, fits_rows) else NULL
+  bundle$factors <- if (length(factors_rows)) do.call(rbind, factors_rows) else NULL
+  bundle$wgcna_modules <- if (length(wgcna_modules_rows)) do.call(rbind, wgcna_modules_rows) else NULL
 
-  for (method in names(new_fits_by_method)) {
-    ids <- new_fits_by_method[[method]]
-    message("  [pairs:", method, "] computing similarities for ", length(ids), " new fits ...")
+  resolve_local <- function(rel_paths) vapply(rel_paths, resolve_artifact, character(1), db_path = db_path)
+
+  # ---- pairs (new x existing, per method) ----
+  for (method in names(new_local_ids_by_method)) {
+    new_ids <- new_local_ids_by_method[[method]]
     if (method == "wgcna") {
-      compute_wgcna_pairs(con, dataset_id, ids)
+      existing <- DBI::dbGetQuery(con, "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = 'wgcna' AND status = 'ok'",
+                                   params = list(dataset_id))
+      existing_ids <- existing$fit_id
+      existing_mods <- if (length(existing_ids)) DBI::dbGetQuery(con, sprintf(
+        "SELECT fit_id, gene, module FROM wgcna_modules WHERE fit_id IN (%s)", paste(existing_ids, collapse = ","))
+      ) else data.frame(fit_id = integer(0), gene = character(0), module = integer(0))
+      mod_list <- split(existing_mods[, c("gene", "module")], existing_mods$fit_id)
+      if (!is.null(bundle$wgcna_modules)) {
+        new_mod_list <- split(bundle$wgcna_modules[, c("gene", "module")], bundle$wgcna_modules$fit_ref)
+        mod_list <- c(mod_list, new_mod_list)
+      }
+      all_ids <- c(existing_ids, if (!is.null(bundle$wgcna_modules)) unique(bundle$wgcna_modules$fit_ref) else integer(0))
+      out <- compute_wgcna_pairs_from_universe(mod_list, all_ids, new_ids)
+      if (!is.null(out)) {
+        bundle$wgcna_fit_pairs <- rbind(bundle$wgcna_fit_pairs, out$fit_pairs)
+        bundle$wgcna_module_pairs <- rbind(bundle$wgcna_module_pairs, out$module_pairs)
+      }
     } else {
-      n <- compute_factor_pairs(con, db_path, dataset_id, method, ids)
-      message("  [pairs:", method, "] wrote ", n, " factor-pair rows")
-      update_factor_stability(con, dataset_id, method)
+      existing <- DBI::dbGetQuery(con,
+        "SELECT fit_id AS id, rank, loadings_file FROM fits
+         WHERE dataset_id = ? AND method = ? AND status = 'ok' AND loadings_file IS NOT NULL",
+        params = list(dataset_id, method))
+      existing_u <- if (nrow(existing)) {
+        data.frame(id = existing$id, rank = existing$rank, loadings_file_abs = resolve_local(existing$loadings_file))
+      } else NULL
+
+      new_sub <- bundle$fits[bundle$fits$method == method & bundle$fits$status == "ok" &
+                                !is.na(bundle$fits$loadings_file), , drop = FALSE]
+      new_u <- if (nrow(new_sub)) {
+        data.frame(id = -new_sub$local_id, rank = new_sub$rank, loadings_file_abs = resolve_local(new_sub$loadings_file))
+      } else NULL
+
+      universe <- rbind(existing_u, new_u)
+      rows <- compute_factor_pairs_from_universe(universe, new_ids)
+      if (!is.null(rows)) {
+        message("  [pairs:", method, "] computed ", nrow(rows), " factor-pair rows for ", length(new_ids), " new fits")
+        bundle$factor_pairs <- rbind(bundle$factor_pairs, rows)
+      }
+
+      existing_pairs <- DBI::dbGetQuery(con,
+        "SELECT fp.fit_a, fp.fit_b, fp.factor_a, fp.factor_b, fp.cosine, fp.pearson, fp.spearman, fp.matched, fp.same_rank
+         FROM factor_pairs fp JOIN fits fa ON fa.fit_id = fp.fit_a
+         WHERE fa.dataset_id = ? AND fa.method = ?", params = list(dataset_id, method))
+      combined_pairs <- rbind(existing_pairs, rows)
+      agg <- if (!is.null(combined_pairs)) update_factor_stability_from_pairs(combined_pairs) else NULL
+      if (!is.null(agg)) bundle$factor_stability_updates <- rbind(bundle$factor_stability_updates, agg)
     }
   }
 
-  run_all_redundancy(con, db_path, dataset_id, force = recompute_redundancy, project_root = project_root)
+  # ---- redundancy (representative fits, new x existing universe) ----
+  this_file <- file.path(project_root, "R/lib/ingest/redundancy.R")
+  redundancy_src_mtime <- if (file.exists(this_file)) file.mtime(this_file) else Sys.time()
+
+  for (method in c("nmf", "cogaps", "spca", "ica")) {
+    existing_all <- DBI::dbGetQuery(con,
+      "SELECT fit_id AS id, method, family, rank, alpha, mse, status FROM fits WHERE dataset_id = ? AND method = ?",
+      params = list(dataset_id, method))
+    new_all <- if (!is.null(bundle$fits)) bundle$fits[bundle$fits$method == method,
+      c("local_id", "method", "family", "rank", "alpha", "mse", "status"), drop = FALSE] else NULL
+    if (!is.null(new_all) && nrow(new_all)) {
+      new_all$id <- -new_all$local_id
+      new_all$local_id <- NULL
+    } else new_all <- NULL
+    universe_fits <- rbind(existing_all, new_all)
+    if (is.null(universe_fits) || nrow(universe_fits) == 0) next
+    rep_ids <- select_representative_ids_from_universe(universe_fits, method)
+
+    for (rid in rep_ids) {
+      if (rid < 0) {
+        row <- bundle$fits[bundle$fits$local_id == -rid, , drop = FALSE]
+        if (nrow(row) == 0 || is.na(row$loadings_file)) next
+        loadings_path <- resolve_artifact(row$loadings_file, db_path)
+        raw_path <- if (is.na(row$raw_result_file)) NA_character_ else resolve_artifact(row$raw_result_file, db_path)
+        out <- run_redundancy_for_fit(method, loadings_path, raw_path)   # new fit -- always compute, no cache possible
+        if (is.null(out)) next
+        fname <- sprintf("%s_local%d_redundancy.rds", method, -rid)
+        saveRDS(out$summary$matrix, file.path(art_dir, fname))
+      } else {
+        existing_cache <- DBI::dbGetQuery(con, "SELECT redundancy_file FROM fit_redundancy WHERE fit_id = ?", params = list(rid))
+        have_cache <- nrow(existing_cache) > 0 && !is.na(existing_cache$redundancy_file[1])
+        stale <- FALSE
+        if (!recompute_redundancy && have_cache) {
+          art_path <- resolve_artifact(existing_cache$redundancy_file[1], db_path)
+          if (file.exists(art_path) && file.mtime(art_path) < redundancy_src_mtime) {
+            message("  fit_redundancy for fit_id ", rid, " is STALE (redundancy.R edited since) -- recomputing")
+            stale <- TRUE
+          }
+        }
+        if (!recompute_redundancy && !stale && have_cache) next
+
+        f <- DBI::dbGetQuery(con, "SELECT * FROM fits WHERE fit_id = ?", params = list(rid))
+        if (nrow(f) == 0 || is.na(f$loadings_file)) next
+        out <- run_redundancy_for_fit(method, resolve_artifact(f$loadings_file, db_path),
+                                       if (is.na(f$raw_result_file)) NA_character_ else resolve_artifact(f$raw_result_file, db_path))
+        if (is.null(out)) next
+        fname <- sprintf("%s_fit%d_redundancy.rds", method, rid)
+        saveRDS(out$summary$matrix, file.path(art_dir, fname))
+        if (stale || have_cache) bundle$redundancy_deletes <- c(bundle$redundancy_deletes, rid)
+      }
+      bundle$pattern_markers <- rbind(bundle$pattern_markers, cbind(fit_ref = rid, out$markers[, c("factor_index", "gene", "score")]))
+      bundle$fit_redundancy <- rbind(bundle$fit_redundancy, data.frame(
+        fit_ref = rid, max_offdiag_cosine = out$summary$max_offdiag, median_offdiag_cosine = out$summary$median_offdiag,
+        n_factors_with_no_markers = out$summary$n_factors_with_no_markers,
+        redundancy_file = file.path("stability_artifacts", dataset_id, fname)))
+    }
+  }
+
+  invisible(bundle)
+}
+
+#' Apply one dataset's compute_ingest_bundle() output to the shared DB.
+#' Wrapped in ONE transaction -- confirmed the fix for a real ingest_core
+#' seff report showing only 28.42% CPU efficiency over a 1h19m single-core
+#' run (i.e. ~56 minutes of wall-clock spent blocked on per-statement
+#' fsyncs, not computing) -- same "death by a thousand fsyncs" pattern
+#' already diagnosed and fixed for driver_grid. on.exit()'s
+#' rollback-if-not-committed guard ensures an error partway through never
+#' leaves an open transaction for the NEXT dataset's writes (the merge
+#' script loops many datasets' bundles against the same connection) to
+#' land inside.
+write_ingest_bundle <- function(con, db_path, bundle) {
+  dataset_id <- bundle$dataset_id
+  if (length(bundle$families) == 0 && is.null(bundle$fits)) return(invisible(dataset_id))
+
+  DBI::dbExecute(con, "BEGIN")
+  committed <- FALSE
+  on.exit(if (!committed) DBI::dbExecute(con, "ROLLBACK"), add = TRUE)
+
+  ensure_dataset(con, dataset_id, bundle$description)
+  register_metadata_source(con, dataset_id, "sample", bundle$sample_metadata$sample_metadata_path,
+                            bundle$sample_metadata$sample_id_col)
+  register_metadata_source(con, dataset_id, "feature", bundle$feature_metadata$path, bundle$feature_metadata$id_col,
+                            ensembl_col = bundle$feature_metadata$ensembl_col, symbol_col = bundle$feature_metadata$symbol_col)
+
+  for (jobname in names(bundle$families)) {
+    if (isTRUE(bundle$families[[jobname]]$overwrite)) {
+      message("  [", jobname, "] OVERWRITING")
+      delete_family(con, db_path, dataset_id, jobname)
+    }
+  }
+
+  local_to_fit_id <- integer(0)   # names = local_id (character), values = real fit_id
+  if (!is.null(bundle$fits)) {
+    fits <- bundle$fits[order(bundle$fits$local_id), , drop = FALSE]
+    for (i in seq_len(nrow(fits))) {
+      r <- fits[i, ]
+      DBI::dbExecute(con,
+        "INSERT INTO fits (dataset_id, method, family, jobname, rank, seed, alpha, power,
+                           rank_genes, rank_subjects, rank_time,
+                           mse, n_factors, status, converged, loadings_file, scores_file, time_loadings_file, raw_result_file,
+                           cogaps_diag_file, pca_diag_file, spca_diag_file, ica_diag_file, nmf_diag_file, cp_diag_file, tucker_diag_file)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params = list(r$dataset_id, r$method, r$family, r$jobname, r$rank, r$seed, r$alpha, r$power,
+                      r$rank_genes, r$rank_subjects, r$rank_time, r$mse, r$n_factors, r$status, r$converged,
+                      r$loadings_file, r$scores_file, r$time_loadings_file, r$raw_result_file,
+                      r$cogaps_diag_file, r$pca_diag_file, r$spca_diag_file, r$ica_diag_file,
+                      r$nmf_diag_file, r$cp_diag_file, r$tucker_diag_file))
+      fit_id <- DBI::dbGetQuery(con, "SELECT last_insert_rowid() AS id")$id
+      local_to_fit_id[as.character(r$local_id)] <- fit_id
+    }
+  }
+  # Remap: positive ids (already-merged, from an earlier run) pass through
+  # unchanged; negative ids (-local_id, this bundle's own new fits) map to
+  # the real fit_id just assigned above.
+  remap <- function(ids) ifelse(ids < 0, local_to_fit_id[as.character(-ids)], ids)
+
+  if (!is.null(bundle$factors)) {
+    df <- bundle$factors
+    df$fit_id <- remap(df$fit_ref); df$fit_ref <- NULL
+    DBI::dbWriteTable(con, "factors", df, append = TRUE)
+  }
+  if (!is.null(bundle$wgcna_modules)) {
+    df <- bundle$wgcna_modules
+    df$fit_id <- remap(df$fit_ref); df$fit_ref <- NULL
+    DBI::dbWriteTable(con, "wgcna_modules", df, append = TRUE)
+  }
+  if (!is.null(bundle$factor_pairs)) {
+    df <- bundle$factor_pairs
+    df$fit_a <- remap(df$fit_a); df$fit_b <- remap(df$fit_b)
+    for (start in seq(1, nrow(df), by = 200)) {
+      DBI::dbWriteTable(con, "factor_pairs", df[start:min(start + 199, nrow(df)), , drop = FALSE], append = TRUE)
+    }
+  }
+  if (!is.null(bundle$wgcna_fit_pairs)) {
+    df <- bundle$wgcna_fit_pairs
+    df$fit_a <- remap(df$fit_a); df$fit_b <- remap(df$fit_b)
+    DBI::dbWriteTable(con, "wgcna_fit_pairs", df, append = TRUE)
+  }
+  if (!is.null(bundle$wgcna_module_pairs)) {
+    df <- bundle$wgcna_module_pairs
+    df$fit_a <- remap(df$fit_a); df$fit_b <- remap(df$fit_b)
+    DBI::dbWriteTable(con, "wgcna_module_pairs", df, append = TRUE)
+  }
+  if (!is.null(bundle$factor_stability_updates)) {
+    agg <- bundle$factor_stability_updates
+    agg$fit_id <- remap(agg$fit_id)
+    for (r in seq_len(nrow(agg))) {
+      DBI::dbExecute(con,
+        "UPDATE factors SET stability_cosine = ?, stability_pearson = ?, stability_spearman = ?
+         WHERE fit_id = ? AND factor_index = ?",
+        params = list(agg$cosine[r], agg$pearson[r], agg$spearman[r], agg$fit_id[r], agg$factor_index[r]))
+    }
+  }
+  for (rid in bundle$redundancy_deletes) {
+    DBI::dbExecute(con, "DELETE FROM pattern_markers WHERE fit_id = ?", params = list(rid))
+    DBI::dbExecute(con, "DELETE FROM fit_redundancy WHERE fit_id = ?", params = list(rid))
+  }
+  if (!is.null(bundle$pattern_markers)) {
+    df <- bundle$pattern_markers
+    df$fit_id <- remap(df$fit_ref); df$fit_ref <- NULL
+    DBI::dbWriteTable(con, "pattern_markers", df, append = TRUE)
+  }
+  if (!is.null(bundle$fit_redundancy)) {
+    df <- bundle$fit_redundancy
+    df$fit_id <- remap(df$fit_ref); df$fit_ref <- NULL
+    DBI::dbWriteTable(con, "fit_redundancy", df, append = TRUE)
+  }
+
+  for (jobname in names(bundle$families)) {
+    fam <- bundle$families[[jobname]]
+    record_ingest(con, dataset_id, jobname, fam$family, fam$method, n_results = fam$n_results, results_dir = fam$results_dir)
+  }
 
   DBI::dbExecute(con, "COMMIT")
-  pairs_committed <- TRUE
+  committed <- TRUE
+  invisible(dataset_id)
+}
+
+#' Ingest ONE dataset's job-family results (+ redundancy) into `con`.
+#' Thin wrapper -- compute_ingest_bundle() + write_ingest_bundle() --
+#' kept for the single-dataset direct CLI (R/ingest_results.R) and any
+#' other caller that just wants "ingest this one dataset now," without
+#' the array-job/merge-script split R/ingest_jobs/ingest_core_job.R uses
+#' for the multi-dataset production path.
+#'
+#' NOTE: deliberately does NOT call cache_dataset_matrix() -- that function
+#' runs `preprocessing_script`/`load_input_matrix()`, which `source()`s a
+#' project-relative file path and reads the raw parquet trio. Neither is
+#' reachable from inside the ingest_core slurm job's container (only
+#' slurm_bundles/ingest/ is bind-mounted). cache_dataset_matrix() must be
+#' called separately first (a plain `Rscript` invocation, submitted via
+#' `srun`, never inside ingest_core's container) -- see
+#' R/create_ingest_slurm_bundle.R's --stage core.
+#'
+#' @param overwrite FALSE, TRUE (every family), or a character vector of
+#'   jobnames to replace.
+#' @param recompute_redundancy passed straight through to
+#'   compute_ingest_bundle()'s redundancy staleness/force logic.
+#' @param run_pattern_drivers whether to also run the
+#'   projectR::projectionDriveR()-based pattern-driver pass (see
+#'   R/lib/ingest/driver.R) inline. Default TRUE for R/ingest_results.R's
+#'   direct (non-slurm) CLI use, where projectR is just whatever's in that
+#'   R session. FALSE for the multi-dataset compute-job path -- ingest_core
+#'   runs inside a container that does NOT have projectR installed (a
+#'   different image than the one it needs -- see config/
+#'   ingest_slurm_config.yml's `driver:` entry); the pattern-driver pass is
+#'   staged as its own `driver_grid` job family instead, during
+#'   --stage enrichment (see R/ingest_jobs/driver_job.R).
+#' @param project_root absolute project-root path, used (a) as the
+#'   fallback location for this dataset's rslurm bundle when it isn't
+#'   colocated with results_dir -- see bundle_dir below -- and (b) to
+#'   locate redundancy.R's own source file for staleness detection.
+#'   Defaults to getwd(), correct for R/ingest_results.R's direct CLI use
+#'   (run from the project root).
+ingest_one_dataset <- function(con, config_path, results_dir, db_path,
+                                overwrite = FALSE, recompute_redundancy = FALSE,
+                                run_pattern_drivers = TRUE, project_root = getwd()) {
+  bundle <- compute_ingest_bundle(config_path, results_dir, db_path,
+                                   overwrite = overwrite, recompute_redundancy = recompute_redundancy,
+                                   project_root = project_root)
+  write_ingest_bundle(con, db_path, bundle)
+  dataset_id <- bundle$dataset_id
 
   # Differential feature identification (projectR::projectionDriveR(), see
   # R/lib/ingest/driver.R) -- batch pass over representative fits x
   # 2-4-level categorical sample-metadata columns. Silently no-ops if the
-  # dataset's matrix isn't cached yet (cache_dataset_matrix() is
-  # login-node-only) or has no small categorical columns -- never blocks
-  # the rest of ingest. Skipped entirely when run_pattern_drivers = FALSE
-  # (see this function's @param doc) -- staged as its own driver_grid job
-  # family instead in that case.
+  # dataset's matrix isn't cached yet or has no small categorical columns
+  # -- never blocks the rest of ingest. Skipped entirely when
+  # run_pattern_drivers = FALSE (see this function's @param doc) --
+  # staged as its own driver_grid job family instead in that case.
   if (run_pattern_drivers) {
     # CI (default) and PV are the projectR fork's own paired standard
     # modes (its vignette runs both) -- see R/ingest_jobs/driver_job.R's

@@ -1,53 +1,57 @@
-# Phase-1 slurm job: a SINGLE (non-array) job that loops every dataset in
-# `targets` sequentially against the SAME sqlite DB -- one writer, avoiding
-# concurrent-write corruption.
+# Phase-1 slurm job: a real ARRAY job (one task per dataset, or a small
+# batch of datasets per task via --core-max-array-size -- see
+# R/create_ingest_slurm_bundle.R's `--stage core`), each task computing
+# ONE dataset's full ingest bundle (R/lib/ingest/ingest_dataset.R::
+# compute_ingest_bundle()) with NO shared DB writer at all -- safe to run
+# fully in parallel, since compute_ingest_bundle() only ever opens the DB
+# for READS (never issues BEGIN/INSERT/UPDATE/DELETE; SQLite's WAL mode
+# allows unlimited concurrent readers -- see that function's own header
+# for the full audit this design is based on) and every artifact path it
+# writes is scoped to that one dataset's own stability_artifacts/<id>/
+# directory (no cross-task collisions).
+#
+# Replaces the old single non-array `run_ingest_core_job()`, which looped
+# every dataset serially against ONE shared writer connection -- a real
+# seff report showed that approach at only 28.42% CPU efficiency over a
+# 1h19m single-core run, and even after fixing the transaction-batching
+# portion of that (see ingest_dataset.R's write_ingest_bundle() comment),
+# the remaining ~22-25 CPU-minutes summed across ~32 datasets was still a
+# genuinely serial, embarrassingly-parallel cost. Each array task here
+# just writes its bundle to rslurm's own `results_<task>.RDS` (standard
+# `slurm_apply()` output convention -- the actual DB write happens
+# afterward, serially, in R/ingest_core_results.R).
 #
 # Deliberately does NOT `library(here)`/`source()` anything by path -- the
-# container only has slurm_bundles/ingest/ bind-mounted (see
-# build_apptainer_rscript_path()), not the project's R/ tree, so
-# ingest_one_dataset() and everything it calls must already exist in this
-# job's execution environment via `global_objects` (see
-# R/create_ingest_slurm_bundle.R, which sources R/lib/ingest/*.R on the
-# LOGIN NODE and bundles the resulting function objects alongside
-# `targets`/`db_path`/`recompute_redundancy`).
+# container only has slurm_bundles/ingest/ bind-mounted, not the
+# project's R/ tree, so compute_ingest_bundle() and everything it calls
+# must already exist in this job's execution environment via
+# `global_objects` (see R/create_ingest_slurm_bundle.R, which sources
+# R/lib/ingest/*.R wherever it itself runs -- a plain `Rscript`
+# invocation submitted via `srun`, not inside any container -- and bundles
+# the resulting function objects alongside `db_path`/`recompute_redundancy`/
+# `PROJECT_ROOT`).
 #
-# `targets`/`db_path`/`recompute_redundancy`/`PROJECT_ROOT` are read as
-# FREE VARIABLES, NOT function parameters -- this job is staged via
-# submit_job_family() with jobs_df = NULL, which dispatches to
-# rslurm::slurm_call() with no
-# `params`. rslurm's generated slurm_run_single_R.txt then calls
-# `do.call(f, list())` -- i.e. with ZERO arguments -- relying entirely on
-# `add_objects.RData` (loaded into the same global environment this
-# function's closure resolves free variables against) to supply them.
-# Declaring them as formal parameters instead (as an earlier version of
-# this function did) shadows that global lookup and fails with `argument
-# "db_path" is missing, with no default` the moment the body references
-# it, since nothing ever supplies them positionally. (Contrast with the
-# ARRAY jobs in R/ingest_jobs/fgsea_job.R etc., which as jobs_df-driven
-# slurm_apply() calls DO get one row's values passed in as real params --
-# formal parameters are correct there.)
-run_ingest_core_job <- function() {
-  con <- open_stability_db(db_path)
-  for (i in seq_len(nrow(targets))) {
-    force_redundancy <- isTRUE(recompute_redundancy) ||
-      (is.character(recompute_redundancy) && targets$dataset_id[i] %in% recompute_redundancy)
-    tryCatch(
-      # run_pattern_drivers = FALSE -- this container doesn't have projectR
-      # installed (a different image -- see R/ingest_jobs/driver_job.R's
-      # header and config/ingest_slurm_config.yml's `driver:` entry); that
-      # pass is staged as its own driver_grid job family during
-      # --stage enrichment instead.
-      # project_root = PROJECT_ROOT -- ingest_one_dataset()'s default
-      # (project_root = getwd()) is wrong here: this job's cwd is rslurm's
-      # own bundle directory, not the project root, but
-      # slurm_bundles/<id>/_rslurm_<jobname>/params.RDS lookups (and
-      # run_all_redundancy()'s staleness check) need the latter.
-      ingest_one_dataset(con, targets$config_path[i], targets$results_dir[i], db_path,
-                          recompute_redundancy = force_redundancy, run_pattern_drivers = FALSE,
-                          project_root = PROJECT_ROOT),
-      error = function(e) message("  FAILED (", targets$dataset_id[i], "): ", conditionMessage(e))
-    )
-  }
-  DBI::dbDisconnect(con)
-  invisible(NULL)
+# `dataset_id`/`config_path`/`results_dir` are real formal parameters
+# here (unlike the old single-job version) -- this IS a jobs_df-driven
+# `slurm_apply()` array job now, so rslurm supplies one row's values per
+# call. `db_path`/`recompute_redundancy`/`PROJECT_ROOT` remain FREE
+# VARIABLES (global_objects) -- shared across the whole job family, not
+# per-row.
+#
+# `overwrite` is NOT supported here (always FALSE, same as the old
+# run_ingest_core_job() -- it never threaded overwrite through either):
+# re-running a family that needs overwriting is a single-dataset,
+# deliberate operation better done via the direct CLI
+# (R/ingest_results.R), not the bulk array path.
+run_ingest_core_compute_job <- function(dataset_id, config_path, results_dir) {
+  force_redundancy <- isTRUE(recompute_redundancy) ||
+    (is.character(recompute_redundancy) && dataset_id %in% recompute_redundancy)
+  tryCatch(
+    compute_ingest_bundle(config_path, results_dir, db_path,
+                           recompute_redundancy = force_redundancy, project_root = PROJECT_ROOT),
+    error = function(e) {
+      message("  FAILED (", dataset_id, "): ", conditionMessage(e))
+      NULL
+    }
+  )
 }

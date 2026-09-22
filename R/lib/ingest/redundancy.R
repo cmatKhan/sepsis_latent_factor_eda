@@ -19,6 +19,12 @@
 #      being confounded by a gene's overall expression level). Shrinking/
 #      zero marker counts for newly added factors as rank grows is the
 #      "too many patterns" signal.
+#
+# As in R/lib/ingest/pairs.R, functions here come in a pure
+# (`_from_universe`/`_for_fit`) form usable during a PARALLEL, no-DB-
+# writer compute phase (see ingest_dataset.R::compute_ingest_bundle()),
+# plus a thin DB-querying wrapper preserving the original API for the
+# single-dataset direct path and merge-time use.
 
 within_fit_similarity <- function(loadings) {
   prep <- prepare_loadings(loadings)
@@ -69,6 +75,23 @@ redundancy_summary <- function(loadings, markers) {
   )
 }
 
+#' Compute one fit's redundancy diagnostic from already-resolved absolute
+#' artifact paths (no DB access) -- `loadings_path` and `raw_result_path`
+#' (CoGAPS only, NA otherwise) are absolute file paths. Returns
+#' list(markers, summary) or NULL if the loadings can't be read.
+run_redundancy_for_fit <- function(method, loadings_path, raw_result_path = NA_character_) {
+  if (is.na(loadings_path) || !file.exists(loadings_path)) return(NULL)
+  L <- as.matrix(readRDS(loadings_path))
+
+  markers <- if (method == "cogaps" && !is.na(raw_result_path) && file.exists(raw_result_path)) {
+    cogaps_raw <- tryCatch(readRDS(raw_result_path), error = function(e) NULL)
+    if (is.null(cogaps_raw)) generic_pattern_markers(L) else cogaps_pattern_markers(cogaps_raw)
+  } else {
+    generic_pattern_markers(L)
+  }
+  list(markers = markers, summary = redundancy_summary(L, markers))
+}
+
 #' One method + dataset -> the fit_id(s) ingest should treat as
 #' "representative" for every non-seed-sweep analysis (redundancy,
 #' enrichment, projectr, pattern-drivers). PCA collapses to a SINGLE fit
@@ -85,37 +108,44 @@ redundancy_summary <- function(loadings, markers) {
 #' 1824 of 2236 -- and was the dominant contributor to fgsea_grid tasks
 #' timing out/OOMing on the cluster). cp/tucker/wgcna have no second
 #' parameter to collapse -- every ok fit is already "representative".
-representative_fit_ids <- function(con, dataset_id, method) {
+#'
+#' Pure version: `fits` is a data.frame(id, method, family, rank, alpha,
+#' mse, status) covering the FULL universe (already-merged + this
+#' bundle's new fits) for one dataset -- same id-sign convention as
+#' R/lib/ingest/pairs.R (positive = real fit_id, negative = local id).
+select_representative_ids_from_universe <- function(fits, method) {
+  f <- fits[fits$method == method & fits$status == "ok", , drop = FALSE]
+  if (nrow(f) == 0) return(integer(0))
+
   if (method == "pca") {
-    r <- DBI::dbGetQuery(con,
-      "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = 'pca' AND status = 'ok'
-       ORDER BY rank DESC LIMIT 1", params = list(dataset_id))
-    return(r$fit_id)
+    f <- f[order(-f$rank), , drop = FALSE]
+    return(f$id[1])
   }
   if (method %in% c("nmf", "cogaps", "ica")) {
-    ranks <- DBI::dbGetQuery(con,
-      "SELECT DISTINCT rank FROM fits WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok'",
-      params = list(dataset_id, method))$rank
+    f <- f[f$family == "seed_sweep", , drop = FALSE]
+    if (nrow(f) == 0) return(integer(0))
+    ranks <- sort(unique(f$rank))
     return(vapply(ranks, function(rk) {
-      DBI::dbGetQuery(con,
-        "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = ? AND rank = ?
-         AND family = 'seed_sweep' AND status = 'ok' ORDER BY mse ASC LIMIT 1",
-        params = list(dataset_id, method, rk))$fit_id
+      sub <- f[f$rank == rk, , drop = FALSE]
+      sub$id[which.min(sub$mse)]
     }, integer(1)))
   }
   if (method == "spca") {
-    ks <- DBI::dbGetQuery(con,
-      "SELECT DISTINCT rank FROM fits WHERE dataset_id = ? AND method = 'spca' AND status = 'ok'",
-      params = list(dataset_id))$rank
+    ks <- sort(unique(f$rank))
     return(vapply(ks, function(k) {
-      DBI::dbGetQuery(con,
-        "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = 'spca' AND rank = ?
-         AND status = 'ok' ORDER BY mse ASC LIMIT 1",
-        params = list(dataset_id, k))$fit_id
+      sub <- f[f$rank == k, , drop = FALSE]
+      sub$id[which.min(sub$mse)]
     }, integer(1)))
   }
-  DBI::dbGetQuery(con, "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = ? AND status = 'ok'",
-                   params = list(dataset_id, method))$fit_id
+  f$id
+}
+
+#' Thin DB-querying wrapper -- unchanged public behavior.
+representative_fit_ids <- function(con, dataset_id, method) {
+  fits <- DBI::dbGetQuery(con,
+    "SELECT fit_id AS id, method, family, rank, alpha, mse, status
+     FROM fits WHERE dataset_id = ? AND method = ?", params = list(dataset_id, method))
+  select_representative_ids_from_universe(fits, method)
 }
 
 #' Runs redundancy for every representative fit of every non-orthogonal
@@ -135,8 +165,8 @@ representative_fit_ids <- function(con, dataset_id, method) {
 #'   inside a containerized slurm job is rslurm's own bundle directory, not
 #'   the project root. Defaults to getwd(), correct when called from
 #'   R/ingest_results.R's direct CLI use (run from the project root);
-#'   run_ingest_core_job() passes its bind-mounted PROJECT_ROOT explicitly
-#'   via ingest_one_dataset()'s own project_root argument.
+#'   run_ingest_core_compute_job() passes its bind-mounted PROJECT_ROOT
+#'   explicitly via compute_ingest_bundle()'s own project_root argument.
 run_all_redundancy <- function(con, db_path, dataset_id, force = FALSE, project_root = getwd()) {
   art_dir <- artifacts_dir(db_path, dataset_id)
   dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
@@ -162,17 +192,11 @@ run_all_redundancy <- function(con, db_path, dataset_id, force = FALSE, project_
 
       f <- DBI::dbGetQuery(con, "SELECT * FROM fits WHERE fit_id = ?", params = list(fit_id))
       if (nrow(f) == 0 || is.na(f$loadings_file)) next
-      L <- as.matrix(readRDS(resolve_artifact(f$loadings_file, db_path)))
+      out <- run_redundancy_for_fit(method, resolve_artifact(f$loadings_file, db_path),
+                                     if (is.na(f$raw_result_file)) NA_character_ else resolve_artifact(f$raw_result_file, db_path))
+      if (is.null(out)) next
+      markers <- out$markers; summ <- out$summary
 
-      markers <- if (method == "cogaps" && !is.na(f$raw_result_file)) {
-        cogaps_raw <- tryCatch(readRDS(resolve_artifact(f$raw_result_file, db_path)),
-                                error = function(e) NULL)
-        if (is.null(cogaps_raw)) generic_pattern_markers(L) else cogaps_pattern_markers(cogaps_raw)
-      } else {
-        generic_pattern_markers(L)
-      }
-
-      summ <- redundancy_summary(L, markers)
       fname <- sprintf("%s_fit%d_redundancy.rds", method, fit_id)
       saveRDS(summ$matrix, file.path(art_dir, fname))
 

@@ -234,10 +234,11 @@ submit_job_family <- function(f, jobs_df, jobname, global_objects = character(0)
     # arguments. That check is gated behind `if (!missing(params))`, so
     # omitting the argument entirely (letting slurm_call() fall back to its
     # own default) skips the buggy check altogether. Confirmed against the
-    # installed rslurm 0.6.2. f's real arguments (targets/db_path/etc.) are
+    # installed rslurm 0.6.2. f's real arguments (db_path/etc.) are
     # supplied via `global_objects`, not `params`, for every job this
-    # dispatches to (see run_ingest_core_job()'s header) -- params was never
-    # actually used for anything here.
+    # dispatches to (see R/ingest_jobs/driver_job.R's run_driver_job()
+    # header for a worked example) -- params was never actually used for
+    # anything here.
     do.call(slurm_call, common_args)
   } else {
     n_rows <- nrow(jobs_df)

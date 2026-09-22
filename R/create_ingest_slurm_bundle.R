@@ -1,9 +1,18 @@
 # Two-phase slurm ingest pipeline driver.
 #
-# Phase 1 (--stage core): a SINGLE (non-array) "ingest_core" job that
-# loops every dataset's job-family results (from a user-supplied list of
-# results directories, one per dataset -- see --datasets) into the shared
-# stability DB, one writer at a time (avoiding concurrent-write hazards).
+# Phase 1 (--stage core): a real ARRAY "ingest_core" job -- one task per
+# dataset (or a small batch of datasets per task, see
+# --core-max-array-size), each task computing that dataset's full ingest
+# bundle (R/lib/ingest/ingest_dataset.R::compute_ingest_bundle()) with NO
+# shared DB writer at all (safe: every read this needs is scoped to that
+# one dataset, and SQLite's WAL mode allows unlimited concurrent readers).
+# After the array job finishes, run `Rscript R/ingest_core_results.R` --
+# a lightweight SERIAL merge step (one writer, one connection) that
+# applies every dataset's already-computed bundle to the shared DB. This
+# replaced a single non-array job that looped every dataset serially
+# against one writer connection, confirmed via a real seff report at only
+# 28.42% CPU efficiency over a 1h19m run -- see compute_ingest_bundle()'s
+# and R/ingest_core_results.R's own headers for the full design.
 #
 # Phase 2 (--stage enrichment): run ONLY after Phase 1's job has finished
 # and the DB reflects its results (representative-fit selection needs
@@ -62,8 +71,8 @@ source(here("R/ingest_jobs/driver_job.R"))
 # before `opt`/`targets`/etc. exist, so it's exactly "everything sourced
 # above" and nothing else -- deliberately NOT filtered down to
 # is.function() only (an earlier version did that and silently dropped
-# PARAM_GRID_METHODS, breaking classify_jobname() -> ingest_one_dataset()
-# inside run_ingest_core_job() with "object 'PARAM_GRID_METHODS' not
+# PARAM_GRID_METHODS, breaking classify_jobname() -> compute_ingest_bundle()
+# inside run_ingest_core_compute_job() with "object 'PARAM_GRID_METHODS' not
 # found" -- any future non-function constant added to these lib files
 # would hit the same gap if this were re-narrowed). ALSO deliberately
 # `all.names = TRUE` -- plain ls() silently excludes dot-prefixed names,
@@ -85,10 +94,10 @@ FRAMEWORK_FUNCS <- ls(envir = .GlobalEnv, all.names = TRUE)
 # path. NOT used as --pwd (never pass this as submit_job_family()'s
 # pwd_override) -- that collides with rslurm's own slurm_run.R, which loads
 # f.RDS/params.RDS/add_objects.RData via relative paths from ITS bundle
-# directory before calling the job function (see run_ingest_core_job()'s
+# directory before calling the job function (see run_ingest_core_compute_job()'s
 # header for the full story). Consequently, every path a containerized job
 # actually touches under this tree must be built as an ABSOLUTE path baked
-# in via global_objects (e.g. ingest_one_dataset()'s project_root
+# in via global_objects (e.g. compute_ingest_bundle()'s project_root
 # argument, or normalizePath()-ed config_path/db_path below) -- cwd inside
 # the container can't be relied on to resolve anything project-relative.
 PROJECT_ROOT <- here::here()
@@ -127,7 +136,16 @@ option_list <- list(
                             "timeouts/OOMs, not underprovisioned mem/time. A single 20-factor PCA fit",
                             "measured ~350s locally; 20 such fits/task stays comfortably inside the",
                             "slurm config's time/mem budget with real margin, and any one task failing",
-                            "only costs ~20 fits of re-work instead of 700+."))
+                            "only costs ~20 fits of re-work instead of 700+.")),
+  make_option("--core-max-array-size", type = "integer", default = NULL,
+              help = paste("max datasets any ONE ingest_core array task processes sequentially.",
+                            "Default NULL = 1 dataset/task (maximum parallelism -- a real seff report",
+                            "showed the OLD single non-array ingest_core job at only 28.42% CPU",
+                            "efficiency over a 1h19m serial run across ~32 datasets, and each",
+                            "dataset's compute is fully independent -- see",
+                            "R/lib/ingest/ingest_dataset.R::compute_ingest_bundle()'s header). Raise",
+                            "this only if per-task Slurm scheduling overhead starts to dominate a",
+                            "dataset count large enough to make that a real concern."))
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 slurm_cfg <- yaml::read_yaml(opt$`slurm-config`)
@@ -152,9 +170,9 @@ cfg_match <- match(tolower(paste0(targets$dataset_id, "_config.yml")), tolower(a
 targets$config_path <- ifelse(is.na(cfg_match), NA_character_, file.path("config", available_cfg[cfg_match]))
 missing_cfg <- is.na(targets$config_path)
 if (any(missing_cfg)) stop("No config found for: ", paste(targets$dataset_id[missing_cfg], collapse = ", "))
-# Absolute from here on: run_ingest_core_job() (inside the ingest_core
-# container) reads this back -- see the --stage core block below for why
-# it must NOT be project-relative there.
+# Absolute from here on: run_ingest_core_compute_job() (inside the
+# ingest_core array job's container) reads this back -- see the --stage
+# core block below for why it must NOT be project-relative there.
 targets$config_path <- normalizePath(targets$config_path, mustWork = TRUE)
 
 parse_flag_list <- function(x) {
@@ -167,9 +185,10 @@ recompute_redundancy <- parse_flag_list(opt$`recompute-redundancy`)
 if (opt$stage == "core") {
 
   # cache_dataset_matrix() sources each dataset's preprocessing_script and
-  # reads the raw parquet trio -- ONLY safe to run here, on the login node,
-  # where project-relative paths actually resolve (see
-  # R/ingest_jobs/ingest_core_job.R's header). Never inside the slurm job.
+  # reads the raw parquet trio -- ONLY safe to run here, wherever this
+  # script itself is invoked (a plain `Rscript` call, submitted via
+  # `srun`, never inside the ingest_core array job's container), where
+  # project-relative paths actually resolve. Never inside the slurm job.
   con_cache <- open_stability_db(opt$db)
   for (i in seq_len(nrow(targets))) {
     force_i <- isTRUE(recache_matrix) || (is.character(recache_matrix) && targets$dataset_id[i] %in% recache_matrix)
@@ -184,53 +203,57 @@ if (opt$stage == "core") {
   }
   DBI::dbDisconnect(con_cache)
 
-  # ingest_one_dataset() reads targets$config_path/results_dir and
-  # slurm_bundles/<dataset_id>/_rslurm_<jobname>/params.RDS for every
-  # dataset being ingested. These must be ABSOLUTE, not project-relative:
-  # rslurm's own slurm_run.R (see config/rslurm_templates/
-  # slurm_run_single_R.txt) loads f.RDS/params.RDS/add_objects.RData via
-  # relative paths from its own _rslurm_ingest_core/ directory BEFORE
-  # calling run_ingest_core_job() -- so the container's cwd at that point
+  # run_ingest_core_compute_job() reads config_path/results_dir (one
+  # row's values, passed in as real params -- this is a jobs_df-driven
+  # array job) and slurm_bundles/<dataset_id>/_rslurm_<jobname>/params.RDS
+  # for the dataset it's assigned. These must be ABSOLUTE, not
+  # project-relative: rslurm's own slurm_run.R loads f.RDS/params.RDS/
+  # add_objects.RData via relative paths from its own
+  # _rslurm_ingest_core/ directory BEFORE calling
+  # run_ingest_core_compute_job() -- so the container's cwd at that point
   # must stay the default `$RSLURM_BUNDLE_DIR/_rslurm_ingest_core` (never
   # override it via pwd_override, which breaks that load with "cannot open
   # file 'slurm_run.R'"). extra_binds (below) is still what makes
   # PROJECT_ROOT reachable/writable inside the container at its ordinary
-  # absolute path; run_ingest_core_job() just needs paths that already
-  # point there regardless of its own cwd, which is what
+  # absolute path; run_ingest_core_compute_job() just needs paths that
+  # already point there regardless of its own cwd, which is what
   # normalizePath()-ing config_path (above) and db_path (below) achieves
   # -- results_dir is already absolute, since datasets.txt itself lists
   # absolute cluster paths.
-  assign("targets", targets, envir = .GlobalEnv)
   assign("db_path", normalizePath(opt$db, mustWork = FALSE), envir = .GlobalEnv)
   assign("recompute_redundancy", recompute_redundancy, envir = .GlobalEnv)
   # PROJECT_ROOT itself was defined AFTER FRAMEWORK_FUNCS was captured
   # (above), so it isn't already among those baked-in globals -- needed by
-  # run_ingest_core_job() to pass ingest_one_dataset()'s project_root arg.
+  # run_ingest_core_compute_job() to pass compute_ingest_bundle()'s
+  # project_root arg.
   assign("PROJECT_ROOT", PROJECT_ROOT, envir = .GlobalEnv)
-  # ingest_one_dataset() also list.dirs()/reads results_*.RDS straight out
-  # of each targets$results_dir -- these commonly live OUTSIDE PROJECT_ROOT
-  # entirely (e.g. as sibling directories of the project checkout, not
-  # nested under it: /scratch/.../GSE110487_T2_results next to /scratch/
-  # .../sepsis_latent_factor_eda/), so binding PROJECT_ROOT alone leaves
-  # them invisible inside the container -- list.dirs(results_dir) silently
-  # returns character(0) there even though the same path is populated on
-  # the login node, surfacing as "no job family subdirectories ... --
-  # skipping" for every single dataset. Bind each results_dir's PARENT
-  # (deduplicated -- typically just one shared parent covering everything)
-  # in addition to PROJECT_ROOT.
+  # compute_ingest_bundle() also list.dirs()/reads results_*.RDS straight
+  # out of each targets$results_dir -- these commonly live OUTSIDE
+  # PROJECT_ROOT entirely (e.g. as sibling directories of the project
+  # checkout, not nested under it: /scratch/.../GSE110487_T2_results next
+  # to /scratch/.../sepsis_latent_factor_eda/), so binding PROJECT_ROOT
+  # alone leaves them invisible inside the container -- list.dirs(results_dir)
+  # silently returns character(0) there even though the same path is
+  # populated wherever this script itself was run, surfacing as "no job
+  # family subdirectories ... -- skipping" for every single dataset. Bind
+  # each results_dir's PARENT (deduplicated -- typically just one shared
+  # parent covering everything) in addition to PROJECT_ROOT.
   results_parents <- unique(dirname(targets$results_dir))
   submit_job_family(
-    f = run_ingest_core_job, jobs_df = NULL, jobname = "ingest_core",
-    global_objects = c(FRAMEWORK_FUNCS, "targets", "db_path", "recompute_redundancy", "PROJECT_ROOT"),
+    f = run_ingest_core_compute_job, jobs_df = targets, jobname = "ingest_core",
+    global_objects = c(FRAMEWORK_FUNCS, "db_path", "recompute_redundancy", "PROJECT_ROOT"),
     # NOTE: no projectR here -- ingest_core's image doesn't have it (a
-    # different image than driver_grid needs, see run_ingest_core_job()'s
-    # header); run_pattern_drivers = FALSE there, staged as its own
-    # driver_grid job family during --stage enrichment instead.
+    # different image than driver_grid needs, see
+    # run_ingest_core_compute_job()'s header); driver_grid is staged as
+    # its own job family during --stage enrichment instead.
     pkgs = c("DBI", "RSQLite", "arrow", "yaml", "CoGAPS", "clue", "matrixStats", "mclust"),
     cluster_cfg = slurm_cfg$ingest_core, output_dir = opt$output,
-    extra_binds = unique(c(PROJECT_ROOT, results_parents))
+    extra_binds = unique(c(PROJECT_ROOT, results_parents)),
+    max_array_size = opt$`core-max-array-size`
   )
-  message("Staged ingest_core -- run this FIRST, wait for it to finish, then re-run with --stage enrichment")
+  message("Staged ingest_core (array job, ", nrow(targets), " dataset(s)) -- run this FIRST, wait for it to ",
+          "finish, then run `Rscript R/ingest_core_results.R --bundle-dir ", opt$output, " --db ", opt$db,
+          "` to merge results into the DB, THEN re-run this script with --stage enrichment")
 
 } else if (opt$stage == "enrichment") {
 

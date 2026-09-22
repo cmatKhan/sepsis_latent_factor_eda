@@ -24,9 +24,22 @@
 # see the comment further down where that entry used to be.)
 
 ingest_core:
-  mem: 30G
-  cpus_per_task: 1        # single SQLite writer -- no benefit from more
-  time: "10:00:00"
+  # A real ARRAY job now (one task per dataset, or a small batch via
+  # --core-max-array-size) -- each task computes ONE dataset's full
+  # ingest bundle (R/lib/ingest/ingest_dataset.R::compute_ingest_bundle())
+  # with no shared DB writer at all; the actual write happens afterward
+  # in a separate, lightweight serial step (Rscript R/ingest_core_results.R).
+  # cpus_per_task stays 1 -- compute_ingest_bundle() is single-threaded
+  # per dataset (no benefit from more). mem/time were previously sized
+  # for ONE process serially accumulating ALL ~32 datasets' work (a real
+  # seff report on that old design showed only 1.69GB/30G memory used
+  # even then); now that each task handles just one dataset, both are
+  # shrunk accordingly as a starting point -- confirm with a real seff
+  # report on the first array run and adjust if any single dataset needs
+  # more.
+  mem: 8G
+  cpus_per_task: 1
+  time: "01:00:00"
   container: "/ref/mblab/containers/chasem/sepsis_timecourse_factors_eda.sif"
   libPaths: "/ref/mblab/software/chasem/R/4.6.0"
   sh_template: "config/rslurm_templates/submit_sh.txt"

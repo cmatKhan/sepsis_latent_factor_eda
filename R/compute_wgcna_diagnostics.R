@@ -9,10 +9,11 @@
 #   - compute_wgcna_kme() needs each WGCNA fit's `scores_file` (module
 #     eigengenes), which only exists once ingest_core has ingested that
 #     dataset's wgcna_grid results.
-#   - Neither function is safe to call from inside run_ingest_core_job()
-#     (R/ingest_jobs/ingest_core_job.R): that job runs inside ingest_core's
-#     own container, which -- like compute_wgcna_sft()'s identical
-#     constraint -- does not have WGCNA installed. This script, like
+#   - Neither function is safe to call from inside
+#     run_ingest_core_compute_job() (R/ingest_jobs/ingest_core_job.R):
+#     that job runs inside ingest_core's own container, which -- like
+#     compute_wgcna_sft()'s identical constraint -- does not have WGCNA
+#     installed. This script, like
 #     cache_dataset_matrices.R and R/ingest_results.R, is a plain
 #     `Rscript` invocation meant to be submitted via `srun` (an
 #     interactive scheduled allocation, with WGCNA + the raw
