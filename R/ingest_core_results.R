@@ -18,6 +18,18 @@
 #
 # Usage:
 #   Rscript R/ingest_core_results.R --bundle-dir slurm_bundles/ingest --db results/stability.sqlite
+#
+# `--bundle-dir` accepts EITHER rslurm's own raw `_rslurm_ingest_core`
+# naming (i.e. pass the DIRECTORY THAT CONTAINS it, matching
+# R/ingest_enrichment_results.R's fgsea_grid/wgcna_ora_grid convention)
+# OR a directory that already IS the results folder itself (results_*.RDS
+# directly inside it, no `_rslurm_` prefix) -- confirmed in practice this
+# project's actual cluster output for the ingest_core array job can land
+# either way depending on how it's collected/organized after the job
+# completes, unlike fgsea_grid/wgcna_ora_grid's own merge step, which
+# only ever sees rslurm's raw naming. Same two-convention fallback
+# pattern already used by R/lib/ingest/ingest_dataset.R's own bundle_dir
+# resolution.
 
 library(here); library(optparse); library(DBI)
 source(here("R/lib/ingest/db.R"))
@@ -35,7 +47,15 @@ opt <- parse_args(OptionParser(option_list = option_list))
 con <- open_stability_db(opt$db)
 
 fam_dir <- file.path(opt$`bundle-dir`, "_rslurm_ingest_core")
-if (!dir.exists(fam_dir)) stop("ingest_core: no results dir found at ", fam_dir)
+if (!dir.exists(fam_dir)) {
+  if (length(list.files(opt$`bundle-dir`, pattern = "^results_\\d+\\.RDS$")) > 0) {
+    message("no _rslurm_ingest_core/ found under --bundle-dir -- treating --bundle-dir itself as the results folder")
+    fam_dir <- opt$`bundle-dir`
+  } else {
+    stop("ingest_core: no results found -- checked ", file.path(opt$`bundle-dir`, "_rslurm_ingest_core"),
+         " and ", opt$`bundle-dir`, " itself")
+  }
+}
 
 result_files <- list.files(fam_dir, pattern = "^results_\\d+\\.RDS$", full.names = TRUE)
 message("ingest_core: ", length(result_files), " result file(s)")
