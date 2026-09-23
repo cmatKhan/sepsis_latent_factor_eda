@@ -60,31 +60,36 @@
 # different step entirely -- see this file's header), so it was dead
 # weight that would ALSO have needed `arrow` (missing from this container
 # too) the moment any of its functions were actually invoked.
-library(yaml); library(DBI)
+library(yaml)
+library(DBI)
 source("R/lib/ingest/db.R")
-source("R/lib/ingest/ingest_dataset.R")   # compute_wgcna_kme()/compute_wgcna_gene_significance()
+source("R/lib/ingest/ingest_dataset.R") # compute_wgcna_kme()/compute_wgcna_gene_significance()
 
 args <- commandArgs(trailingOnly = TRUE)
 get_opt <- function(flag, default = NULL) {
-  i <- which(args == flag)
-  if (length(i) == 1 && i < length(args)) args[[i + 1]] else default
+    i <- which(args == flag)
+    if (length(i) == 1 && i < length(args)) args[[i + 1]] else default
 }
 get_bare_or_list <- function(flag) {
-  i <- which(args == flag)
-  if (length(i) != 1) return(FALSE)
-  nxt <- if (i < length(args)) args[[i + 1]] else ""
-  if (nzchar(nxt) && !startsWith(nxt, "--")) strsplit(nxt, ",")[[1]] else TRUE
+    i <- which(args == flag)
+    if (length(i) != 1) {
+        return(FALSE)
+    }
+    nxt <- if (i < length(args)) args[[i + 1]] else ""
+    if (nzchar(nxt) && !startsWith(nxt, "--")) strsplit(nxt, ",")[[1]] else TRUE
 }
 
 datasets_file <- get_opt("--datasets")
 if (is.null(datasets_file)) {
-  stop("Usage: Rscript R/compute_wgcna_diagnostics.R --datasets datasets.txt ",
-       "[--db results/stability.sqlite] [--recompute-kme [id1,id2,...]] [--recompute-gs [id1,id2,...]] ",
-       "[--recompute-dendro [id1,id2,...]]")
+    stop(
+        "Usage: Rscript R/compute_wgcna_diagnostics.R --datasets datasets.txt ",
+        "[--db results/stability.sqlite] [--recompute-kme [id1,id2,...]] [--recompute-gs [id1,id2,...]] ",
+        "[--recompute-dendro [id1,id2,...]]"
+    )
 }
 db_path <- get_opt("--db", "results/stability.sqlite")
 recompute_kme <- get_bare_or_list("--recompute-kme")
-recompute_gs  <- get_bare_or_list("--recompute-gs")
+recompute_gs <- get_bare_or_list("--recompute-gs")
 # Unlike kme/gs (cheap, always attempted -- each is a no-op for anything
 # already computed), the dendrogram step is a full gene x gene TOM per
 # fit and must be explicitly opted into: absent this flag,
@@ -103,35 +108,46 @@ recompute_gs  <- get_bare_or_list("--recompute-gs")
 # change, not the everyday "keep going" case.
 recompute_dendro <- get_bare_or_list("--recompute-dendro")
 
+message("finding datasets...")
 result_dirs <- readLines(datasets_file) |> trimws()
 result_dirs <- result_dirs[nzchar(result_dirs)]
 targets <- data.frame(
-  results_dir = result_dirs,
-  dataset_id  = sub("_results$", "", basename(result_dirs)),
-  stringsAsFactors = FALSE
+    results_dir = result_dirs,
+    dataset_id = sub("_results$", "", basename(result_dirs)),
+    stringsAsFactors = FALSE
 )
+
 # Same case-insensitive config lookup as R/create_ingest_slurm_bundle.R /
 # R/cache_dataset_matrices.R.
+message("finding configs...")
 available_cfg <- list.files("config", pattern = "_config\\.yml$")
 cfg_match <- match(tolower(paste0(targets$dataset_id, "_config.yml")), tolower(available_cfg))
 targets$config_path <- ifelse(is.na(cfg_match), NA_character_, file.path("config", available_cfg[cfg_match]))
 missing_cfg <- is.na(targets$config_path)
 if (any(missing_cfg)) stop("No config found for: ", paste(targets$dataset_id[missing_cfg], collapse = ", "))
 
+message("opening database...")
 con <- open_stability_db(db_path)
 for (i in seq_len(nrow(targets))) {
-  dataset_id <- targets$dataset_id[i]
-  kme_force_i <- isTRUE(recompute_kme) || (is.character(recompute_kme) && dataset_id %in% recompute_kme)
-  gs_force_i  <- isTRUE(recompute_gs)  || (is.character(recompute_gs)  && dataset_id %in% recompute_gs)
-  run_dendro_i <- isTRUE(recompute_dendro) || (is.character(recompute_dendro) && dataset_id %in% recompute_dendro)
-  dendro_force_i <- is.character(recompute_dendro) && dataset_id %in% recompute_dendro
-  ds_yaml <- yaml::read_yaml(targets$config_path[i])
-  message("dataset: ", dataset_id)
-  compute_wgcna_kme(con, dataset_id, ds_yaml, db_path, force = kme_force_i)
-  compute_wgcna_gene_significance(con, dataset_id, ds_yaml, db_path, force = gs_force_i)
-  if (run_dendro_i) compute_wgcna_dendro(con, dataset_id, ds_yaml, db_path, force = dendro_force_i)
+    dataset_id <- targets$dataset_id[i]
+    message("working on: ", dataset_id)
+    kme_force_i <- isTRUE(recompute_kme) || (is.character(recompute_kme) && dataset_id %in% recompute_kme)
+    gs_force_i <- isTRUE(recompute_gs) || (is.character(recompute_gs) && dataset_id %in% recompute_gs)
+    run_dendro_i <- isTRUE(recompute_dendro) || (is.character(recompute_dendro) && dataset_id %in% recompute_dendro)
+    dendro_force_i <- is.character(recompute_dendro) && dataset_id %in% recompute_dendro
+    ds_yaml <- yaml::read_yaml(targets$config_path[i])
+    message(dataset_id, ": computing kme")
+    compute_wgcna_kme(con, dataset_id, ds_yaml, db_path, force = kme_force_i)
+    message(dataset_id, ": computing gene significance")
+    compute_wgcna_gene_significance(con, dataset_id, ds_yaml, db_path, force = gs_force_i)
+    if (run_dendro_i) {
+        message(dataset_id, ": computing dendrogram")
+        compute_wgcna_dendro(con, dataset_id, ds_yaml, db_path, force = dendro_force_i)
+    }
 }
 DBI::dbDisconnect(con)
 
-message("\nDone -- computed WGCNA kME + gene significance", if (!isFALSE(recompute_dendro)) " + dendrograms" else "",
-        " for ", nrow(targets), " dataset(s) into ", db_path)
+message(
+    "\nDone -- computed WGCNA kME + gene significance", if (!isFALSE(recompute_dendro)) " + dendrograms" else "",
+    " for ", nrow(targets), " dataset(s) into ", db_path
+)
