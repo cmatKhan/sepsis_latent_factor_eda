@@ -278,3 +278,69 @@ generic_association_scan <- function(scores_mat, meta_df, id_col = "sample_id") 
   out$padj <- p.adjust(out$p_value, method = "BH")
   out
 }
+
+#' Metadata analog of a gene biplot: projects every usable sample-metadata
+#' field onto two chosen score components, for overlaying on the same
+#' sample-score point cloud a gene biplot uses. Two kinds of fields need
+#' different geometry (there's no single "loading" for a metadata field the
+#' way there is for a gene):
+#'   - numeric fields -> a VECTOR, direction = (Spearman cor with comp_x,
+#'     Spearman cor with comp_y) -- the standard "supplementary quantitative
+#'     variable" convention (e.g. FactoMineR's quanti.sup, vegan::envfit's
+#'     vector fit), scaled like the gene biplot's arrows so the longest
+#'     vector reaches 80% of the score cloud's radius (raw correlations
+#'     live on a bounded [-1,1]-ish scale, not the scores' own units).
+#'   - categorical fields -> one CENTROID point per level (mean score per
+#'     group, in the SAME units as the scores already -- no rescaling
+#'     needed), the standard vegan::envfit convention for factors. Levels
+#'     with < min_n samples are dropped; fields left with < 2 or > max_levels
+#'     usable levels are skipped entirely (too little signal, or too
+#'     cluttered to read).
+biplot_metadata_data <- function(scores_mat, meta_df, comp_x, comp_y, id_col = "sample_id",
+                                  min_n = 3, max_levels = 8) {
+  if (is.null(scores_mat) || is.null(meta_df) || !(id_col %in% names(meta_df))) return(NULL)
+  shared <- intersect(rownames(scores_mat), meta_df[[id_col]])
+  if (length(shared) < min_n) return(NULL)
+  scores_mat <- scores_mat[shared, , drop = FALSE]
+  meta_df <- meta_df[match(shared, meta_df[[id_col]]), , drop = FALSE]
+
+  x <- scores_mat[, comp_x]; y <- scores_mat[, comp_y]
+  scores_df <- data.frame(sample_id = shared, x = x, y = y)
+
+  vec_rows <- list(); cen_rows <- list()
+  for (field in setdiff(names(meta_df), id_col)) {
+    v <- meta_df[[field]]
+    if (is.numeric(v)) {
+      ok <- !is.na(v) & !is.na(x) & !is.na(y)
+      if (sum(ok) < min_n) next
+      dx <- suppressWarnings(cor(v[ok], x[ok], method = "spearman"))
+      dy <- suppressWarnings(cor(v[ok], y[ok], method = "spearman"))
+      if (is.na(dx) || is.na(dy)) next
+      vec_rows[[length(vec_rows) + 1]] <- data.frame(field = field, dx = dx, dy = dy)
+    } else {
+      f <- as.factor(v)
+      tab <- table(f)
+      levs <- names(tab)[tab >= min_n]
+      if (length(levs) < 2 || length(levs) > max_levels) next
+      for (lv in levs) {
+        ok <- !is.na(f) & f == lv
+        cen_rows[[length(cen_rows) + 1]] <- data.frame(
+          field = field, level = lv, x = mean(x[ok], na.rm = TRUE), y = mean(y[ok], na.rm = TRUE))
+      }
+    }
+  }
+
+  vectors <- if (length(vec_rows)) do.call(rbind, vec_rows) else data.frame(field = character(0), dx = numeric(0), dy = numeric(0))
+  centroids <- if (length(cen_rows)) do.call(rbind, cen_rows) else data.frame(field = character(0), level = character(0), x = numeric(0), y = numeric(0))
+
+  if (nrow(vectors) > 0) {
+    score_radius <- suppressWarnings(max(sqrt(scores_df$x^2 + scores_df$y^2), na.rm = TRUE))
+    vec_mag <- sqrt(vectors$dx^2 + vectors$dy^2)
+    max_mag <- suppressWarnings(max(vec_mag, na.rm = TRUE))
+    scale_factor <- if (is.finite(max_mag) && max_mag > 0 && is.finite(score_radius)) 0.8 * score_radius / max_mag else 1
+    vectors$x <- vectors$dx * scale_factor
+    vectors$y <- vectors$dy * scale_factor
+  }
+
+  list(scores = scores_df, vectors = vectors, centroids = centroids)
+}

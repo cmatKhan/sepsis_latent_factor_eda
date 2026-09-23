@@ -110,7 +110,7 @@ methods:
 
   spca:
     K: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
-    para: [0.05, 0.1, 0.2]   # crossed with K -- see R/methods/spca.R's header
+    para: [0.0000001, 0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.05, 0.1, 0.2]   # crossed with K -- see R/methods/spca.R's header; widened 2026-09-22 to span the low end after real-data testing showed the old [0.05,0.1,0.2] grid was already fully saturated (~94% sparsity) at para values 50x smaller than 0.05 -- the real transition to lower sparsity lies somewhere below 0.001, unlocated locally (each full-scale fit costs ~9min single-threaded); the wider grid lets the cluster's parallel array job actually find it
     sparse: penalty
 
   ica:

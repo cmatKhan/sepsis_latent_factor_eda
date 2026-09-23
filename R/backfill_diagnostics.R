@@ -18,10 +18,21 @@
 #     cluster-scratch raw results (Tier 2), which will overwrite this
 #     fit's row (and spca_diag_file) with the complete bundle. This
 #     backfill is a stopgap for the sparsity part only, safe to run now.
+#   spca mse fix: R/methods/spca.R used to compute `fits.mse` as
+#     `1 - pev[length(pev)]` -- the LAST component's own individual
+#     variance contribution, not the cumulative total across all K
+#     components (elasticnet::spca()'s `pev` is a per-component vector;
+#     summing it gives the real total). Fixed at the source 2026-09-22,
+#     but every already-ingested sPCA fit's `mse` column still has the
+#     old, wrong value baked in. Recomputed here from each fit's ALREADY-
+#     STORED `spca_diag_file$pev` -- no re-fit needed. Confirmed on real
+#     data: one real fit's mse changed from 0.9987 (implying ~0.1%
+#     variance explained) to the correct 0.942 (~5.8% explained).
 #
 # Usage: Rscript R/backfill_diagnostics.R <db_path> [--force]
 #   --force: recompute/overwrite even for fits that already have a
 #   cogaps_diag_file/spca_diag_file set (default: only fills in NULLs).
+#   The spca mse fix always runs (idempotent, cheap) regardless of --force.
 
 library(here)
 source(here("R/lib/ingest/db.R"))
@@ -72,13 +83,36 @@ backfill_spca <- function(con, db_path, force) {
   invisible(nrow(rows))
 }
 
+#' Recompute fits.mse for every sPCA fit from its already-stored
+#' spca_diag_file$pev vector -- see this file's header for why the
+#' original value (`1 - pev[length(pev)]`) was wrong. Skips fits whose
+#' diag file has NA pev (the sparsity-only stopgap backfill_spca() above
+#' produces these for fits that predate spca_diag_file entirely -- nothing
+#' to recompute from until those are re-ingested per Tier 2).
+backfill_spca_mse <- function(con, db_path) {
+  rows <- DBI::dbGetQuery(con,
+    "SELECT fit_id, spca_diag_file FROM fits WHERE method = 'spca' AND status = 'ok' AND spca_diag_file IS NOT NULL")
+  message("spca mse fix: recomputing cumulative-PEV mse for ", nrow(rows), " fits")
+  n_fixed <- 0L
+  for (i in seq_len(nrow(rows))) {
+    diag <- readRDS(resolve_artifact(rows$spca_diag_file[i], db_path))
+    if (is.null(diag$pev) || all(is.na(diag$pev))) next
+    DBI::dbExecute(con, "UPDATE fits SET mse = ? WHERE fit_id = ?",
+                   params = list(1 - sum(diag$pev), rows$fit_id[i]))
+    n_fixed <- n_fixed + 1L
+    if (i %% 200 == 0) message("  ", i, "/", nrow(rows))
+  }
+  invisible(n_fixed)
+}
+
 DBI::dbExecute(con, "BEGIN")
 committed <- FALSE
 on.exit(if (!committed) DBI::dbExecute(con, "ROLLBACK"))
-n_cogaps <- backfill_cogaps(con, db_path, force)
-n_spca   <- backfill_spca(con, db_path, force)
+n_cogaps  <- backfill_cogaps(con, db_path, force)
+n_spca    <- backfill_spca(con, db_path, force)
+n_spca_mse <- backfill_spca_mse(con, db_path)
 DBI::dbExecute(con, "COMMIT")
 committed <- TRUE
 
-message("done: ", n_cogaps, " cogaps + ", n_spca, " spca fits backfilled")
+message("done: ", n_cogaps, " cogaps + ", n_spca, " spca (sparsity) + ", n_spca_mse, " spca (mse fix) fits backfilled")
 DBI::dbDisconnect(con)

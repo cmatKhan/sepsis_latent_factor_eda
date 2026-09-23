@@ -1,8 +1,11 @@
 # Post-ingest_core step: compute WGCNA kME (intramodular connectivity /
-# module membership) and Gene Significance (per-gene x sample-trait
-# correlation) for every dataset -- see R/lib/ingest/ingest_dataset.R's
-# compute_wgcna_kme()/compute_wgcna_gene_significance() headers for the
-# full rationale.
+# module membership), Gene Significance (per-gene x sample-trait
+# correlation), and a real gene-clustering dendrogram for every dataset --
+# see R/lib/ingest/ingest_dataset.R's compute_wgcna_kme()/
+# compute_wgcna_gene_significance()/compute_wgcna_dendro() headers for the
+# full rationale. The dendrogram step is the expensive one (a full gene x
+# gene TOM per fit) -- opt into it explicitly via --recompute-dendro; it
+# does not run by default the way kme/gs do.
 #
 # Split out as its own script, run AFTER ingest_core (unlike
 # R/cache_dataset_matrices.R, which runs BEFORE it), because:
@@ -23,7 +26,7 @@
 # Usage:
 #   Rscript R/compute_wgcna_diagnostics.R --datasets datasets.txt \
 #     [--db results/stability.sqlite] [--recompute-kme [id1,id2,...]] \
-#     [--recompute-gs [id1,id2,...]]
+#     [--recompute-gs [id1,id2,...]] [--recompute-dendro [id1,id2,...]]
 #
 # `datasets.txt` is the SAME file used by cache_dataset_matrices.R/
 # --stage core: one results-dir path per line -- only its basename (with
@@ -36,6 +39,14 @@
 # additive) and compute_wgcna_gene_significance()'s (per-dataset,
 # no-op-if-already-present) own semantics -- see their headers in
 # R/lib/ingest/ingest_dataset.R.
+#
+# `--recompute-dendro`: absent entirely = never runs (the one real,
+# expensive step here -- opt in explicitly). Bare flag = every dataset,
+# RESUMABLE (fits that already have a dendro are skipped -- safe to
+# re-run the identical command after a cluster time limit cuts this
+# single sequential loop off partway through; see compute_wgcna_dendro()'s
+# header for real cost). A comma-separated list = force-redo ONLY those
+# dataset ids (e.g. after a config change), even if already computed.
 
 # Deliberately does NOT `library(here)`/`library(optparse)` -- confirmed
 # directly (2026-09-22) that the dedicated WGCNA container this script
@@ -68,11 +79,29 @@ get_bare_or_list <- function(flag) {
 datasets_file <- get_opt("--datasets")
 if (is.null(datasets_file)) {
   stop("Usage: Rscript R/compute_wgcna_diagnostics.R --datasets datasets.txt ",
-       "[--db results/stability.sqlite] [--recompute-kme [id1,id2,...]] [--recompute-gs [id1,id2,...]]")
+       "[--db results/stability.sqlite] [--recompute-kme [id1,id2,...]] [--recompute-gs [id1,id2,...]] ",
+       "[--recompute-dendro [id1,id2,...]]")
 }
 db_path <- get_opt("--db", "results/stability.sqlite")
 recompute_kme <- get_bare_or_list("--recompute-kme")
 recompute_gs  <- get_bare_or_list("--recompute-gs")
+# Unlike kme/gs (cheap, always attempted -- each is a no-op for anything
+# already computed), the dendrogram step is a full gene x gene TOM per
+# fit and must be explicitly opted into: absent this flag,
+# compute_wgcna_dendro() is never called at all, not even to fill in
+# fits with no dendro yet.
+#
+# This is a single sequential loop, not a parallel array job like the
+# original wgcna_grid fits -- up to 480 fits' worth of full TOMs in one
+# process can genuinely take a long time, and a cluster time limit can
+# cut it off partway through. So: bare flag = every dataset, RESUMABLE
+# (force=FALSE -- fits that already have a dendro are skipped, so
+# re-running the exact same command after an interruption just picks up
+# where it left off, at no extra cost for what's already done). A
+# comma-separated list = force-redo ONLY those specific dataset ids
+# (force=TRUE) -- for deliberately recomputing after e.g. a config
+# change, not the everyday "keep going" case.
+recompute_dendro <- get_bare_or_list("--recompute-dendro")
 
 result_dirs <- readLines(datasets_file) |> trimws()
 result_dirs <- result_dirs[nzchar(result_dirs)]
@@ -94,12 +123,15 @@ for (i in seq_len(nrow(targets))) {
   dataset_id <- targets$dataset_id[i]
   kme_force_i <- isTRUE(recompute_kme) || (is.character(recompute_kme) && dataset_id %in% recompute_kme)
   gs_force_i  <- isTRUE(recompute_gs)  || (is.character(recompute_gs)  && dataset_id %in% recompute_gs)
+  run_dendro_i <- isTRUE(recompute_dendro) || (is.character(recompute_dendro) && dataset_id %in% recompute_dendro)
+  dendro_force_i <- is.character(recompute_dendro) && dataset_id %in% recompute_dendro
   ds_yaml <- yaml::read_yaml(targets$config_path[i])
   message("dataset: ", dataset_id)
   compute_wgcna_kme(con, dataset_id, ds_yaml, db_path, force = kme_force_i)
   compute_wgcna_gene_significance(con, dataset_id, ds_yaml, db_path, force = gs_force_i)
+  if (run_dendro_i) compute_wgcna_dendro(con, dataset_id, ds_yaml, db_path, force = dendro_force_i)
 }
 DBI::dbDisconnect(con)
 
-message("\nDone -- computed WGCNA kME + gene significance for ", nrow(targets),
-        " dataset(s) into ", db_path)
+message("\nDone -- computed WGCNA kME + gene significance", if (!isFALSE(recompute_dendro)) " + dendrograms" else "",
+        " for ", nrow(targets), " dataset(s) into ", db_path)

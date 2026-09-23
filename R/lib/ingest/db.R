@@ -138,6 +138,10 @@ ensure_schema <- function(con) {
        module INTEGER NOT NULL
      )",
     "CREATE INDEX IF NOT EXISTS idx_wgcna_modules_fit ON wgcna_modules(fit_id)",
+    # Every real membership lookup filters by (fit_id, module) together
+    # (wgcna_module_kme(), wgcna_module_gs_kme()), not fit_id alone --
+    # same rationale as wgcna_kme's idx_wgcna_kme_fit_module below.
+    "CREATE INDEX IF NOT EXISTS idx_wgcna_modules_fit_module ON wgcna_modules(fit_id, module)",
     "CREATE TABLE IF NOT EXISTS wgcna_fit_pairs (
        fit_a INTEGER NOT NULL REFERENCES fits(fit_id),
        fit_b INTEGER NOT NULL REFERENCES fits(fit_id),
@@ -351,6 +355,19 @@ ensure_schema <- function(con) {
   ensure_column(con, "fits", "nmf_diag_file", "TEXT")
   ensure_column(con, "fits", "cp_diag_file", "TEXT")
   ensure_column(con, "fits", "tucker_diag_file", "TEXT")
+  #   wgcna_dendro_file: list(merge, height, order, labels) -- the four
+  #     fields needed to reconstruct a real `hclust`-classed object
+  #     (class(x) <- "hclust") for WGCNA::plotDendroAndColors(). NOT the
+  #     TOM itself (an n_genes x n_genes matrix -- hundreds of MB at this
+  #     project's gene counts, x 480 fits would be impractical); the TOM
+  #     is computed transiently by compute_wgcna_dendro() and discarded
+  #     once reduced to this tree. blockwiseModules() computes an
+  #     equivalent tree internally (net$dendrograms) but it's discarded
+  #     at ingest (saveTOMs=FALSE, extract_result() only reads
+  #     $colors/$MEs off `net`) -- see that function's header for why
+  #     this needs its own separate, dedicated computation instead of
+  #     just being read off an existing fit.
+  ensure_column(con, "fits", "wgcna_dendro_file", "TEXT")
   # CP/Tucker only -- both already compute this correctly (rTensor's own
   # `conv` field) but it used to be consulted ONLY to decide `status` in
   # the corner case where loadings are ALSO NULL, so a fit that hit
@@ -377,6 +394,15 @@ ensure_schema <- function(con) {
        kme REAL
      )")
   DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_wgcna_kme_fit ON wgcna_kme(fit_id)")
+  # signedKME() correlates every gene against EVERY module's eigengene
+  # (not just its own), so this table holds n_genes x n_modules rows per
+  # fit -- every real query here (wgcna_module_kme(), wgcna_module_gs_kme())
+  # filters by (fit_id, module) together, not fit_id alone. Without this,
+  # such a query only seeks on fit_id and then linearly scans ALL of
+  # that fit's modules for the one it wants -- confirmed directly this
+  # was the dominant cost behind a real ~50s hang joining this table
+  # against wgcna_gene_significance for one module of one ROSE fit.
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_wgcna_kme_fit_module ON wgcna_kme(fit_id, module)")
   # WGCNA Gene Significance (GS) -- per-gene correlation of expression
   # against each sample-metadata trait, dataset-level (not per fit --
   # GS doesn't depend on module assignment, only on the expression matrix
@@ -392,6 +418,23 @@ ensure_schema <- function(con) {
        p_value REAL
      )")
   DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_wgcna_gs_dataset ON wgcna_gene_significance(dataset_id)")
+  # Covers the GS-vs-kME hub-gene join (app/R/db_helpers.R::wgcna_module_gs_kme(),
+  # joining on dataset_id+field+gene against wgcna_kme's fit_id+module
+  # filter) -- without this, that join is an unindexed nested-loop scan
+  # of this table (millions of rows total) for every one of a module's
+  # ~hundreds-to-thousands of kME rows, confirmed directly to hang
+  # (still running after 30s on real ROSE data) rather than just being
+  # slow.
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_wgcna_gs_lookup ON wgcna_gene_significance(dataset_id, field, gene)")
+  # test: "spearman" (numeric field -- statistic is a SIGNED correlation,
+  # usable for a GS-vs-kME scatter or a module-trait heatmap) vs
+  # "kruskal" (categorical field -- statistic is an unsigned KW test
+  # statistic) -- generic_association_scan() already computes this per
+  # row but compute_wgcna_gene_significance() originally discarded it at
+  # write time; added back so the app can filter to signed fields
+  # directly instead of re-deriving field type from live sample metadata
+  # on every read.
+  ensure_column(con, "wgcna_gene_significance", "test", "TEXT")
 
   # fgsea's NES (normalized enrichment score -- the standard cross-pathway-
   # comparable magnitude fgsea's own vignette reports and ranks by

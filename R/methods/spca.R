@@ -24,7 +24,20 @@ run_spca_job <- function(K, para, type = "predictor", sparse = "penalty",
   colnames(loadings) <- paste0("Component_", seq_len(ncol(loadings)))
   scores <- t(mat) %*% loadings
 
-  list(rank = K, mse = 1 - fit$pev[length(fit$pev)], loadings = loadings, scores = scores,
+  list(rank = K,
+       # mse = 1 - CUMULATIVE PEV (sum across all K components), not the
+       # last component's own individual contribution -- elasticnet's own
+       # `pev` vector is per-component (each entry is that ONE component's
+       # incremental, non-overlapping contribution via the QR-based
+       # adjustment for non-orthogonality; see ?elasticnet::spca), so
+       # summing it gives the total variance explained by the whole
+       # K-component solution together. Bug fixed 2026-09-22: this used
+       # to be `1 - fit$pev[length(fit$pev)]`, silently reporting mse
+       # near 1 (implying ~0% variance explained) for every fit, since a
+       # single late component's own incremental contribution is always
+       # small on real data -- confirmed on real data the true cumulative
+       # value was ~40x larger (0.058 vs 0.0013 for one real K=10 fit).
+       mse = 1 - sum(fit$pev), loadings = loadings, scores = scores,
        # pev's full per-component curve -- elasticnet's own adjusted-variance
        # bookkeeping, NOT recomputable by naively projecting mat onto
        # loadings (sPCA's components aren't orthogonal, so that double-counts
@@ -38,7 +51,16 @@ spca_registry <- list(
   jobname = "spca_grid",
   fn = run_spca_job,
   pkgs = "elasticnet",
-  defaults = list(K = 2:20, para = c(0.05, 0.1, 0.2), sparse = "penalty",
+  # para: widened 2026-09-22 -- real-data testing (ANEMONES, K=10, full
+  # 8000-gene matrix) showed the old c(0.05, 0.1, 0.2) grid was already
+  # fully saturated (~94% sparsity, matching production) at para=0.001,
+  # 50x smaller than the old minimum; the true transition to lower
+  # sparsity lies somewhere below that, unlocated locally (each full-scale
+  # fit costs ~9min single-threaded) -- this fallback now matches every
+  # real dataset config's grid (config/*.yml) so a new config that omits
+  # `para` gets the same wide sweep, not the old saturated one.
+  defaults = list(K = 2:20, para = c(1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 0.01, 0.05, 0.1, 0.2),
+                   sparse = "penalty",
                    use.corr = FALSE, lambda = 1e-6, max.iter = 200, eps.conv = 1e-3),
   build_grid = function(p) {
     expand.grid(K = p$K, para = p$para, sparse = p$sparse, use.corr = p$use.corr,

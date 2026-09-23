@@ -118,13 +118,21 @@ seedpair_matrix <- function(con, dataset_id, method, rank) {
     params = list(dataset_id, method, rank))
 }
 
-#' Distinct ranks with at least one ok seed_sweep fit for a method --
-#' used by PCA's reduced Level 1 rank-select (falls back to this when a
-#' method has no masking-CV family at all).
+#' Distinct ranks with at least one ok fit for a method -- used by PCA's
+#' reduced Level 1 rank-select (falls back to this when a method has no
+#' masking-CV family at all) and by the Level 2+ breadcrumb's rank
+#' dropdown for every FACTORIZATION_METHODS method. No `family` filter
+#' (see fits_at_rank()'s matching comment): sPCA's fits live under
+#' 'param_grid', not 'seed_sweep', so filtering on the latter always
+#' returned zero rows for sPCA and crashed the breadcrumb (setNames() on
+#' a length-0 vector against paste0()'s length-1 "rank " -- paste0()
+#' treats a zero-length argument as "" for recycling, not as "propagate
+#' zero length", so the mismatch only surfaces here, not as an empty
+#' dropdown).
 distinct_ranks <- function(con, dataset_id, method) {
   DBI::dbGetQuery(con,
     "SELECT DISTINCT rank FROM fits
-     WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok'
+     WHERE dataset_id = ? AND method = ? AND status = 'ok'
      ORDER BY rank",
     params = list(dataset_id, method))$rank
 }
@@ -258,6 +266,72 @@ get_factor_id <- function(con, fit_id, factor_index) {
     params = list(fit_id, factor_index))$factor_id
 }
 
+#' Resolve which factor_id's cached enrichment should represent
+#' (fit_id, factor_index) -- either that fit's own factor_id (if
+#' anything has been queried for it already), or an exact-loadings-match
+#' sibling fit's factor_id at some other rank/seed within the SAME
+#' method + dataset.
+#'
+#' This generalizes what used to be a PCA-only special case in app.R's
+#' find_or_reuse_enrichment(). PCA's rank truncation is a genuine
+#' mathematical guarantee (prcomp() with a smaller `rank.` never changes
+#' earlier components -- a rank-10 fit's factor 3 IS, bit for bit,
+#' rank-20's factor 3), so representative-fit selection
+#' (R/lib/ingest/redundancy.R::representative_fit_ids() collapsing PCA to
+#' a single max-rank fit before running fgsea_grid) never actually omits
+#' any other rank's enrichment -- it's identical, just never redundantly
+#' recomputed. Confirmed directly (2026-09-22): the pre-existing PCA-only
+#' code already searched siblings across ALL ranks (no rank filter), so
+#' this was already correct for PCA -- the gap was that (a) it was
+#' hardcoded to PCA only, and (b) cached_enrichment_summary() (used by
+#' the Compare tab) never called it at all, for any method.
+#'
+#' Other seed-sweep methods (nmf/cogaps/ica/spca) have NO such guarantee
+#' across DIFFERENT seeds/para values -- each seed's factorization is
+#' genuinely its own answer, not a truncation of anything else -- but
+#' this still checks for an exact match there (fastICA/NNLM/CoGAPS
+#' occasionally converge to bit-identical solutions from different
+#' seeds), a real if less common win, at negligible cost since it's just
+#' comparing already-loaded loading vectors.
+#'
+#' Returns NULL if the fit/factor doesn't exist; otherwise always returns
+#' SOME factor_id (falling back to the fit's own, even if nothing is
+#' cached for it, so callers can distinguish "genuinely nothing
+#' computed anywhere" from "this factor doesn't exist").
+resolve_enrichment_factor_id <- function(con, fit_id, factor_index) {
+  factor_id <- get_factor_id(con, fit_id, factor_index)
+  if (length(factor_id) != 1) return(NULL)
+
+  was_queried <- function(fid) {
+    DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM enrichment_queried WHERE factor_id = ?",
+                     params = list(fid))$n > 0
+  }
+  if (was_queried(factor_id)) return(factor_id)
+
+  fit <- get_fit(con, fit_id)
+  if (nrow(fit) == 0 || !(fit$method %in% c("pca", "nmf", "cogaps", "ica", "spca"))) return(factor_id)
+
+  L <- load_loadings(con, fit_id)
+  if (is.null(L) || !(factor_index %in% seq_len(ncol(L)))) return(factor_id)
+  v <- L[, factor_index]
+
+  siblings <- DBI::dbGetQuery(con,
+    "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = ? AND fit_id != ? AND status = 'ok'",
+    params = list(fit$dataset_id, fit$method, fit_id))$fit_id
+  for (other_fit in siblings) {
+    L2 <- load_loadings(con, other_fit)
+    if (is.null(L2)) next
+    for (fi2 in seq_len(ncol(L2))) {
+      v2 <- L2[, fi2]
+      if (length(v) != length(v2) || !identical(names(v), names(v2))) next
+      if (!isTRUE(all.equal(as.numeric(v), as.numeric(v2), tolerance = 1e-8))) next
+      other_factor_id <- get_factor_id(con, other_fit, fi2)
+      if (length(other_factor_id) == 1 && was_queried(other_factor_id)) return(other_factor_id)
+    }
+  }
+  factor_id
+}
+
 #' loadings_file paths are stored relative to the DB file's directory
 #' (see R/lib/ingest/db.R) -- resolve via the option set at app startup.
 resolve_artifact <- function(path) {
@@ -285,6 +359,73 @@ load_time_loadings <- function(con, fit_id) {
   path <- resolve_artifact(f$time_loadings_file)
   if (!file.exists(path)) return(NULL)
   readRDS(path)
+}
+
+#' sPCA's diagnostics bundle -- list(pev, var_all, n_nonzero), see
+#' R/lib/ingest/db.R's spca_diag_file column comment. NULL for any other
+#' method (no spca_diag_file) or a fit predating this column.
+load_spca_diag <- function(con, fit_id) {
+  f <- get_fit(con, fit_id)
+  if (nrow(f) == 0 || is.na(f$spca_diag_file)) return(NULL)
+  path <- resolve_artifact(f$spca_diag_file)
+  if (!file.exists(path)) return(NULL)
+  readRDS(path)
+}
+
+#' This fit's gene-clustering tree (merge/height/order/labels -- see
+#' R/lib/ingest/ingest_dataset.R::compute_wgcna_dendro()), reconstructed
+#' as a real `hclust`-classed object ready for WGCNA::plotDendroAndColors().
+#' NULL for any fit compute_wgcna_dendro() hasn't been run for yet
+#' (real, expected -- it's an explicit opt-in step, not part of normal
+#' ingest; see --recompute-dendro).
+load_wgcna_dendro <- function(con, fit_id) {
+  f <- get_fit(con, fit_id)
+  if (nrow(f) == 0 || is.na(f$wgcna_dendro_file)) return(NULL)
+  path <- resolve_artifact(f$wgcna_dendro_file)
+  if (!file.exists(path)) return(NULL)
+  tree <- readRDS(path)
+  hc <- list(merge = tree$merge, height = tree$height, order = tree$order,
+             labels = tree$labels, method = "average", dist.method = "1 - TOM")
+  class(hc) <- "hclust"
+  hc
+}
+
+#' Classic PCA/sPCA biplot data: ALL sample scores + a SUBSET of gene
+#' loadings (the `top_n` genes by combined magnitude on the two chosen
+#' components -- showing every gene as an arrow is unreadable at
+#' genomics scale, thousands of features vs. the handful typical in a
+#' textbook biplot). Loadings are pre-scaled so arrow tips land within
+#' ~80% of the score cloud's radius -- the standard ad hoc biplot
+#' convention (e.g. factoextra::fviz_pca_biplot, ggbiplot) since raw
+#' loadings and raw scores live on very different numeric scales and a
+#' biplot's real content is DIRECTION/relative magnitude, not a shared
+#' numeric axis.
+#'
+#' `comp_x`/`comp_y` are 1-based component indices (matching
+#' colnames(loadings)/colnames(scores)). Returns NULL if the fit has no
+#' loadings/scores, or either component index is out of range.
+biplot_data <- function(con, fit_id, comp_x, comp_y, top_n = 15) {
+  L <- load_loadings(con, fit_id)
+  S <- load_scores(con, fit_id)
+  if (is.null(L) || is.null(S)) return(NULL)
+  if (!(comp_x %in% seq_len(ncol(L))) || !(comp_y %in% seq_len(ncol(L)))) return(NULL)
+
+  scores_df <- data.frame(sample_id = rownames(S), x = S[, comp_x], y = S[, comp_y])
+
+  lx <- L[, comp_x]; ly <- L[, comp_y]
+  mag <- sqrt(lx^2 + ly^2)
+  keep <- order(-mag)[seq_len(min(top_n, sum(mag > 0)))]
+
+  score_radius <- suppressWarnings(max(sqrt(scores_df$x^2 + scores_df$y^2), na.rm = TRUE))
+  loading_radius <- suppressWarnings(max(mag[keep], na.rm = TRUE))
+  scale_factor <- if (is.finite(loading_radius) && loading_radius > 0) 0.8 * score_radius / loading_radius else 1
+
+  arrows_df <- data.frame(
+    gene = rownames(L)[keep],
+    x = lx[keep] * scale_factor,
+    y = ly[keep] * scale_factor
+  )
+  list(scores = scores_df, arrows = arrows_df)
 }
 
 ## ---- pattern drivers (differential features, projectR::projectionDriveR()) ---
@@ -408,6 +549,44 @@ wgcna_module_sizes <- function(con, fit_id) {
     params = list(fit_id))
 }
 
+#' One module's member genes ranked by kME (intramodular connectivity /
+#' module membership, WGCNA::signedKME()) -- the standard hub-gene
+#' ranking blockwiseModules() computes internally but never returns (see
+#' compute_wgcna_kme()'s header in R/lib/ingest/ingest_dataset.R). Genes
+#' with no wgcna_kme row (older fits ingested before kME support, or a
+#' sample-overlap edge case at compute time) still appear with kme = NA,
+#' sorted last -- never silently dropped from the membership list.
+wgcna_module_kme <- function(con, fit_id, module) {
+  DBI::dbGetQuery(con,
+    "SELECT m.gene, k.kme FROM wgcna_modules m
+     LEFT JOIN wgcna_kme k ON k.fit_id = m.fit_id AND k.gene = m.gene AND k.module = m.module
+     WHERE m.fit_id = ? AND m.module = ?
+     ORDER BY k.kme DESC",
+    params = list(fit_id, module))
+}
+
+#' Every gene's module assignment for this fit, module 0 (unassigned)
+#' included -- for coloring a full gene dendrogram by module, where every
+#' leaf needs a color regardless of whether it landed in a real module.
+wgcna_all_modules <- function(con, fit_id) {
+  DBI::dbGetQuery(con, "SELECT gene, module FROM wgcna_modules WHERE fit_id = ?",
+                   params = list(fit_id))
+}
+
+#' Every gene's kME to its OWN assigned module, for every module in this
+#' fit -- the "how well-defined is each module" diagnostic: a module
+#' where members' kME clusters tightly near 1 is a real, coherent
+#' co-expression unit; one with a broad/low kME spread is diffuse. Module
+#' 0 (WGCNA's "unassigned genes" bucket) has no real eigengene to belong
+#' to, so it's excluded here, matching the app's existing convention
+#' (e.g. gene_sets_from_wgcna()) of treating module 0 as not a real module.
+wgcna_kme_all <- function(con, fit_id) {
+  DBI::dbGetQuery(con,
+    "SELECT k.module, k.gene, k.kme FROM wgcna_kme k
+     WHERE k.fit_id = ? AND k.module != 0",
+    params = list(fit_id))
+}
+
 wgcna_module_jaccard <- function(con, fit_a, fit_b) {
   DBI::dbGetQuery(con,
     "SELECT module_a, module_b, jaccard, matched FROM wgcna_module_pairs
@@ -439,6 +618,46 @@ wgcna_module_best_matches <- function(con, dataset_id, fit_id) {
      FROM wgcna_module_pairs p JOIN fits fa ON fa.fit_id = p.fit_a
      WHERE p.fit_b = ?1 AND p.matched = 1",
     params = list(fit_id))
+}
+
+#' Numeric-metadata field names available for this dataset's Gene
+#' Significance (see compute_wgcna_gene_significance()) -- restricted to
+#' test='spearman' rows, since only those carry a SIGNED statistic
+#' usable in a GS-vs-kME scatter (Kruskal-Wallis/categorical fields have
+#' no sign). Empty for datasets whose sample metadata is all-categorical
+#' (real, expected -- e.g. ANEMONES), or that predate this table
+#' (compute_wgcna_gene_significance() hasn't been run for them yet).
+wgcna_gene_significance_fields <- function(con, dataset_id) {
+  DBI::dbGetQuery(con,
+    "SELECT DISTINCT field FROM wgcna_gene_significance
+     WHERE dataset_id = ? AND test = 'spearman' ORDER BY field",
+    params = list(dataset_id))$field
+}
+
+#' The classic WGCNA hub-gene validation join: for one module, each
+#' member gene's kME (module membership) against its Gene Significance
+#' for one chosen trait. A real kME-vs-GS relationship within a module
+#' means that module is phenotype-relevant, not just a network-structure
+#' artifact -- see R/lib/ingest/ingest_dataset.R::compute_wgcna_gene_significance()'s
+#' header. `dataset_id` is needed because wgcna_gene_significance is
+#' dataset-level (not per-fit, unlike wgcna_kme).
+#'
+#' Joins through wgcna_modules (real membership), NOT just `wgcna_kme
+#' WHERE module = ?` -- signedKME() correlates every gene against EVERY
+#' module's eigengene, not just its own, so wgcna_kme alone has a
+#' (module) row for every gene in the dataset regardless of actual
+#' assignment; filtering on it directly silently returns all genes
+#' instead of this module's real members (confirmed directly: module 1
+#' of one real ROSE fit has 2,236 assigned genes, but `wgcna_kme WHERE
+#' module = 1` alone returns all 7,080).
+wgcna_module_gs_kme <- function(con, fit_id, module, dataset_id, field) {
+  DBI::dbGetQuery(con,
+    "SELECT m.gene, k.kme, g.statistic AS gs
+     FROM wgcna_modules m
+     JOIN wgcna_kme k ON k.fit_id = m.fit_id AND k.gene = m.gene AND k.module = m.module
+     JOIN wgcna_gene_significance g ON g.dataset_id = ?3 AND g.gene = m.gene AND g.field = ?4
+     WHERE m.fit_id = ?1 AND m.module = ?2 AND g.test = 'spearman'",
+    params = list(fit_id, module, dataset_id, field))
 }
 
 ## ---- enrichment cache ---------------------------------------------------------

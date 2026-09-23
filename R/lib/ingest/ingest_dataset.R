@@ -275,6 +275,84 @@ compute_wgcna_kme <- function(con, dataset_id, dataset_yaml, db_path, force = FA
   invisible(NULL)
 }
 
+#' Compute a real gene-clustering dendrogram for every already-ingested
+#' WGCNA fit of this dataset that doesn't have one yet -- the classic
+#' plotDendroAndColors() tree, never persisted anywhere today.
+#' blockwiseModules() computes an equivalent tree internally
+#' (net$dendrograms) but it's discarded before ingest even sees it
+#' (R/methods/wgcna.R calls it with saveTOMs=FALSE, and extract_result()'s
+#' wgcna branch only ever reads $colors/$MEs off `net` -- see R/lib/ingest/
+#' db.R's wgcna_dendro_file column comment). So this recomputes the tree
+#' from scratch via WGCNA::TOMsimilarityFromExpr(), using the SAME
+#' goodSamplesGenes() filter run_wgcna_param_job()/compute_wgcna_sft() both
+#' apply, so the resulting gene set/order matches this fit's own
+#' wgcna_modules rows exactly.
+#'
+#' Real, non-trivial cost: one full gene x gene TOM per fit (up to 8,000 x
+#' 8,000 at this project's current scale) -- meant to run via the same
+#' dedicated, non-containerized WGCNA `srun` workflow as
+#' compute_wgcna_kme()/compute_wgcna_sft(), not casually re-run.
+#'
+#' Persists ONLY the small hclust-reconstructable fields (merge, height,
+#' order, labels) as this fit's `wgcna_dendro_file` artifact -- NEVER the
+#' TOM itself (computed transiently, discarded immediately after
+#' hclust() reduces it to a tree; see db.R's column comment for why
+#' storing the full matrix per fit would be impractical at 480 fits).
+#'
+#' `force = TRUE` recomputes for every fit even if wgcna_dendro_file is
+#' already set; otherwise only fits with no dendro yet are computed
+#' (same additive-across-fits semantics as compute_wgcna_kme()).
+compute_wgcna_dendro <- function(con, dataset_id, dataset_yaml, db_path, force = FALSE) {
+  wg <- dataset_yaml$methods$network$wgcna
+  if (is.null(wg)) return(invisible(NULL))
+  networkType <- wg$networkType %||% "signed"
+
+  mat_row <- DBI::dbGetQuery(con, "SELECT matrix_file FROM datasets WHERE dataset_id = ?",
+                              params = list(dataset_id))
+  if (nrow(mat_row) == 0 || is.na(mat_row$matrix_file)) {
+    message("  no cached matrix for ", dataset_id, " -- skipping WGCNA dendrogram")
+    return(invisible(NULL))
+  }
+  mat <- as.matrix(readRDS(resolve_artifact(mat_row$matrix_file, db_path)))
+  datExpr_full <- t(mat)
+  gsg <- WGCNA::goodSamplesGenes(datExpr_full, verbose = 0)   # mirrors run_wgcna_param_job()'s own filter
+  if (!gsg$allOK) datExpr_full <- datExpr_full[gsg$goodSamples, gsg$goodGenes, drop = FALSE]
+
+  fits <- DBI::dbGetQuery(con,
+    "SELECT fit_id, power, wgcna_dendro_file FROM fits
+     WHERE dataset_id = ? AND method = 'wgcna' AND status = 'ok'",
+    params = list(dataset_id))
+  if (nrow(fits) == 0) return(invisible(NULL))
+
+  art_dir <- file.path(artifacts_dir(db_path, dataset_id), "wgcna_dendro")
+  dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
+
+  for (i in seq_len(nrow(fits))) {
+    fit_id <- fits$fit_id[i]
+    if (!force && !is.na(fits$wgcna_dendro_file[i])) next
+
+    message("  [wgcna_dendro] fit_id ", fit_id, " (power ", fits$power[i], "): TOM over ",
+            ncol(datExpr_full), " genes...")
+    # networkType AND TOMType both set to match run_wgcna_param_job()'s own
+    # blockwiseModules() call exactly (TOMType = networkType there too) --
+    # TOMsimilarityFromExpr()'s own default TOMType ("signed") would
+    # silently diverge from the original fit for any other networkType.
+    TOM <- WGCNA::TOMsimilarityFromExpr(datExpr_full, power = fits$power[i],
+                                        networkType = networkType, TOMType = networkType,
+                                        verbose = 0)
+    hc <- hclust(as.dist(1 - TOM), method = "average")
+    rm(TOM); gc(FALSE)
+
+    tree <- list(merge = hc$merge, height = hc$height, order = hc$order,
+                 labels = colnames(datExpr_full))
+    rel_path <- file.path("stability_artifacts", dataset_id, "wgcna_dendro", paste0("fit_", fit_id, ".rds"))
+    saveRDS(tree, file.path(art_dir, paste0("fit_", fit_id, ".rds")))
+    DBI::dbExecute(con, "UPDATE fits SET wgcna_dendro_file = ? WHERE fit_id = ?",
+                   params = list(rel_path, fit_id))
+  }
+  invisible(NULL)
+}
+
 #' Compute WGCNA Gene Significance (GS) -- per-gene correlation of
 #' expression against each sample-metadata trait -- for this dataset.
 #' Dataset-level, not per-fit: GS depends only on the cached expression
@@ -352,7 +430,7 @@ compute_wgcna_gene_significance <- function(con, dataset_id, dataset_yaml, db_pa
   DBI::dbExecute(con, "DELETE FROM wgcna_gene_significance WHERE dataset_id = ?", params = list(dataset_id))
   DBI::dbWriteTable(con, "wgcna_gene_significance", data.frame(
     dataset_id = dataset_id, gene = gs$component, field = gs$field,
-    statistic = gs$statistic, p_value = gs$p_value, stringsAsFactors = FALSE
+    statistic = gs$statistic, p_value = gs$p_value, test = gs$test, stringsAsFactors = FALSE
   ), append = TRUE)
   invisible(NULL)
 }

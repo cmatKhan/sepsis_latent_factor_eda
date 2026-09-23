@@ -19,6 +19,89 @@ scree_best_rank <- function(con, dataset_id, method) {
   best_by_rank$rank[which.min(best_by_rank$mse)]
 }
 
+#' Per-K sparsity/quality tradeoff curve for sPCA, following the "Index
+#' of Sparseness" (IS) approach (Trendafilov 2014, shown by Gu et al.
+#' 2019 to outperform cross-validation/BIC for choosing sPCA's sparsity
+#' penalty -- see Guerra-Urzola et al. 2021, "A Guide for Sparse PCA:
+#' Model Comparison and Applications," Figs 6-7, PMC8636462). Replaces
+#' the old rank x alpha MSE heatmap -- that view was both hard to act on
+#' AND, until 2026-09-22, built on a buggy `mse` (see R/methods/spca.R's
+#' comment) that reported ~0% variance explained for every fit.
+#'
+#' For a FIXED rank K, across every para/alpha this dataset's spca_grid
+#' swept:
+#'   PEV_sparse = sum(pev)  -- cumulative variance explained by the
+#'     K-component sparse solution. spca_diag_file$pev is PER-COMPONENT
+#'     (each entry is that one component's own incremental contribution),
+#'     not cumulative -- summing it is what R/methods/spca.R's `mse` fix
+#'     does too, for the same underlying reason.
+#'   PS = 1 - sum(n_nonzero) / (n_genes * K)  -- proportion of sparsity
+#'     (fraction of zero loadings across the whole K-component solution).
+#'   PEV_pca = 1 - (mse_pca(K) * n_genes * n_samples) / var_all  -- the
+#'     UNCONSTRAINED PCA reference at the same K, derived from this
+#'     dataset's own PCA fit (`fits.mse`, a raw per-element MSE -- PCA's
+#'     mse has no analogous bug, only sPCA's does) and any sPCA fit's
+#'     `var_all` (mathematically the same total sum-of-squares
+#'     `elasticnet::spca()` and `prcomp()` both compute from the
+#'     identically-centered matrix -- verified numerically against real
+#'     data, 2026-09-22: monotonically increasing, sane 0-1 values).
+#'     Constant across the para sweep for this K -- no PCA re-fit needed.
+#'   IS = PEV_sparse * PEV_pca * PS -- peaks at the paper's recommended
+#'     "not too sparse, not too dense" sweet spot; a sparse solution can
+#'     never explain more variance than unconstrained PCA at the same K,
+#'     so PEV_sparse <= PEV_pca always holds by construction.
+#'
+#' Returns data.frame(fit_id, alpha, PS, PEV_sparse, IS) sorted by alpha
+#' (IS is NA, not the whole row dropped, when no PCA fit exists at this
+#' exact rank for this dataset -- callers should still plot PEV_sparse
+#' vs PS in that case and just skip/note the IS series).
+spca_sparsity_curve <- function(con, dataset_id, rank) {
+  empty <- data.frame(fit_id = integer(0), alpha = numeric(0), PS = numeric(0),
+                       PEV_sparse = numeric(0), IS = numeric(0))
+
+  fits <- DBI::dbGetQuery(con,
+    "SELECT fit_id, alpha FROM fits
+     WHERE dataset_id = ? AND method = 'spca' AND rank = ? AND status = 'ok'
+     ORDER BY alpha",
+    params = list(dataset_id, rank))
+  if (nrow(fits) == 0) return(empty)
+
+  pca_fit <- DBI::dbGetQuery(con,
+    "SELECT fit_id, mse FROM fits
+     WHERE dataset_id = ? AND method = 'pca' AND rank = ? AND status = 'ok' LIMIT 1",
+    params = list(dataset_id, rank))
+  have_pca_ref <- nrow(pca_fit) == 1 && !is.na(pca_fit$mse)
+  pca_n_samples <- if (have_pca_ref) {
+    s <- load_scores(con, pca_fit$fit_id[1])
+    if (!is.null(s)) nrow(s) else NA_integer_
+  } else NA_integer_
+  have_pca_ref <- have_pca_ref && !is.na(pca_n_samples)
+
+  rows <- lapply(seq_len(nrow(fits)), function(i) {
+    fit_id <- fits$fit_id[i]
+    diag <- load_spca_diag(con, fit_id)
+    if (is.null(diag) || is.null(diag$pev) || all(is.na(diag$pev)) ||
+        is.null(diag$n_nonzero) || is.null(diag$var_all) || is.na(diag$var_all)) return(NULL)
+
+    L <- load_loadings(con, fit_id)
+    if (is.null(L)) return(NULL)
+    n_genes <- nrow(L)
+
+    pev_sparse <- sum(diag$pev)
+    ps <- 1 - sum(diag$n_nonzero) / (n_genes * rank)
+
+    is_val <- NA_real_
+    if (have_pca_ref) {
+      pev_pca <- 1 - (pca_fit$mse[1] * n_genes * pca_n_samples) / diag$var_all
+      is_val <- pev_sparse * pev_pca * ps
+    }
+    data.frame(fit_id = fit_id, alpha = fits$alpha[i], PS = ps, PEV_sparse = pev_sparse, IS = is_val)
+  })
+  rows <- Filter(Negate(is.null), rows)
+  if (length(rows) == 0) return(empty)
+  do.call(rbind, rows)
+}
+
 #' Like hungarian_match() (R/lib/ingest/similarity.R) but costed on
 #' |similarity| rather than raw similarity -- needed whenever a strongly
 #' NEGATIVE similarity is just as informative a match as a strongly
@@ -203,17 +286,42 @@ cluster_and_ari <- function(con, fit_a, fit_b, k = 4) {
 #' one fit's factors -- per factor/direction/query_type, count of
 #' significant terms + the smallest p-value seen. Purely a live read of
 #' what's already been queried; never triggers new enrichment computation.
+#'
+#' Resolves each factor through resolve_enrichment_factor_id() (see
+#' db_helpers.R) rather than joining directly on this fit_id's own
+#' factor_id -- a non-representative fit (e.g. any PCA rank below the
+#' max, or an NMF/CoGAPS/ICA/sPCA seed that happens to match another
+#' seed's loadings exactly) never has its OWN enrichment_queried rows
+#' (representative_fit_ids() only runs fgsea_grid once per equivalence
+#' class), but its factors' enrichment is still available via whichever
+#' sibling fit IS representative -- confirmed directly (2026-09-22) this
+#' was previously the reason the Compare tab's "Enrichment cross-
+#' reference" showed "Nothing computed yet" for e.g. any non-max-rank
+#' PCA fit even though real enrichment existed for that exact factor.
 cached_enrichment_summary <- function(con, fit_id) {
-  DBI::dbGetQuery(con,
-    "SELECT f.factor_index, q.query_type, q.direction,
-            COUNT(c.term_id) AS n_significant_terms,
-            MIN(c.p_value) AS min_p_value
-     FROM factors f
-     JOIN enrichment_queried q ON q.factor_id = f.factor_id
-     LEFT JOIN enrichment_cache c
-       ON c.factor_id = q.factor_id AND c.query_type = q.query_type AND c.direction = q.direction
-     WHERE f.fit_id = ?
-     GROUP BY f.factor_index, q.query_type, q.direction
-     ORDER BY f.factor_index",
-    params = list(fit_id))
+  empty <- data.frame(factor_index = integer(0), query_type = character(0), direction = character(0),
+                       n_significant_terms = integer(0), min_p_value = numeric(0))
+  fac_idx <- DBI::dbGetQuery(con, "SELECT factor_index FROM factors WHERE fit_id = ? ORDER BY factor_index",
+                              params = list(fit_id))$factor_index
+  if (length(fac_idx) == 0) return(empty)
+
+  rows <- lapply(fac_idx, function(fi) {
+    resolved_id <- resolve_enrichment_factor_id(con, fit_id, fi)
+    if (is.null(resolved_id)) return(NULL)
+    d <- DBI::dbGetQuery(con,
+      "SELECT q.query_type, q.direction,
+              COUNT(c.term_id) AS n_significant_terms,
+              MIN(c.p_value) AS min_p_value
+       FROM enrichment_queried q
+       LEFT JOIN enrichment_cache c
+         ON c.factor_id = q.factor_id AND c.query_type = q.query_type AND c.direction = q.direction
+       WHERE q.factor_id = ?
+       GROUP BY q.query_type, q.direction",
+      params = list(resolved_id))
+    if (nrow(d) == 0) return(NULL)
+    cbind(factor_index = fi, d)
+  })
+  rows <- Filter(Negate(is.null), rows)
+  if (length(rows) == 0) return(empty)
+  do.call(rbind, rows)
 }

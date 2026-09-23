@@ -578,13 +578,29 @@ server <- function(input, output, session) {
     m <- nav$method
     if (m %in% SCREE_RANK_METHODS) {
       # PCA/sPCA are deterministic given their rank (+ sPCA's para) -- no
-      # seed-stability or cross-rank views apply; a scree-style
-      # reconstruction-error-by-rank plot (in-sample MSE, already
-      # populated per rank in `fits` for every pca/spca fit) stands in for
-      # rank selection, plus a plain rank-select (no click-through plot
-      # left to drill via)
+      # seed-stability or cross-rank views apply. PCA gets a plain
+      # scree-by-rank line plot (in-sample MSE across ALL ranks at once).
+      # sPCA gets an Index-of-Sparseness plot (IS + PEV vs. proportion of
+      # sparsity, PER rank -- see spca_sparsity_curve()'s header for the
+      # full rationale/citations) -- this replaced a rank x alpha MSE
+      # heatmap that was both hard to act on and, until 2026-09-22, built
+      # on a buggy `mse` column. Since the new sPCA view is per-rank, the
+      # SAME rank selector below now also drives which curve is shown
+      # here, not just which rank "Explore this rank" drills into.
+      tab_title <- if (m == "spca") "Sparsity vs. variance explained" else "Reconstruction error by rank"
+      tab_desc <- if (m == "spca") {
+        paste("Index of Sparseness (IS) and cumulative percent variance explained (PEV), against the",
+              "proportion of sparsity (PS), for the rank selected below -- the standard data-driven way",
+              "to choose sPCA's sparsity penalty (Trendafilov 2014; shown by Gu et al. 2019 to outperform",
+              "cross-validation/BIC for this). IS peaks at a \"not too sparse, not too dense\" sweet spot;",
+              "PEV alone just keeps falling as sparsity increases, which is why IS (not PEV) is the metric",
+              "to actually optimize.")
+      } else {
+        "In-sample reconstruction error at each rank -- the classic scree-plot elbow heuristic."
+      }
       navset_card_tab(
-        nav_panel("Reconstruction error by rank",
+        nav_panel(tab_title,
+          p(tab_desc),
           plotOutput("l1_scree", height = "420px"),
           layout_columns(col_widths = c(6, 6),
             selectInput("l1_scree_rank", "Explore rank:", choices = NULL),
@@ -664,22 +680,34 @@ server <- function(input, output, session) {
   })
 
   output$l1_scree <- renderPlot({
-    d <- scree_mse_by_rank(con, ds(), nav$method); req(nrow(d) > 0)
-    if (all(is.na(d$alpha))) {
+    if (nav$method == "spca") {
+      # Per-rank Index-of-Sparseness view -- reacts live to the rank
+      # selector below (not just at "Explore this rank" click time),
+      # since this plot is inherently per-K, unlike PCA's all-ranks-at-once
+      # scree line. See spca_sparsity_curve()'s header for the full
+      # citation/formula rationale.
+      req(input$l1_scree_rank)
+      rk <- as.integer(input$l1_scree_rank)
+      d <- spca_sparsity_curve(con, ds(), rk)
+      validate(need(nrow(d) > 0,
+        paste0("No sPCA diagnostics available at rank ", rk, " (re-run --stage core / R/ingest_results.R for this dataset if it predates spca_diag_file).")))
+      have_is <- any(!is.na(d$IS))
+      long <- rbind(
+        data.frame(alpha = d$alpha, PS = d$PS, metric = "PEV (cumulative)", value = d$PEV_sparse),
+        if (have_is) data.frame(alpha = d$alpha, PS = d$PS, metric = "Index of Sparseness (IS)", value = d$IS) else NULL
+      )
+      subtitle <- if (have_is) NULL else "No PCA fit at this rank for this dataset -- showing PEV only (IS needs a same-rank PCA reference)."
+      ggplot(long, aes(PS, value, color = metric)) +
+        geom_line() + geom_point(size = 2.5) +
+        scale_color_manual(values = c("PEV (cumulative)" = "steelblue", "Index of Sparseness (IS)" = "firebrick")) +
+        labs(title = paste0("sPCA rank ", rk, " -- IS/PEV vs. proportion of sparsity"), subtitle = subtitle,
+             x = "proportion of sparsity (PS)", y = NULL, color = NULL) +
+        theme_minimal(base_size = 14) + theme(legend.position = "top")
+    } else {
+      d <- scree_mse_by_rank(con, ds(), nav$method); req(nrow(d) > 0)
       ggplot(d, aes(rank, mse)) + geom_line() + geom_point(size = 2) +
         labs(title = paste(toupper(nav$method), "-- in-sample reconstruction error by rank (scree plot)"),
              x = "rank", y = "reconstruction MSE") +
-        theme_minimal(base_size = 14)
-    } else {
-      # sPCA: `alpha` stores the `para` sparsity penalty crossed with rank
-      # (see fits_at_rank()'s doc) -- facet/color by it since multiple
-      # values exist per rank.
-      ggplot(d, aes(factor(rank), factor(alpha), fill = mse)) +
-        geom_tile() +
-        geom_text(aes(label = ifelse(is.na(mse), "failed", sprintf("%.2f", mse))), size = 3) +
-        scale_fill_viridis_c(na.value = "grey70", direction = -1) +
-        labs(title = paste(toupper(nav$method), "-- in-sample reconstruction MSE by rank x alpha (para)"),
-             x = "rank", y = "alpha (para)") +
         theme_minimal(base_size = 14)
     }
   })
@@ -904,22 +932,54 @@ server <- function(input, output, session) {
         ))
       }
 
+      if (m %in% c("pca", "spca")) {
+        panels <- c(panels, list(
+          nav_panel("Biplot (genes)",
+            p("Sample scores (points) + the top gene loadings by combined magnitude (arrows) on two chosen components -- the classic PCA/sPCA diagnostic for seeing which genes drive which axis (Guerra-Urzola et al. 2021, Fig. 7). Arrows are scaled for visibility, not on the same numeric axis as the scores -- only their DIRECTION and RELATIVE length are meaningful."),
+            layout_columns(col_widths = c(3, 3, 3, 3),
+              selectInput("l2_biplot_fit", "Fit:", choices = seed_choices),
+              selectInput("l2_biplot_x", "Component (x-axis):", choices = NULL),
+              selectInput("l2_biplot_y", "Component (y-axis):", choices = NULL),
+              numericInput("l2_biplot_topn", "Top N genes shown:", value = 15, min = 3, max = 50)),
+            plotOutput("l2_biplot", height = "500px")),
+          nav_panel("Biplot (metadata)",
+            p("Sample scores (points) + every usable sample-metadata field projected onto the same two components -- numeric fields as a Spearman-correlation VECTOR (direction/length show how that field aligns with each axis), categorical fields as a CENTROID point per level (mean score of the samples in that group). The metadata analog of the gene biplot -- shows which clinical/experimental variables track which axis, the same way the other tab shows which genes do."),
+            layout_columns(col_widths = c(4, 4, 4),
+              selectInput("l2_biplot_meta_fit", "Fit:", choices = seed_choices),
+              selectInput("l2_biplot_meta_x", "Component (x-axis):", choices = NULL),
+              selectInput("l2_biplot_meta_y", "Component (y-axis):", choices = NULL)),
+            plotOutput("l2_biplot_meta", height = "500px"))
+        ))
+      }
+
       panels <- c(panels, list(
         nav_panel("Sample scores",
           layout_columns(col_widths = c(3, 9),
             selectInput("l2_scores_fit", "Fit:", choices = seed_choices),
             selectInput("l2_scores_sort", "Sort/group by metadata field:", choices = NULL)),
-          DTOutput("l2_scores_table")),
-        nav_panel("Factor correlation (this fit)",
-          p("How redundant are this fit's own factors with each other, at the sample-score level?"),
-          selectInput("l2_corr_fit", "Fit:", choices = seed_choices),
-          plotOutput("l2_factor_corr", height = "420px")),
+          DTOutput("l2_scores_table"))
+      ))
+      if (!(m %in% c("pca", "spca"))) {
+        # PCA/sPCA's components are uncorrelated by construction (PCA:
+        # orthogonal eigenvectors; sPCA: elastic-net-penalized toward the
+        # same near-orthogonal solution) -- a within-fit correlation
+        # heatmap has nothing to show for either. NMF/CoGAPS/ICA have no
+        # such guarantee (non-negativity or non-orthogonal rotation), so
+        # they keep this tab.
+        panels <- c(panels, list(
+          nav_panel("Factor correlation (this fit)",
+            p("How redundant are this fit's own factors with each other, at the sample-score level?"),
+            selectInput("l2_corr_fit", "Fit:", choices = seed_choices),
+            plotOutput("l2_factor_corr", height = "420px"))
+        ))
+      }
+      panels <- c(panels, list(
         nav_panel("Metadata associations",
           p("Spearman correlation (numeric fields) / Kruskal-Wallis (categorical fields) between each factor's sample scores and every sample-metadata column. p-values BH-adjusted across the whole grid shown."),
           selectInput("l2_assoc_fit", "Fit:", choices = seed_choices),
           plotOutput("l2_assoc_heatmap", height = "440px")),
         nav_panel("Enrichment overview",
-          p("Whatever functional enrichment the cluster ingest pipeline has already computed for every factor in this fit -- ORA and GSEA, and (for PCA/ICA/sPCA) both loading directions. Jump straight to any one factor's full detail via Level 3's Enrichment tab."),
+          p("Whatever functional enrichment the cluster ingest pipeline has already computed for every factor in this fit -- ORA and GSEA both, and for PCA/ICA/sPCA specifically (genuinely signed loadings), both the positive AND negative loading directions; NMF/CoGAPS (non-negative loadings) only have a positive side. Jump straight to any one factor's full detail via Level 3's Enrichment tab."),
           selectInput("l2_enrich_all_fit", "Fit:", choices = seed_choices),
           DTOutput("l2_enrich_overview_table"),
           layout_columns(col_widths = c(4, 4, 4),
@@ -941,18 +1001,50 @@ server <- function(input, output, session) {
                          style = "margin-top: 24px;")),
           h6("Best Hungarian-matched module at every other power (Jaccard):"),
           DTOutput("l2_wgcna_matches")),
+        nav_panel("Module quality (kME)",
+          p("Each module's spread of kME (correlation of member genes to their own module's eigengene). A module where genes cluster tightly near kME = 1 is a well-defined, coherent co-expression unit; a wide or low spread means the module is diffuse -- some members barely resemble the eigengene they were assigned to. Module 0 (unassigned genes) is excluded."),
+          plotOutput("l2_wgcna_kme_quality", height = "440px")),
+        nav_panel("Gene dendrogram",
+          p("The real gene-clustering tree this power's modules were cut from (1 - TOM distance, average linkage), with each leaf colored by its final module assignment -- the classic plotDendroAndColors() view. Requires R/compute_wgcna_diagnostics.R --recompute-dendro to have been run for this fit (a real, non-trivial computation -- not part of normal ingest, see that flag's own docs)."),
+          plotOutput("l2_wgcna_dendro", height = "480px")),
         nav_panel("Module overlap vs another power",
           selectInput("l2_wgcna_other", "Compare with power:", choices = power_choices),
           plotOutput("l2_wgcna_jaccard", height = "440px")),
         nav_panel("Module eigengenes",
-          p("Eigengene scores require re-running wgcna_grid with the current R/methods/wgcna.R (records sample ids) and re-ingesting with --overwrite; older fits show no data here."),
-          layout_columns(col_widths = c(3, 9),
-            selectInput("l2_wgcna_scores_fit", "Power:", choices = power_choices),
-            selectInput("l2_wgcna_scores_sort", "Sort/group by metadata field:", choices = NULL)),
-          DTOutput("l2_wgcna_scores_table")),
+          # navset_card_tab()'s default `wrapper = card_body` makes each
+          # panel's content a FILLABLE flex container -- DTOutput's real
+          # height is only known after its JS initializes, so the
+          # flexbox fill pass sized everything else (the module-comparison
+          # controls + scatter plot) as if the table had zero height,
+          # causing visual overlap (confirmed directly in the browser,
+          # 2026-09-22). `nav_panel()` itself has no `fillable` argument
+          # in the installed bslib version (0.12.0) to opt out per-panel,
+          # so instead: wrap everything in one plain, non-flex `div()` --
+          # it becomes a single flex ITEM in card_body's layout, and plain
+          # `<div>`s lay out THEIR OWN children via normal block flow
+          # regardless of the parent's flex context, which stacks
+          # correctly no matter when DT's JS resolves its height.
+          div(
+            p("Eigengene scores require re-running wgcna_grid with the current R/methods/wgcna.R (records sample ids) and re-ingesting with --overwrite; older fits show no data here."),
+            layout_columns(col_widths = c(3, 9),
+              selectInput("l2_wgcna_scores_fit", "Power:", choices = power_choices),
+              selectInput("l2_wgcna_scores_sort", "Sort/group by metadata field:", choices = NULL)),
+            DTOutput("l2_wgcna_scores_table"),
+            hr(),
+            h6("Compare two modules across samples"),
+            layout_columns(col_widths = c(4, 4, 4),
+              selectInput("l2_wgcna_scores_x", "Module (x-axis):", choices = NULL),
+              selectInput("l2_wgcna_scores_y", "Module (y-axis):", choices = NULL),
+              p("Points are colored by the metadata field selected above, if any.",
+                style = "margin-top: 32px; color: #666;")),
+            plotOutput("l2_wgcna_scores_scatter", height = "440px")
+          )),
         nav_panel("Metadata associations",
           selectInput("l2_wgcna_assoc_fit", "Power:", choices = power_choices),
           plotOutput("l2_wgcna_assoc_heatmap", height = "440px")),
+        nav_panel("Module-trait relationships",
+          p("The classic WGCNA module-trait heatmap (Langfelder & Horvath's labeledHeatmap() convention): signed correlation between each module's eigengene and every NUMERIC sample-metadata field, with the correlation and BH-adjusted p-value shown in each cell. Categorical fields have no meaningful sign -- see \"Metadata associations\" for those."),
+          plotOutput("l2_wgcna_module_trait", height = "440px")),
         nav_panel("Enrichment overview",
           p("ORA already computed by the cluster ingest pipeline (R/ingest_jobs/wgcna_ora_job.R) for every module in this power (WGCNA has no GSEA/direction side -- see the Level 3 module view). Jump straight to any one module's full detail."),
           DTOutput("l2_wgcna_enrich_overview_table"),
@@ -1064,11 +1156,124 @@ server <- function(input, output, session) {
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
   }
 
+  #' The classic WGCNA module-trait relationship heatmap (Langfelder &
+  #' Horvath's labeledHeatmap() convention, also the plot the Biostars
+  #' consensus-network thread builds by hand): SIGNED correlation +
+  #' r/p-value text per cell, diverging blue-white-red fill. NUMERIC
+  #' metadata fields only -- Kruskal-Wallis (categorical fields) has no
+  #' sign, so those stay on the existing generic assoc_heatmap_plot()
+  #' tab instead of being force-fit into a diverging scale here.
+  wgcna_module_trait_plot <- function(fit_id) {
+    L <- load_scores(con, fit_id)
+    validate(need(!is.null(L), "No module eigengenes available for this fit."))
+    m <- sample_meta_reactive()
+    validate(need(!is.null(m), "No sample metadata registered for this dataset (see dataset config sample_metadata_path/sample_id_col)."))
+    numeric_cols <- c("sample_id", names(m)[vapply(m, is.numeric, logical(1))])
+    m_num <- m[, intersect(names(m), numeric_cols), drop = FALSE]
+    validate(need(ncol(m_num) > 1, "No numeric sample-metadata fields for this dataset -- signed correlation needs a continuous trait (see the generic \"Metadata associations\" tab for categorical fields)."))
+    d <- generic_association_scan(L, m_num, "sample_id")
+    validate(need(nrow(d) > 0, "Not enough overlap between module eigengenes and sample metadata to test."))
+    d$module <- suppressWarnings(as.integer(sub("^ME", "", d$component)))
+    d$module[is.na(d$module)] <- d$component[is.na(d$module)]
+    d$label <- paste0(sprintf("%.2f", d$statistic), "\n(", signif(d$p_value, 2), ")")
+    ggplot(d, aes(field, factor(module), fill = statistic)) +
+      geom_tile() +
+      geom_text(aes(label = label), size = 3) +
+      scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick",
+                            midpoint = 0, limits = c(-1, 1), name = "correlation") +
+      labs(x = NULL, y = "module",
+           title = "Module-trait relationships (Spearman r, BH-adjusted p in parentheses)") +
+      theme_minimal(base_size = 13) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  }
+
   # factorization methods
   observe({
     req(nav$level == 2, nav$method %in% FACTORIZATION_METHODS)
     update_meta_field_choices(session, "l2_scores_sort")
   })
+
+  # ---- Biplot (PCA/sPCA only) ----
+  observeEvent(input$l2_biplot_fit, {
+    L <- load_loadings(con, as.integer(input$l2_biplot_fit))
+    comps <- if (is.null(L)) character(0) else colnames(L)
+    updateSelectInput(session, "l2_biplot_x", choices = comps, selected = comps[1])
+    updateSelectInput(session, "l2_biplot_y", choices = comps, selected = comps[min(2, length(comps))])
+  })
+  output$l2_biplot <- renderPlot({
+    req(input$l2_biplot_fit, input$l2_biplot_x, input$l2_biplot_y)
+    fit_id <- as.integer(input$l2_biplot_fit)
+    L <- load_loadings(con, fit_id)
+    validate(need(!is.null(L), "No loadings available for this fit."))
+    comp_x <- match(input$l2_biplot_x, colnames(L))
+    comp_y <- match(input$l2_biplot_y, colnames(L))
+    validate(need(!is.na(comp_x) && !is.na(comp_y), "Selected component(s) not found in this fit."))
+
+    top_n <- if (is.null(input$l2_biplot_topn) || is.na(input$l2_biplot_topn)) 15 else as.integer(input$l2_biplot_topn)
+    d <- biplot_data(con, fit_id, comp_x, comp_y, top_n = max(1, top_n))
+    validate(need(!is.null(d), "No scores/loadings available for this fit."))
+
+    disp <- build_display_map(con, ds())
+    d$arrows$label <- if (!is.null(disp)) unname(disp[d$arrows$gene]) else d$arrows$gene
+    d$arrows$label[is.na(d$arrows$label)] <- d$arrows$gene[is.na(d$arrows$label)]
+
+    ggplot() +
+      geom_point(data = d$scores, aes(x, y), color = "grey40", alpha = 0.6, size = 2) +
+      geom_segment(data = d$arrows, aes(x = 0, y = 0, xend = x, yend = y),
+                   arrow = arrow(length = unit(0.2, "cm")), color = "firebrick") +
+      ggrepel::geom_text_repel(data = d$arrows, aes(x, y, label = label), color = "firebrick",
+                                size = 3.5, max.overlaps = Inf) +
+      labs(x = input$l2_biplot_x, y = input$l2_biplot_y,
+           title = paste0(toupper(nav$method), " biplot -- ", input$l2_biplot_x, " vs ", input$l2_biplot_y),
+           subtitle = paste0(nrow(d$scores), " samples, top ", nrow(d$arrows), " genes by combined loading magnitude")) +
+      theme_minimal(base_size = 14) +
+      coord_fixed()
+  })
+
+  observeEvent(input$l2_biplot_meta_fit, {
+    L <- load_loadings(con, as.integer(input$l2_biplot_meta_fit))
+    comps <- if (is.null(L)) character(0) else colnames(L)
+    updateSelectInput(session, "l2_biplot_meta_x", choices = comps, selected = comps[1])
+    updateSelectInput(session, "l2_biplot_meta_y", choices = comps, selected = comps[min(2, length(comps))])
+  })
+  output$l2_biplot_meta <- renderPlot({
+    req(input$l2_biplot_meta_fit, input$l2_biplot_meta_x, input$l2_biplot_meta_y)
+    fit_id <- as.integer(input$l2_biplot_meta_fit)
+    S <- load_scores(con, fit_id)
+    validate(need(!is.null(S), "No sample scores available for this fit."))
+    comp_x <- match(input$l2_biplot_meta_x, colnames(S))
+    comp_y <- match(input$l2_biplot_meta_y, colnames(S))
+    validate(need(!is.na(comp_x) && !is.na(comp_y), "Selected component(s) not found in this fit."))
+
+    m <- sample_meta_reactive()
+    validate(need(!is.null(m), "No sample metadata registered for this dataset (see dataset config sample_metadata_path/sample_id_col)."))
+    d <- biplot_metadata_data(S, m, comp_x, comp_y, "sample_id")
+    validate(need(!is.null(d), "Not enough overlap between sample scores and sample metadata to plot."))
+    validate(need(nrow(d$vectors) > 0 || nrow(d$centroids) > 0,
+                  "No usable metadata fields (numeric fields need >=3 non-missing values; categorical fields need 2-8 levels with >=3 samples each)."))
+
+    p <- ggplot() +
+      geom_point(data = d$scores, aes(x, y), color = "grey40", alpha = 0.6, size = 2)
+    if (nrow(d$vectors) > 0) {
+      p <- p +
+        geom_segment(data = d$vectors, aes(x = 0, y = 0, xend = x, yend = y),
+                     arrow = arrow(length = unit(0.2, "cm")), color = "steelblue") +
+        ggrepel::geom_text_repel(data = d$vectors, aes(x, y, label = field), color = "steelblue",
+                                  size = 3.5, max.overlaps = Inf)
+    }
+    if (nrow(d$centroids) > 0) {
+      p <- p +
+        geom_point(data = d$centroids, aes(x, y), color = "darkgreen", shape = 17, size = 3) +
+        ggrepel::geom_text_repel(data = d$centroids, aes(x, y, label = paste0(field, ": ", level)),
+                                  color = "darkgreen", size = 3.5, max.overlaps = Inf)
+    }
+    p + labs(x = input$l2_biplot_meta_x, y = input$l2_biplot_meta_y,
+             title = paste0(toupper(nav$method), " metadata biplot -- ", input$l2_biplot_meta_x, " vs ", input$l2_biplot_meta_y),
+             subtitle = paste0(nrow(d$scores), " samples -- blue vectors: numeric fields (Spearman correlation), green triangles: categorical field group centroids")) +
+      theme_minimal(base_size = 14) +
+      coord_fixed()
+  })
+
   output$l2_scores_table <- renderDT({
     req(input$l2_scores_fit)
     scores_table_output(as.integer(input$l2_scores_fit), input$l2_scores_sort)
@@ -1133,6 +1338,27 @@ server <- function(input, output, session) {
     datatable(d[order(d$module, d$other_power), ], rownames = FALSE,
               options = list(pageLength = 15))
   })
+  output$l2_wgcna_kme_quality <- renderPlot({
+    req(nav$wgcna_fit)
+    d <- wgcna_kme_all(con, nav$wgcna_fit)
+    validate(need(nrow(d) > 0, "No kME data for this fit (older fits ingested before kME support -- re-run R/compute_wgcna_diagnostics.R --recompute-kme)."))
+    ggplot(d, aes(factor(module), kme)) +
+      geom_boxplot(outlier.size = 0.7, fill = "grey85") +
+      labs(x = "module", y = "kME to own module eigengene",
+           title = "Module quality: kME distribution per module") +
+      theme_minimal(base_size = 14)
+  })
+  output$l2_wgcna_dendro <- renderPlot({
+    req(nav$wgcna_fit)
+    tree <- load_wgcna_dendro(con, nav$wgcna_fit)
+    validate(need(!is.null(tree),
+      "No dendrogram computed for this fit yet -- run R/compute_wgcna_diagnostics.R --recompute-dendro (a real, non-trivial computation; see that flag's own docs)."))
+    mods <- wgcna_all_modules(con, nav$wgcna_fit)
+    mod_map <- setNames(mods$module, mods$gene)
+    colors <- WGCNA::labels2colors(mod_map[tree$labels])
+    WGCNA::plotDendroAndColors(tree, colors, "module",
+      dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05)
+  })
   output$l2_wgcna_jaccard <- renderPlot({
     req(nav$wgcna_fit, input$l2_wgcna_other)
     other <- as.integer(input$l2_wgcna_other)
@@ -1154,6 +1380,41 @@ server <- function(input, output, session) {
   output$l2_wgcna_scores_table <- renderDT({
     req(input$l2_wgcna_scores_fit)
     scores_table_output(as.integer(input$l2_wgcna_scores_fit), input$l2_wgcna_scores_sort)
+  })
+  observeEvent(input$l2_wgcna_scores_fit, {
+    L <- load_scores(con, as.integer(input$l2_wgcna_scores_fit))
+    modules <- if (is.null(L)) character(0) else colnames(L)
+    updateSelectInput(session, "l2_wgcna_scores_x", choices = modules,
+                       selected = modules[1])
+    updateSelectInput(session, "l2_wgcna_scores_y", choices = modules,
+                       selected = modules[min(2, length(modules))])
+  })
+  output$l2_wgcna_scores_scatter <- renderPlot({
+    req(input$l2_wgcna_scores_fit, input$l2_wgcna_scores_x, input$l2_wgcna_scores_y)
+    L <- load_scores(con, as.integer(input$l2_wgcna_scores_fit))
+    validate(need(!is.null(L), "No sample scores available for this fit."))
+    validate(need(input$l2_wgcna_scores_x %in% colnames(L) && input$l2_wgcna_scores_y %in% colnames(L),
+                  "Selected module(s) not found in this fit's eigengenes."))
+    d <- data.frame(sample_id = rownames(L), x = L[, input$l2_wgcna_scores_x], y = L[, input$l2_wgcna_scores_y])
+    color_field <- input$l2_wgcna_scores_sort
+    m <- sample_meta_reactive()
+    has_color <- !is.null(m) && nzchar(color_field %||% "") && color_field %in% names(m)
+    if (has_color) d <- merge(d, m[, c("sample_id", color_field)], by = "sample_id", all.x = TRUE)
+
+    p <- if (has_color) {
+      ggplot(d, aes(x, y, color = .data[[color_field]]))
+    } else {
+      ggplot(d, aes(x, y))
+    }
+    p + geom_point(size = 3, alpha = 0.85) +
+      labs(x = paste("Eigengene", input$l2_wgcna_scores_x), y = paste("Eigengene", input$l2_wgcna_scores_y),
+           color = if (has_color) color_field else NULL,
+           title = paste0(input$l2_wgcna_scores_x, " vs ", input$l2_wgcna_scores_y, " across samples")) +
+      theme_minimal(base_size = 14)
+  })
+  output$l2_wgcna_module_trait <- renderPlot({
+    req(nav$wgcna_fit)
+    wgcna_module_trait_plot(nav$wgcna_fit)
   })
   output$l2_wgcna_assoc_heatmap <- renderPlot({
     req(input$l2_wgcna_assoc_fit)
@@ -1192,34 +1453,17 @@ server <- function(input, output, session) {
   #' Restricted to PCA since that's the only method with this guarantee --
   #' NMF/CoGAPS/sPCA/CP/Tucker fits are never numerically identical to one
   #' another, so the search below would just waste time looking.
+  #' Thin wrapper -- see db_helpers.R::resolve_enrichment_factor_id() for
+  #' the actual exact-loadings-match reuse logic (generalized 2026-09-22
+  #' from a PCA-only special case to every seed-sweep method with
+  #' loadings, since PCA's rank-truncation reuse guarantee was already
+  #' correct here, just never available to non-PCA methods or to the
+  #' Compare tab's cached_enrichment_summary(), which never called this
+  #' at all).
   find_or_reuse_enrichment <- function(fit_id, factor_index, qtype, direction) {
-    factor_id <- get_factor_id(con, fit_id, factor_index)
-    cached <- enrichment_cached(con, factor_id, qtype, direction)
-    if (!is.null(cached)) return(cached)
-
-    fit <- get_fit(con, fit_id)
-    if (nrow(fit) == 0 || fit$method != "pca") return(NULL)
-
-    v <- load_loadings(con, fit_id); if (is.null(v)) return(NULL)
-    v <- v[, factor_index]
-    siblings <- DBI::dbGetQuery(con,
-      "SELECT fit_id FROM fits
-       WHERE dataset_id = ? AND method = 'pca' AND family = 'seed_sweep'
-         AND fit_id != ? AND status = 'ok'",
-      params = list(fit$dataset_id, fit_id))$fit_id
-    for (other_fit in siblings) {
-      L2 <- load_loadings(con, other_fit)
-      if (is.null(L2)) next
-      for (fi2 in seq_len(ncol(L2))) {
-        v2 <- L2[, fi2]
-        if (length(v) != length(v2) || !identical(names(v), names(v2))) next
-        if (!isTRUE(all.equal(as.numeric(v), as.numeric(v2), tolerance = 1e-8))) next
-        other_factor_id <- get_factor_id(con, other_fit, fi2)
-        hit <- enrichment_cached(con, other_factor_id, qtype, direction)
-        if (!is.null(hit)) return(hit)
-      }
-    }
-    NULL
+    factor_id <- resolve_enrichment_factor_id(con, fit_id, factor_index)
+    if (is.null(factor_id)) return(NULL)
+    enrichment_cached(con, factor_id, qtype, direction)
   }
 
   #' Core work for "run every (factor, query type, direction) combination
@@ -1340,7 +1584,7 @@ server <- function(input, output, session) {
       return(navset_card_tab(
         nav_panel(
           "Module genes",
-          p("Member genes of this module -- no continuous ranking available (WGCNA doesn't store intramodular connectivity/kME today), so this is the full membership list."),
+          p("Member genes of this module, ranked by kME (correlation to this module's own eigengene -- WGCNA's standard hub-gene measure: the highest-|kME| genes are the ones most representative of the module's shared expression pattern)."),
           selectInput("l3_label_col", "Label genes by:", choices = "feature_id"),
           DTOutput("l3_wgcna_genes")
         ),
@@ -1348,6 +1592,12 @@ server <- function(input, output, session) {
           "Enrichment (ORA)",
           p("GSEA doesn't apply here -- a WGCNA module is an unranked gene set, not a continuous loading to order by. Shows whatever the cluster ingest pipeline (R/ingest_jobs/wgcna_ora_job.R) has already computed."),
           DTOutput("l3_wgcna_enrichment")
+        ),
+        nav_panel(
+          "Hub genes (GS vs kME)",
+          p("The classic WGCNA module-validation plot: each member gene's kME (module membership) against its Gene Significance for a chosen trait. A real relationship here means this module is phenotype-relevant, not just a network-structure artifact -- genes in the upper-right (high kME, high |GS|) are the module's real hub genes for this trait."),
+          selectInput("l3_wgcna_hub_field", "Trait:", choices = NULL),
+          plotOutput("l3_wgcna_hub_scatter", height = "440px")
         )
       ))
     }
@@ -1556,11 +1806,11 @@ server <- function(input, output, session) {
 
   l3_wgcna_genes_reactive <- reactive({
     req(nav$method == "wgcna", nav$fit, nav$factor_index)
-    DBI::dbGetQuery(con, "SELECT gene FROM wgcna_modules WHERE fit_id = ? AND module = ?",
-                    params = list(nav$fit, nav$factor_index))$gene
+    wgcna_module_kme(con, nav$fit, nav$factor_index)
   })
   output$l3_wgcna_genes <- renderDT({
-    genes <- l3_wgcna_genes_reactive()
+    d <- l3_wgcna_genes_reactive()
+    genes <- d$gene
     # DISPLAY ONLY -- see build_display_map()'s header. `gene` (the raw,
     # native feature_id) is kept as its own column alongside the
     # human-readable label, not replaced by it.
@@ -1573,13 +1823,47 @@ server <- function(input, output, session) {
       out[is.na(out)] <- genes[is.na(out)]
       out
     }
-    datatable(data.frame(gene = genes, label = label), rownames = FALSE, options = list(pageLength = 20))
+    datatable(data.frame(gene = genes, label = label, kme = d$kme), rownames = FALSE,
+              options = list(pageLength = 20)) |> formatRound("kme", 3)
+  })
+  observe({
+    req(nav$level == 3, nav$method == "wgcna", nav$fit)
+    fields <- wgcna_gene_significance_fields(con, ds())
+    updateSelectInput(session, "l3_wgcna_hub_field", choices = fields)
+  })
+  output$l3_wgcna_hub_scatter <- renderPlot({
+    req(nav$method == "wgcna", nav$fit, nav$factor_index, input$l3_wgcna_hub_field)
+    validate(need(!identical(nav$factor_index, 0L) && !identical(nav$factor_index, 0),
+                  "Module 0 is WGCNA's \"unassigned genes\" bucket -- no hub-gene analysis applies to it."))
+    d <- wgcna_module_gs_kme(con, nav$fit, nav$factor_index, ds(), input$l3_wgcna_hub_field)
+    validate(need(nrow(d) > 0,
+      "No Gene Significance data for this dataset/trait yet -- run R/compute_wgcna_diagnostics.R --recompute-gs (or this dataset's sample metadata is all-categorical, which has no signed Gene Significance to show)."))
+    ggplot(d, aes(kme, gs)) +
+      geom_point(color = "steelblue", alpha = 0.6) +
+      geom_smooth(method = "lm", se = FALSE, color = "firebrick", linewidth = 0.7) +
+      labs(x = "kME (module membership)", y = paste0("Gene Significance (", input$l3_wgcna_hub_field, ")"),
+           title = paste0("Module ", nav$factor_index, " hub genes: kME vs GS"),
+           subtitle = paste0(nrow(d), " genes, Pearson r = ", signif(cor(d$kme, d$gs), 3))) +
+      theme_minimal(base_size = 14)
   })
   #' Pure read of whatever R/ingest_jobs/wgcna_ora_job.R +
   #' R/ingest_enrichment_results.R have already computed for this module --
   #' no live compute in this app.
   wgcna_enrich_result <- reactive({
     req(nav$method == "wgcna", nav$fit, nav$factor_index)
+    # Module 0 is WGCNA's own "unassigned genes" bucket (blockwiseModules()'s
+    # convention -- see extract.R's wgcna branch) -- it deliberately never
+    # gets a `factors` row (ingest_dataset.R only inserts one per REAL
+    # module, `setdiff(..., 0L)`) or module-level enrichment (wgcna_ora_job.R
+    # has nothing coherent to test for a grab-bag of unclustered genes).
+    # Distinguish this expected case from a genuinely missing factor_id
+    # (an old fit truly predating module-level enrichment support) --
+    # confirmed directly (2026-09-22) that conflating the two here produced
+    # a misleading "re-ingest with --overwrite" message for module 0 on
+    # freshly-ingested, fully up-to-date fits.
+    if (identical(nav$factor_index, 0L) || identical(nav$factor_index, 0)) {
+      validate("Module 0 is WGCNA's \"unassigned genes\" bucket -- no enrichment is computed for it (this is expected, not a data gap).")
+    }
     factor_id <- get_factor_id(con, nav$fit, nav$factor_index)
     validate(need(length(factor_id) == 1,
       "This WGCNA fit predates module-level enrichment support -- re-ingest this family with --overwrite (see R/ingest_results.R) to enable it."))

@@ -50,7 +50,27 @@ option_list <- list(
   make_option("--recompute-sft", type = "character", default = NULL,
               help = "bare flag = recompute SFT fit for every dataset; or a comma-separated list of dataset ids")
 )
-opt <- parse_args(OptionParser(option_list = option_list))
+# optparse itself has no concept of a bare flag for a `type = "character"`
+# option -- `--recache-matrix` with no following value errors with "long
+# flag ... requires an argument" before parse_flag_list() below ever runs
+# (confirmed directly, 2026-09-22), contradicting this option's own
+# documented "bare flag = recache every dataset" usage. Work around it by
+# injecting an explicit empty-string value whenever the flag is bare
+# (last arg, or immediately followed by another `--flag`) -- parse_flag_list()
+# already treats "" as the bare-flag case (`!nzchar(x)` -> TRUE), so this
+# makes the documented usage actually work without changing any
+# downstream logic.
+inject_bare_flag_value <- function(args, flag) {
+  i <- which(args == flag)
+  if (length(i) == 1 && (i == length(args) || startsWith(args[i + 1], "--"))) {
+    args <- append(args, "", after = i)
+  }
+  args
+}
+raw_args <- commandArgs(trailingOnly = TRUE)
+raw_args <- inject_bare_flag_value(raw_args, "--recache-matrix")
+raw_args <- inject_bare_flag_value(raw_args, "--recompute-sft")
+opt <- parse_args(OptionParser(option_list = option_list), args = raw_args)
 
 result_dirs <- readLines(opt$datasets) |> trimws()
 result_dirs <- result_dirs[nzchar(result_dirs)]
