@@ -132,6 +132,39 @@ ensure_schema <- function(con) {
        computed_at TEXT,
        UNIQUE(dataset_id, power)
      )",
+    # Preprocessing sanity-check diagnostics for the shared cached matrix
+    # (datasets.matrix_file) every non-nonneg method (PCA/sPCA/ICA) fits
+    # directly, and NMF/CoGAPS/WGCNA fit a row-shifted variant of --
+    # dataset-level, not tied to any one method/fit, same
+    # rationale as wgcna_sft above. See
+    # R/lib/ingest/ingest_dataset.R::compute_matrix_diagnostics().
+    # val_min/max/mean/sd: a cheap tripwire for a silent unit-scale
+    # mistake (e.g. a "log2 microarray" dataset that's actually
+    # linear-scale would show up immediately as an outlier here).
+    # skew_p50/p95, kurtosis_p50/p95: quantiles of PER-GENE skewness/
+    # kurtosis across the cached matrix -- how heterogeneous/non-normal
+    # this dataset is after preprocessing, made concrete and comparable
+    # across datasets/platforms (motivated directly by ICA's/PCA's
+    # implicit distributional assumptions and real sepsis-patient
+    # heterogeneity).
+    # min_singular_value/condition_number/max_sample_cor: near-
+    # singularity / near-duplicate-sample check (Lee & Batzoglou 2003
+    # explicitly removed an experiment that made their input matrix
+    # nearly singular, since that destabilizes ICA) -- computed from one
+    # economy SVD of the (samples x genes) matrix.
+    # Replace-on-recompute semantics (like matrix_file/wgcna_sft), not
+    # additive.
+    "CREATE TABLE IF NOT EXISTS matrix_diagnostics (
+       dataset_id TEXT NOT NULL,
+       n_genes INTEGER, n_samples INTEGER,
+       val_min REAL, val_max REAL, val_mean REAL, val_sd REAL,
+       skew_p50 REAL, skew_p95 REAL,
+       kurtosis_p50 REAL, kurtosis_p95 REAL,
+       min_singular_value REAL, max_singular_value REAL, condition_number REAL,
+       max_sample_cor REAL,
+       computed_at TEXT,
+       UNIQUE(dataset_id)
+     )",
     "CREATE TABLE IF NOT EXISTS wgcna_modules (
        fit_id INTEGER NOT NULL REFERENCES fits(fit_id),
        gene TEXT NOT NULL,
@@ -233,7 +266,30 @@ ensure_schema <- function(con) {
        computed_at TEXT,
        UNIQUE(fit_id, factor_index, grouping_col, group1_level, group2_level, mode)
      )",
-    "CREATE INDEX IF NOT EXISTS idx_pattern_drivers_fit ON pattern_drivers(fit_id)"
+    "CREATE INDEX IF NOT EXISTS idx_pattern_drivers_fit ON pattern_drivers(fit_id)",
+    # Overview Tab 4's gene-space agreement matrix (see
+    # R/backfill_gene_space_agreement.R) -- one summary number per
+    # (source_dataset_id, target_dataset_id, method) pair, aggregating the
+    # SAME live computation the app's "Compare bases (projectR)" screen's
+    # Gene-space alignment tab already does one pair at a time
+    # (project_basis_onto_basis() + Hungarian-matched reordering) into a
+    # single scalar (mean |diagonal value|) cheap enough to show as a full
+    # dataset x dataset heatmap. Distinct from `projections` (sample-space,
+    # already computed offline for every pair) -- this table is deliberately
+    # sparser, since each row costs a live projectR() call + Ensembl
+    # remapping, not a free aggregate read.
+    "CREATE TABLE IF NOT EXISTS gene_space_agreement (
+       source_dataset_id TEXT NOT NULL,
+       target_dataset_id TEXT NOT NULL,
+       method TEXT NOT NULL,
+       source_fit_id INTEGER,
+       target_fit_id INTEGER,
+       n_genes_matched INTEGER,
+       mean_abs_diagonal REAL,
+       computed_at TEXT,
+       UNIQUE(source_dataset_id, target_dataset_id, method)
+     )",
+    "CREATE INDEX IF NOT EXISTS idx_gene_space_agreement_method ON gene_space_agreement(method)"
   )
   for (s in statements) DBI::dbExecute(con, s)
   # additive column migrations for DBs created before this column existed --
@@ -252,10 +308,12 @@ ensure_schema <- function(con) {
   # query_size lets the app compute gene-ratio dot plots (intersection_size /
   # query_size) without re-querying g:Profiler
   ensure_column(con, "enrichment_cache", "query_size", "INTEGER")
-  # cp/tucker (tensor methods): Tucker's per-mode ranks (CP reuses the
+  # CP/Tucker (tensor methods, removed 2026-09-29 -- see R/README.md's
+  # "CP/Tucker (removed)" section): Tucker's per-mode ranks (CP reused the
   # existing single `rank` column, like every other rank-1-per-fit
   # method) + the third (time) mode's artifact, same relative-to-DB-dir
-  # convention as loadings_file/scores_file
+  # convention as loadings_file/scores_file. Kept only for their
+  # historical fits; NULL for every method run since.
   ensure_column(con, "fits", "rank_genes", "INTEGER")
   ensure_column(con, "fits", "rank_subjects", "INTEGER")
   ensure_column(con, "fits", "rank_time", "INTEGER")
@@ -296,6 +354,18 @@ ensure_schema <- function(con) {
   # dataset.symbol_col (display-only override) -- see
   # register_metadata_source()'s doc above.
   ensure_column(con, "dataset_metadata_sources", "symbol_col", "TEXT")
+  # dataset.subject_id_col, for kind='sample' rows -- the column of
+  # sample_metadata that identifies which SUBJECT a sample belongs to.
+  # Originally added to build CP/Tucker's subject-mode tensor dimension
+  # (those methods removed 2026-09-29, see app.R's FACTORIZATION_METHODS
+  # header); now used by the app's trajectory-across-time feature to
+  # collapse per-sample metadata to one row per subject when matching a
+  # subject across sibling per-timepoint datasets (see
+  # app/R/metadata_helpers.R::subject_level_metadata(), app.R's
+  # trajectory_data()). Stored here since the app never reads
+  # config/*.yml directly. NA for datasets with no subject_id_col
+  # configured.
+  ensure_column(con, "dataset_metadata_sources", "subject_id_col", "TEXT")
 
   # Method-specific "diagnostics" artifacts -- one small named-list RDS per
   # method, bundling exactly the outputs each underlying package's own
@@ -335,19 +405,12 @@ ensure_schema <- function(con) {
   #     diagnostics; mse_trace/mkl_trace are the full iteration-by-
   #     iteration loss curves (?nnmf's Value section), not just nmf.R's
   #     own single final-iteration mse (stored separately in fits.mse).
-  #   cp_diag_file: list(lambdas, all_resids) -- rTensor::cp()'s
-  #     per-component scale (without which the fitted tensor can't be
-  #     reconstructed and loadings have no comparable relative magnitude
-  #     -- R/methods/cp.R's own comment) and iteration residual trace
-  #     (?cp's own example: plot(cpD$all_resids), the standard smooth-
-  #     convergence check). `all_resids` is NULL until R/methods/cp.R is
-  #     updated to return it (a re-fit, not just a re-ingest).
-  #   tucker_diag_file: list(core, all_resids) -- rTensor::tucker()'s core
-  #     tensor (the one Tucker-specific object with no CP analogue --
-  #     encodes cross-mode interactions via its non-diagonal structure,
-  #     standard/expected output per ?tucker, not optional decoration) and
-  #     the same iteration residual trace as CP. `all_resids` is NULL
-  #     until R/methods/tucker.R is updated to return it.
+  #   cp_diag_file / tucker_diag_file: rTensor::cp()/tucker()'s own
+  #     diagnostics (lambdas/core tensor + iteration residual trace).
+  #     CP/Tucker were evaluated and removed 2026-09-29 (see R/README.md's
+  #     "CP/Tucker (removed)" section) -- these columns are kept only
+  #     because historical ANEMONES/GSE54514 fits still populate them; no
+  #     current method writes to them.
   ensure_column(con, "fits", "cogaps_diag_file", "TEXT")
   ensure_column(con, "fits", "pca_diag_file", "TEXT")
   ensure_column(con, "fits", "spca_diag_file", "TEXT")
@@ -368,13 +431,32 @@ ensure_schema <- function(con) {
   #     this needs its own separate, dedicated computation instead of
   #     just being read off an existing fit.
   ensure_column(con, "fits", "wgcna_dendro_file", "TEXT")
-  # CP/Tucker only -- both already compute this correctly (rTensor's own
-  # `conv` field) but it used to be consulted ONLY to decide `status` in
-  # the corner case where loadings are ALSO NULL, so a fit that hit
-  # max_iter without converging but still produced usable loadings was
-  # silently reported as status='ok' with no persisted trace of the
-  # non-convergence. NULL for every other method.
+  # CP/Tucker-only (rTensor's own `conv` field), consulted to decide
+  # `status` in the corner case where loadings are ALSO NULL, so a fit
+  # that hit max_iter without converging but still produced usable
+  # loadings was still reported with a persisted trace of the
+  # non-convergence rather than silently as status='ok'. CP/Tucker were
+  # evaluated and removed 2026-09-29 (see R/README.md's "CP/Tucker
+  # (removed)" section) -- kept only for their historical fits; NULL for
+  # every method run since.
   ensure_column(con, "fits", "converged", "INTEGER")
+
+  # ICA-only: 1 if this fit resampled its sample columns with replacement
+  # (ICASSO's bootstrap+reinitialization randomization axis, on top of the
+  # `seed` column's own reinitialization -- see R/methods/ica.R's header),
+  # 0 for a plain reinit-only seed-sweep fit, NULL for every other method.
+  # A bootstrap fit's `scores_file` is always NULL (resampled columns
+  # duplicate sample ids -- no real 1:1 sample correspondence to report)
+  # and its `mse` is reconstruction error against the RESAMPLED data, not
+  # a claim about the real dataset -- every query that treats a method's
+  # `family = 'seed_sweep'` fits as comparable reconstruction-quality
+  # observations (app/R/db_helpers.R's seed_sweep_mse_by_rank(),
+  # all_fits_for_compare(), method_rank_curve()'s nmf/cogaps/ica branch,
+  # fits_at_rank(); R/lib/ingest/redundancy.R's representative-fit
+  # selection) excludes bootstrap = 1 rows accordingly. Bootstrap fits ARE
+  # still included in `factor_pairs`/ICASSO clustering (R/lib/ingest/
+  # icasso.R) -- that's the whole point of computing them.
+  ensure_column(con, "fits", "bootstrap", "INTEGER")
 
   # WGCNA intramodular connectivity / module membership (kME) --
   # WGCNA::signedKME(datExpr, MEs), computable entirely from data already
@@ -435,6 +517,72 @@ ensure_schema <- function(con) {
   # directly instead of re-deriving field type from live sample metadata
   # on every read.
   ensure_column(con, "wgcna_gene_significance", "test", "TEXT")
+
+  # Per-component non-Gaussianity for ICA fits -- the core validity
+  # signature both ICA-for-expression papers rely on (Lee & Batzoglou
+  # 2003: real biological-process components are expected to be
+  # "highly non-Gaussian... super-Gaussian" -- positive excess kurtosis
+  # -- unlike Gaussian noise; their results found no sub-Gaussian
+  # sources across 5 real expression datasets). Populated two ways: (1)
+  # R/lib/ingest/ingest_dataset.R writes it directly at ingest time from
+  # R/methods/ica.R's own `kurtosis` return value (the forward-going
+  # source of truth, and the only way to get it for a bootstrap fit,
+  # whose scores_file is NULL); (2)
+  # R/backfill_diagnostics.R::backfill_ica_kurtosis() is a stopgap for
+  # fits ingested before (1) existed, computed post hoc from
+  # scores_file -- unlike ica_diag_file's W/K/prewhiten_sdev (fastICA's
+  # own unmixing/whitening matrices), kurtosis IS recoverable post hoc
+  # from scores alone. excess_kurtosis = kurtosis - 3, the
+  # "super-Gaussian if positive" convention the literature uses (kurtosis
+  # alone is centered at 3 for a Gaussian).
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS ica_component_kurtosis (
+       fit_id INTEGER NOT NULL REFERENCES fits(fit_id),
+       component TEXT NOT NULL,
+       kurtosis REAL,
+       excess_kurtosis REAL
+     )")
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_ica_kurtosis_fit ON ica_component_kurtosis(fit_id)")
+
+  # ICASSO (Himberg, Hyvärinen & Esposito 2004): cross-run component
+  # clustering for ICA, computed at ingest time by
+  # R/lib/ingest/icasso.R::compute_icasso_clusters() over every ok ICA
+  # fit (seed-sweep AND bootstrap together) at one rank. Full
+  # delete-and-recompute per (dataset_id, rank) -- a cluster analysis
+  # isn't meaningfully "incremental" the way pairwise factor_pairs is.
+  #   icasso_clusters: one row per cluster. `iq` (Himberg et al.'s
+  #     quality index) = mean intra-cluster |cosine| similarity - mean
+  #     similarity to everything outside the cluster; 0.7 is the
+  #     literature's usual "trustworthy" threshold. `centrotype_fit_id`/
+  #     `centrotype_factor_index` identify the cluster member with the
+  #     highest mean intra-cluster similarity -- the single best
+  #     representative component for that cluster.
+  #   icasso_membership: one row per (run, component) -> cluster
+  #     assignment, needed to render the dendrogram and recompute Iq.
+  #   icasso_dendrograms: the cross-run hclust tree itself, stored the
+  #     same way as fits.wgcna_dendro_file (list(merge, height, order,
+  #     labels), reconstructable into a real `hclust` object) --
+  #     `labels` encodes "fit_id:factor_index" per leaf so it can be
+  #     joined back to icasso_membership for cluster-colored rendering.
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS icasso_clusters (
+       dataset_id TEXT NOT NULL, method TEXT NOT NULL, rank INTEGER NOT NULL,
+       cluster_id INTEGER NOT NULL, iq REAL, n_members INTEGER,
+       centrotype_fit_id INTEGER, centrotype_factor_index INTEGER,
+       computed_at TEXT,
+       UNIQUE(dataset_id, method, rank, cluster_id)
+     )")
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS icasso_membership (
+       dataset_id TEXT NOT NULL, method TEXT NOT NULL, rank INTEGER NOT NULL,
+       cluster_id INTEGER NOT NULL, fit_id INTEGER NOT NULL, factor_index INTEGER NOT NULL,
+       intra_sim REAL,
+       UNIQUE(dataset_id, method, rank, fit_id, factor_index)
+     )")
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_icasso_membership_lookup
+                       ON icasso_membership(dataset_id, method, rank)")
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS icasso_dendrograms (
+       dataset_id TEXT NOT NULL, method TEXT NOT NULL, rank INTEGER NOT NULL,
+       dendro_file TEXT, computed_at TEXT,
+       UNIQUE(dataset_id, method, rank)
+     )")
 
   # fgsea's NES (normalized enrichment score -- the standard cross-pathway-
   # comparable magnitude fgsea's own vignette reports and ranks by
@@ -527,16 +675,25 @@ ensure_column <- function(con, table, col, decl) {
 #'   display chain (see app/R/metadata_helpers.R::build_display_map()),
 #'   never a guess. NA for kind = "sample", or when the config never set
 #'   symbol_col.
+#' @param subject_id_col only meaningful for kind = "sample" -- the
+#'   dataset's `dataset.subject_id_col`, stored here so the app can
+#'   collapse sample_metadata to one row per subject for the
+#'   trajectory-across-time feature (see
+#'   app/R/metadata_helpers.R::subject_level_metadata()) without needing
+#'   config access. NA for kind = "feature", or when the dataset has no
+#'   subject_id_col configured.
 register_metadata_source <- function(con, dataset_id, kind, path, id_col,
-                                      ensembl_col = NA_character_, symbol_col = NA_character_) {
+                                      ensembl_col = NA_character_, symbol_col = NA_character_,
+                                      subject_id_col = NA_character_) {
   if (is.null(path) || is.null(id_col) || !nzchar(path) || !nzchar(id_col)) return(invisible(NULL))
   DBI::dbExecute(con,
-    "INSERT INTO dataset_metadata_sources (dataset_id, kind, path, id_col, ensembl_col, symbol_col, registered_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    "INSERT INTO dataset_metadata_sources (dataset_id, kind, path, id_col, ensembl_col, symbol_col, subject_id_col, registered_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(dataset_id, kind) DO UPDATE SET
        path = excluded.path, id_col = excluded.id_col, ensembl_col = excluded.ensembl_col,
-       symbol_col = excluded.symbol_col, registered_at = excluded.registered_at",
-    params = list(dataset_id, kind, path, id_col, ensembl_col, symbol_col))
+       symbol_col = excluded.symbol_col, subject_id_col = excluded.subject_id_col,
+       registered_at = excluded.registered_at",
+    params = list(dataset_id, kind, path, id_col, ensembl_col, symbol_col, subject_id_col))
   invisible(NULL)
 }
 

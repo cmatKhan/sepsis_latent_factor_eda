@@ -29,11 +29,12 @@ dataset:
   value_col: value
   ensembl_col: ENSEMBL
   symbol_col: SYMBOL
+  subject_id_col: patient_id   # for projectR trajectory views (app.R's Trajectory-across-time tab) -- same subject column as the parent full dataset's config, since this is just a timepoint-filtered subset of it
 
   preprocessing_script: R/preprocessing/corticus_pre_preprocessing.R
-  # No subject_id_col/timepoint_col -- this is a single-timepoint matrix
-  # (no time dimension left), so cp/tucker (the only methods that read
-  # those fields) are deliberately not configured below.
+  # No timepoint_col -- this is a single-timepoint matrix (no time
+  # dimension left). subject_id_col above is set anyway, for the app's
+  # trajectory-across-time feature.
 
 slurm:
   # IMPORTANT: every entry is written out IN FULL -- no YAML anchors/merge
@@ -86,18 +87,15 @@ slurm:
 
 # See config/dataset_metadata.example.yml for the full field-by-field
 # explanation of the config schema.
-#
-# cp/tucker deliberately NOT included here -- this config is a single
-# timepoint slice (no time dimension left to decompose). See the parent
-# dataset's config/CORTICUS_config.yml for the full-timecourse tensor run.
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
 
   spca:
     K: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
-    para: [0.0000001, 0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.05, 0.1, 0.2]   # crossed with K -- see R/methods/spca.R's header; widened 2026-09-22 to span the low end after real-data testing showed the old [0.05,0.1,0.2] grid was already fully saturated (~94% sparsity) at para values 50x smaller than 0.05 -- the real transition to lower sparsity lies somewhere below 0.001, unlocated locally (each full-scale fit costs ~9min single-threaded); the wider grid lets the cluster's parallel array job actually find it
-    sparse: penalty
+    para: [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]   # fraction of genes to keep nonzero per component -- sparse="varnum" converts this to an absolute nonzero-loadings target at run time using this dataset's own real gene count (R/methods/spca.R's run_spca_job()). Revised 2026-09-29: the old sparse="penalty" grid's absolute para values were confirmed on real data to have an effective sparsity that scales strongly with gene count (same para value: 0% sparse at p=300 genes, ~50% sparse at p=1000) -- impossible to calibrate consistently across this project's differently-sized datasets with one fixed grid. sparse="varnum" sidesteps that by specifying the target directly and portably.
+    sparse: varnum
+    lambda: [0.000001, 0.1, 1.0]   # elastic net's ridge/quadratic penalty -- now swept, not held at the package default: real-data testing (2026-09-29) showed it materially changes the sparsity/quality tradeoff at the SAME para value (lambda=1 vs 1e-6 flipped a ~90%-sparse solution to fully dense) -- exactly the p>>n regime elastic net's ridge term exists to help with (Zou & Hastie 2006).
 
   ica:
     n.comp: [5, 7, 10, 15, 20]

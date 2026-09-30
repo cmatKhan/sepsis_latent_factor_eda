@@ -4,8 +4,8 @@
 # changes needed for any of it (WGCNA module-enrichment is the one
 # exception, handled separately in R/lib/ingest/ -- see its own comment).
 #
-# Requires prepare_loadings()/pair_similarities() from
-# R/lib/ingest/similarity.R to be sourced first (see app.R).
+# Requires prepare_loadings()/pair_similarities()/hungarian_match_abs()
+# from R/lib/ingest/similarity.R to be sourced first (see app.R).
 
 #' The rank with the lowest in-sample reconstruction MSE (best over the
 #' alpha/para grid too, for sPCA) -- used as the DEFAULT (always
@@ -102,25 +102,6 @@ spca_sparsity_curve <- function(con, dataset_id, rank) {
   do.call(rbind, rows)
 }
 
-#' Like hungarian_match() (R/lib/ingest/similarity.R) but costed on
-#' |similarity| rather than raw similarity -- needed whenever a strongly
-#' NEGATIVE similarity is just as informative a match as a strongly
-#' positive one (e.g. a non-negative CoGAPS/NMF factor aligning with the
-#' negative tail of a signed PCA component). Plain hungarian_match() would
-#' systematically avoid such matches, since it maximizes raw (signed)
-#' similarity. Also used on Jaccard matrices (always non-negative, so this
-#' degenerates to ordinary Hungarian matching there).
-hungarian_match_abs <- function(sim) {
-  transposed <- FALSE
-  if (nrow(sim) > ncol(sim)) { sim <- t(sim); transposed <- TRUE }
-  a_sim <- abs(sim)
-  cost <- max(a_sim) - a_sim
-  assignment <- clue::solve_LSAP(cost)
-  a <- seq_len(nrow(sim))
-  b <- as.integer(assignment)
-  if (transposed) cbind(a = b, b = a) else cbind(a = a, b = b)
-}
-
 #' Per-factor comparison between any two fits' gene loadings (continuous
 #' cosine/Pearson/Spearman on the shared gene set). `component`/
 #' `other_component` are 1-based factor indices; similarities are SIGNED
@@ -202,8 +183,8 @@ gene_sets_from_wgcna <- function(con, fit_id) {
 #' `factors.factor_index` holds, so a selection here can jump straight
 #' into Level 3/the WGCNA module view) + a display label. Centralizing
 #' this avoids fragile regex-parsing of column-name conventions that
-#' differ by method (PCA's "PC1", NMF's "Pattern_1", sPCA/CP/Tucker's
-#' "Component_1", ...).
+#' differ by method (PCA's "PC1", NMF's "Pattern_1", sPCA's "Component_1",
+#' ...).
 comparator_gene_sets <- function(con, method, fit_id, n = 50, sign = "both") {
   if (method == "wgcna") {
     raw <- gene_sets_from_wgcna(con, fit_id)
@@ -236,10 +217,9 @@ jaccard_matrix <- function(sets_a, sets_b) {
   m
 }
 
-#' Pearson/Spearman correlation between any two fits' sample (or
-#' subject-mode, for CP/Tucker -- excluded from the app's comparator, but
-#' this function itself doesn't care) score matrices, aligned on shared
-#' rownames. Correlation is already signed, so "negative side of a
+#' Pearson/Spearman correlation between any two fits' sample-score
+#' matrices, aligned on shared rownames. Correlation is already signed, so
+#' "negative side of a
 #' component" shows up directly as a negative value here -- no
 #' absolute-value bookkeeping needed for the similarity itself, only for
 #' finding each factor's best match.
@@ -324,4 +304,48 @@ cached_enrichment_summary <- function(con, fit_id) {
   rows <- Filter(Negate(is.null), rows)
   if (length(rows) == 0) return(empty)
   do.call(rbind, rows)
+}
+
+#' Gene-space alignment between two fits' own bases (loadings), via a
+#' LIVE projectR call -- distinct from the projections table's rows
+#' (which project a basis onto a whole TARGET DATASET's expression
+#' matrix; this projects one basis's small genes x k loadings matrix
+#' directly onto another's, with no target dataset involved at all).
+#' Safe to run on demand: loadings matrices are small (genes x k, not
+#' genes x samples), so this is fast, unlike the full-dataset
+#' projectr_within_grid/projectr_cross_grid cluster jobs -- confirmed
+#' directly on real ANEMONES PCA-vs-sPCA fits (rank 10 each): a clean,
+#' fast, sensible result (each sPCA component aligning most strongly
+#' with its correspondingly-ranked PCA component, diagonal R² 0.04-0.21).
+#'
+#' Both fits' loadings are remapped to Ensembl gene ids first (via
+#' ensembl_map_for_dataset()/remap_to_ensembl(), the SAME config-free
+#' path build_display_map() already uses -- this app never reads
+#' config/*.yml directly) since the two fits may come from different
+#' datasets with different native platform ids. Returns NULL if either
+#' fit has no loadings, either dataset has no usable Ensembl map, or
+#' fewer than 3 genes are shared after remapping.
+#'
+#' @param dataset_id_a,dataset_id_b each fit's OWN dataset -- needed to
+#'   look up the right Ensembl map for each side independently (fit_id
+#'   alone doesn't say which dataset it belongs to without a lookup this
+#'   caller already has cheaply, e.g. from a UI selector).
+project_basis_onto_basis <- function(con, fit_id_a, dataset_id_a, fit_id_b, dataset_id_b) {
+  La <- load_loadings(con, fit_id_a)
+  Lb <- load_loadings(con, fit_id_b)
+  if (is.null(La) || is.null(Lb)) return(NULL)
+
+  map_a <- ensembl_map_for_dataset(con, dataset_id_a)
+  map_b <- ensembl_map_for_dataset(con, dataset_id_b)
+  La_ens <- if (!is.null(map_a) && length(map_a) > 0) remap_to_ensembl(La, map_a) else La
+  Lb_ens <- if (!is.null(map_b) && length(map_b) > 0) remap_to_ensembl(Lb, map_b) else Lb
+
+  shared <- intersect(rownames(La_ens), rownames(Lb_ens))
+  if (length(shared) < 3) return(NULL)
+
+  proj <- tryCatch(
+    projectR::projectR(data = La_ens[shared, , drop = FALSE], loadings = Lb_ens[shared, , drop = FALSE], full = TRUE),
+    error = function(e) NULL)
+  if (is.null(proj)) return(NULL)
+  list(projection = proj$projection, r_squared = proj$r_squared, n_genes_matched = length(shared))
 }

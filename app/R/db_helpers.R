@@ -20,7 +20,11 @@ list_ingests <- function(con, dataset_id) {
 }
 
 #' Per-method overview: fit counts by status + headline stability
-#' (mean matched same-rank similarity) per metric.
+#' (mean matched same-rank similarity) per metric. ABS() on cosine/
+#' pearson/spearman: a magnitude claim ("how similar"), not a sign claim
+#' -- needed for pca/spca/ica (unique only up to sign; see
+#' R/lib/ingest/pairs.R's `sign_ambiguous`), a no-op for nmf/cogaps
+#' (already non-negative).
 method_overview <- function(con, dataset_id) {
   counts <- DBI::dbGetQuery(con,
     "SELECT method,
@@ -30,11 +34,15 @@ method_overview <- function(con, dataset_id) {
      FROM fits WHERE dataset_id = ? GROUP BY method",
     params = list(dataset_id))
   stab <- DBI::dbGetQuery(con,
-    "SELECT ft.method,
-            AVG(fp.cosine) AS cosine, AVG(fp.pearson) AS pearson, AVG(fp.spearman) AS spearman
-     FROM factor_pairs fp JOIN fits ft ON ft.fit_id = fp.fit_a
-     WHERE fp.matched = 1 AND fp.same_rank = 1 AND ft.dataset_id = ?
-     GROUP BY ft.method",
+    "SELECT fa.method,
+            AVG(ABS(fp.cosine)) AS cosine, AVG(ABS(fp.pearson)) AS pearson, AVG(ABS(fp.spearman)) AS spearman
+     FROM factor_pairs fp
+     JOIN fits fa ON fa.fit_id = fp.fit_a
+     JOIN fits fb ON fb.fit_id = fp.fit_b
+     WHERE fp.matched = 1 AND fp.same_rank = 1 AND fa.dataset_id = ?
+       AND (fa.bootstrap IS NULL OR fa.bootstrap = 0)
+       AND (fb.bootstrap IS NULL OR fb.bootstrap = 0)
+     GROUP BY fa.method",
     params = list(dataset_id))
   wgcna <- DBI::dbGetQuery(con,
     "SELECT 'wgcna' AS method, AVG(wp.ari) AS ari
@@ -45,16 +53,25 @@ method_overview <- function(con, dataset_id) {
 }
 
 #' Matched same-rank factor similarities with rank/seed info -- the Level-1
-#' "seed stability vs rank" data.
+#' "seed stability vs rank" data. ABS() on cosine/pearson/spearman: see
+#' method_overview()'s comment -- a no-op for nmf/cogaps, a real fix for
+#' ica (its only STABILITY_METHODS sibling that's sign-ambiguous). Excludes
+#' ICA's bootstrap fits on both sides of the pair -- this panel's meaning
+#' ("how much do plain reseeded reruns agree") stays exactly what it
+#' always was; the new ICASSO clustering (R/lib/ingest/icasso.R,
+#' app.R's "ICASSO cluster quality" tab) is where bootstrap+reinit runs
+#' are deliberately pooled together instead.
 seed_stability_by_rank <- function(con, dataset_id, method) {
   DBI::dbGetQuery(con,
     "SELECT fa.rank, fa.seed AS seed_a, fb.seed AS seed_b,
-            fp.factor_a, fp.factor_b, fp.cosine, fp.pearson, fp.spearman
+            fp.factor_a, fp.factor_b, ABS(fp.cosine) AS cosine, ABS(fp.pearson) AS pearson, ABS(fp.spearman) AS spearman
      FROM factor_pairs fp
      JOIN fits fa ON fa.fit_id = fp.fit_a
      JOIN fits fb ON fb.fit_id = fp.fit_b
      WHERE fp.matched = 1 AND fp.same_rank = 1
-       AND fa.dataset_id = ? AND fa.method = ?",
+       AND fa.dataset_id = ? AND fa.method = ?
+       AND (fa.bootstrap IS NULL OR fa.bootstrap = 0)
+       AND (fb.bootstrap IS NULL OR fb.bootstrap = 0)",
     params = list(dataset_id, method))
 }
 
@@ -63,11 +80,16 @@ seed_stability_by_rank <- function(con, dataset_id, method) {
 #' seed dimension at all, so there's nothing to average over). Answers
 #' "how much does reconstruction quality vary across random seeds at this
 #' rank?", a genuine stability question a plain scree plot doesn't
-#' address.
+#' address. Excludes ICA's bootstrap fits (`bootstrap = 1`): their `mse`
+#' is reconstruction error against a RESAMPLED dataset, not a comparable
+#' claim about the real one (see R/lib/ingest/db.R's `fits.bootstrap`
+#' comment) -- a no-op filter for every other method (bootstrap is always
+#' NULL there).
 seed_sweep_mse_by_rank <- function(con, dataset_id, method) {
   d <- DBI::dbGetQuery(con,
     "SELECT rank, mse FROM fits
-     WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok' AND mse IS NOT NULL",
+     WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok' AND mse IS NOT NULL
+       AND (bootstrap IS NULL OR bootstrap = 0)",
     params = list(dataset_id, method))
   if (nrow(d) == 0) return(d)
   agg <- aggregate(mse ~ rank, data = d, FUN = function(x) c(mean = mean(x), sd = sd(x), n = length(x)))
@@ -90,10 +112,12 @@ scree_mse_by_rank <- function(con, dataset_id, method) {
 }
 
 #' Cross-rank persistence: mean matched similarity between every rank pair.
+#' ABS(): see method_overview()'s comment -- used only by pca/spca here
+#' (both sign-ambiguous), so this is a real fix, not a no-op.
 crossrank_matrix <- function(con, dataset_id, method) {
   DBI::dbGetQuery(con,
     "SELECT fa.rank AS rank_a, fb.rank AS rank_b,
-            AVG(fp.cosine) AS cosine, AVG(fp.pearson) AS pearson, AVG(fp.spearman) AS spearman,
+            AVG(ABS(fp.cosine)) AS cosine, AVG(ABS(fp.pearson)) AS pearson, AVG(ABS(fp.spearman)) AS spearman,
             COUNT(*) AS n
      FROM factor_pairs fp
      JOIN fits fa ON fa.fit_id = fp.fit_a
@@ -104,16 +128,23 @@ crossrank_matrix <- function(con, dataset_id, method) {
     params = list(dataset_id, method))
 }
 
-#' Seed x seed mean matched similarity at one rank (Level 2).
+#' Seed x seed mean matched similarity at one rank (Level 2). ABS(): see
+#' method_overview()'s comment. Excludes ICA's bootstrap fits -- they
+#' share the same `seed` values as the plain reinit-only fits (same 10-
+#' seed list, see R/methods/ica.R), so without this exclusion a bootstrap
+#' fit would silently merge into the same seed x seed cell as its
+#' non-bootstrap namesake via GROUP BY fa.seed, fb.seed.
 seedpair_matrix <- function(con, dataset_id, method, rank) {
   DBI::dbGetQuery(con,
     "SELECT fa.seed AS seed_a, fb.seed AS seed_b,
-            AVG(fp.cosine) AS cosine, AVG(fp.pearson) AS pearson, AVG(fp.spearman) AS spearman
+            AVG(ABS(fp.cosine)) AS cosine, AVG(ABS(fp.pearson)) AS pearson, AVG(ABS(fp.spearman)) AS spearman
      FROM factor_pairs fp
      JOIN fits fa ON fa.fit_id = fp.fit_a
      JOIN fits fb ON fb.fit_id = fp.fit_b
      WHERE fp.matched = 1 AND fp.same_rank = 1
        AND fa.dataset_id = ? AND fa.method = ? AND fa.rank = ?
+       AND (fa.bootstrap IS NULL OR fa.bootstrap = 0)
+       AND (fb.bootstrap IS NULL OR fb.bootstrap = 0)
      GROUP BY fa.seed, fb.seed",
     params = list(dataset_id, method, rank))
 }
@@ -143,34 +174,52 @@ distinct_ranks <- function(con, dataset_id, method) {
 #' since K/para have no genuine seed dimension) -- `alpha` is included
 #' because sPCA's `para` value is stored there (see extract_result()'s
 #' spca branch) and is what the app labels sPCA's per-rank fit selector
-#' with (there being no real `seed` to show).
+#' with (there being no real `seed` to show). Excludes ICA's bootstrap
+#' fits: they'd otherwise show up as a confusing duplicate "seed" entry
+#' (same seed value as their non-bootstrap namesake, NULL scores_file --
+#' no real sample identity) in this per-rank fit picker; they're pooled
+#' into ICASSO's clustering instead (R/lib/ingest/icasso.R), not
+#' individually selectable here.
 fits_at_rank <- function(con, dataset_id, method, rank) {
   DBI::dbGetQuery(con,
     "SELECT fit_id, seed, alpha, mse, n_factors, loadings_file FROM fits
      WHERE dataset_id = ? AND method = ? AND rank = ? AND status = 'ok'
+       AND (bootstrap IS NULL OR bootstrap = 0)
      ORDER BY seed, alpha",
     params = list(dataset_id, method, rank))
 }
 
 #' Per-factor matched similarities for one fit vs all other same-rank fits
-#' (handles both storage directions of the pair).
+#' (handles both storage directions of the pair). ABS(): see
+#' method_overview()'s comment. `fit_id` itself is always a non-bootstrap
+#' fit in practice (fits_at_rank()'s selector already excludes bootstrap
+#' fits), but the OTHER side of a stored pair could still be one --
+#' excluded on both sides for the same "keep this panel's meaning to
+#' plain reseeded reruns" reasoning as seed_stability_by_rank().
 factor_stability_for_fit <- function(con, fit_id) {
   DBI::dbGetQuery(con,
     "SELECT fp.factor_a AS factor_index, fb.seed AS other_seed,
-            fp.cosine, fp.pearson, fp.spearman
+            ABS(fp.cosine) AS cosine, ABS(fp.pearson) AS pearson, ABS(fp.spearman) AS spearman
      FROM factor_pairs fp
      JOIN fits fb ON fb.fit_id = fp.fit_b
      WHERE fp.fit_a = ?1 AND fp.matched = 1 AND fp.same_rank = 1
+       AND (fb.bootstrap IS NULL OR fb.bootstrap = 0)
      UNION ALL
      SELECT fp.factor_b AS factor_index, fa.seed AS other_seed,
-            fp.cosine, fp.pearson, fp.spearman
+            ABS(fp.cosine) AS cosine, ABS(fp.pearson) AS pearson, ABS(fp.spearman) AS spearman
      FROM factor_pairs fp
      JOIN fits fa ON fa.fit_id = fp.fit_a
-     WHERE fp.fit_b = ?1 AND fp.matched = 1 AND fp.same_rank = 1",
+     WHERE fp.fit_b = ?1 AND fp.matched = 1 AND fp.same_rank = 1
+       AND (fa.bootstrap IS NULL OR fa.bootstrap = 0)",
     params = list(fit_id))
 }
 
 #' All factor x factor similarities for one specific fit pair.
+#' Deliberately SIGNED, unlike the magnitude-style aggregates above (this
+#' feeds the Level-2 raw heatmap, scale c(-1, 1), where seeing an actual
+#' anti-correlation is the point) -- the `matched` column already reflects
+#' the sign-robust Hungarian assignment from R/lib/ingest/pairs.R, so the
+#' correct pair is outlined even though the displayed value stays signed.
 factor_pair_heatmap_data <- function(con, fit_a, fit_b) {
   d <- DBI::dbGetQuery(con,
     "SELECT factor_a, factor_b, cosine, pearson, spearman, matched
@@ -183,6 +232,9 @@ factor_pair_heatmap_data <- function(con, fit_a, fit_b) {
 }
 
 #' This factor's Hungarian match in every other fit (all seeds + ranks).
+#' Deliberately SIGNED, same reasoning as factor_pair_heatmap_data() --
+#' feeds Level 3's loading-scatter view, where the actual sign relationship
+#' is informative, not a "how similar" magnitude claim.
 factor_matches_everywhere <- function(con, fit_id, factor_index) {
   DBI::dbGetQuery(con,
     "SELECT fb.fit_id AS other_fit, fb.rank AS other_rank, fb.seed AS other_seed,
@@ -198,16 +250,21 @@ factor_matches_everywhere <- function(con, fit_id, factor_index) {
 
 #' Every ok fit for a method, in whatever shape that method's Level 1
 #' already uses to build its own fit choices (seed_sweep across all ranks
-#' for pca/nmf/cogaps; direct_fits() for sPCA/CP/Tucker; wgcna_fits() for
-#' WGCNA) -- used by the standalone "Compare methods" screen's fit
-#' pickers, which need to offer EVERY fit up front rather than drilling
-#' down one rank at a time.
+#' for pca/nmf/cogaps; direct_fits() for sPCA; wgcna_fits() for WGCNA) --
+#' used by the standalone "Compare methods" screen's fit pickers, which
+#' need to offer EVERY fit up front rather than drilling down one rank at
+#' a time. Excludes ICA's bootstrap fits -- they have no `scores_file`
+#' (no real per-sample identity to compare against another fit) and
+#' aren't meant to be individually inspected, only pooled into ICASSO's
+#' clustering (see R/lib/ingest/icasso.R); a no-op filter for every other
+#' method.
 all_fits_for_compare <- function(con, dataset_id, method) {
   if (method == "wgcna") return(wgcna_fits(con, dataset_id)$fit_id)
-  if (method %in% c("spca", "cp", "tucker")) return(direct_fits(con, dataset_id, method)$fit_id)
+  if (method == "spca") return(direct_fits(con, dataset_id, method)$fit_id)
   DBI::dbGetQuery(con,
     "SELECT fit_id FROM fits
      WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok'
+       AND (bootstrap IS NULL OR bootstrap = 0)
      ORDER BY rank, seed",
     params = list(dataset_id, method))$fit_id
 }
@@ -218,9 +275,8 @@ get_fit <- function(con, fit_id) {
 
 #' Human-readable descriptor for one fit, method-aware -- used in
 #' breadcrumbs, Level 1's fit-select labels, and Level 3 plot titles so
-#' every method (including the "direct fit" ones with no seed dimension:
-#' sPCA/CP/Tucker) gets a sensible label instead of a literal "rank NA
-#' seed NA".
+#' every method (including the "direct fit" one with no seed dimension,
+#' sPCA) gets a sensible label instead of a literal "rank NA seed NA".
 fit_descriptor <- function(con, method, fit_id) {
   f <- get_fit(con, fit_id)
   if (nrow(f) == 0) return("")
@@ -228,10 +284,6 @@ fit_descriptor <- function(con, method, fit_id) {
     sprintf("power %s", f$power)
   } else if (method == "spca") {
     sprintf("K=%s", f$rank)
-  } else if (method == "cp") {
-    sprintf("num_components=%s", f$rank)
-  } else if (method == "tucker") {
-    sprintf("rank_genes=%s, rank_subjects=%s, rank_time=%s", f$rank_genes, f$rank_subjects, f$rank_time)
   } else if (!is.na(f$seed)) {
     sprintf("rank %s seed %s", f$rank, f$seed)
   } else {
@@ -239,25 +291,18 @@ fit_descriptor <- function(con, method, fit_id) {
   }
 }
 
-#' All ok fits for a "direct fit" method (sPCA/CP/Tucker) -- no seed
-#' dimension to group by, so (unlike fits_at_rank()) this returns every
-#' fit for the method directly.
+#' All ok fits for a "direct fit" method (sPCA) -- no seed dimension to
+#' group by, so (unlike fits_at_rank()) this returns every fit for the
+#' method directly. `rank_genes`/`rank_subjects`/`rank_time` are still
+#' selected for backward compatibility with historical CP/Tucker rows
+#' (removed 2026-09-29, see FACTORIZATION_METHODS's header in app.R) that
+#' remain in the DB but are no longer surfaced anywhere in the app.
 direct_fits <- function(con, dataset_id, method) {
   DBI::dbGetQuery(con,
     "SELECT fit_id, rank, rank_genes, rank_subjects, rank_time, mse, n_factors
      FROM fits WHERE dataset_id = ? AND method = ? AND status = 'ok'
      ORDER BY rank, rank_genes, rank_subjects, rank_time",
     params = list(dataset_id, method))
-}
-
-#' Lowest-MSE fit for a direct-fit method -- Level 0's headline, standing
-#' in for the masking-CV-based headlines other methods use (sPCA/CP/Tucker
-#' have no masking_cv family at all).
-best_direct_fit <- function(con, dataset_id, method) {
-  d <- direct_fits(con, dataset_id, method)
-  d <- d[!is.na(d$mse), ]
-  if (nrow(d) == 0) return(NULL)
-  d[which.min(d$mse), ]
 }
 
 get_factor_id <- function(con, fit_id, factor_index) {
@@ -350,17 +395,6 @@ load_loadings <- function(con, fit_id) {
   readRDS(path)
 }
 
-#' CP/Tucker's third (time-mode) loading matrix -- rows = timepoint
-#' levels, columns = component. NULL for any other method (no
-#' time_loadings_file).
-load_time_loadings <- function(con, fit_id) {
-  f <- get_fit(con, fit_id)
-  if (nrow(f) == 0 || is.na(f$time_loadings_file)) return(NULL)
-  path <- resolve_artifact(f$time_loadings_file)
-  if (!file.exists(path)) return(NULL)
-  readRDS(path)
-}
-
 #' sPCA's diagnostics bundle -- list(pev, var_all, n_nonzero), see
 #' R/lib/ingest/db.R's spca_diag_file column comment. NULL for any other
 #' method (no spca_diag_file) or a fit predating this column.
@@ -370,6 +404,56 @@ load_spca_diag <- function(con, fit_id) {
   path <- resolve_artifact(f$spca_diag_file)
   if (!file.exists(path)) return(NULL)
   readRDS(path)
+}
+
+#' This fit's fastICA() diagnostics -- list(W, K, prewhiten_sdev), see
+#' R/lib/ingest/db.R's ica_diag_file column comment. NULL for every ICA
+#' fit currently in the DB (confirmed directly, 2026-09-23: 0/1,600 real
+#' fits have this populated -- the capturing code is correct but every
+#' currently-ingested ica_grid result predates it, and unlike sPCA/CoGAPS
+#' there's no raw_result_file to backfill W/K from after the fact; see
+#' R/methods/ica.R's header). Will return real data once ica_grid is
+#' re-run with current code and re-ingested.
+load_ica_diag <- function(con, fit_id) {
+  f <- get_fit(con, fit_id)
+  if (nrow(f) == 0 || is.na(f$ica_diag_file)) return(NULL)
+  path <- resolve_artifact(f$ica_diag_file)
+  if (!file.exists(path)) return(NULL)
+  readRDS(path)
+}
+
+#' fastICA()'s own unmixing matrix W has no self-reported convergence
+#' diagnostic -- a genuinely converged W should be close to orthonormal
+#' (W %*% t(W) ~= I), the "cheap real check" R/methods/ica.R's own
+#' header comment calls out. Returns the Frobenius-norm residual (0 =
+#' perfectly orthonormal); NULL if this fit has no ica_diag_file yet.
+ica_orthonormality_residual <- function(con, fit_id) {
+  diag <- load_ica_diag(con, fit_id)
+  if (is.null(diag) || is.null(diag$W)) return(NULL)
+  W <- as.matrix(diag$W)
+  norm(W %*% t(W) - diag(nrow(W)), type = "F")
+}
+
+#' How much of the pre-ICA PCA-prewhitening reduction's total variance
+#' (pcfit$sdev, R/methods/ica.R:36-38) was actually retained by keeping
+#' only n_pcs = n.comp + 5 components -- the literature (Lee & Batzoglou
+#' 2003) found that reducing dimensionality via PCA before ICA measurably
+#' hurts result quality vs. full-rank ICA; this lets a user see exactly
+#' how much variance that tradeoff costs for a REAL fit, without this
+#' function deciding anything about whether that cost is acceptable.
+#' NULL if this fit has no ica_diag_file yet.
+ica_prewhiten_variance_retained <- function(con, fit_id) {
+  diag <- load_ica_diag(con, fit_id)
+  if (is.null(diag) || is.null(diag$prewhiten_sdev)) return(NULL)
+  sdev <- diag$prewhiten_sdev
+  # K (fastICA's own pre-whitening matrix) is n_pcs x n.comp -- nrow(K) is
+  # the PCA-prewhitening dimension (n.comp + 5 in R/methods/ica.R) fed
+  # INTO fastICA, i.e. exactly how many of pcfit$sdev's components were
+  # kept. Confirmed directly against a real fastICA() call: dim(K) =
+  # c(n_pcs_in, n.comp), dim(W) = c(n.comp, n.comp) -- W is square and
+  # does NOT carry n_pcs, unlike an earlier draft of this function assumed.
+  n_pcs <- if (!is.null(diag$K)) nrow(diag$K) else length(sdev)
+  sum(sdev[seq_len(n_pcs)]^2) / sum(sdev^2)
 }
 
 #' This fit's gene-clustering tree (merge/height/order/labels -- see
@@ -386,6 +470,69 @@ load_wgcna_dendro <- function(con, fit_id) {
   tree <- readRDS(path)
   hc <- list(merge = tree$merge, height = tree$height, order = tree$order,
              labels = tree$labels, method = "average", dist.method = "1 - TOM")
+  class(hc) <- "hclust"
+  hc
+}
+
+#' Per-component non-Gaussianity for one ICA fit (Lee & Batzoglou 2003 --
+#' see R/lib/ingest/db.R's ica_component_kurtosis comment for the full
+#' rationale). Plain query wrapper, not an artifact read -- unlike
+#' load_ica_diag()'s W/K/prewhiten_sdev, this is small enough to live as
+#' its own queryable table.
+ica_component_kurtosis <- function(con, fit_id) {
+  DBI::dbGetQuery(con,
+    "SELECT component, kurtosis, excess_kurtosis FROM ica_component_kurtosis
+     WHERE fit_id = ? ORDER BY component",
+    params = list(fit_id))
+}
+
+#' ICASSO (Himberg, Hyvärinen & Esposito 2004) cluster-level summary for
+#' one (dataset, rank) -- see R/lib/ingest/icasso.R. One row per cluster;
+#' `iq` >= ~0.7 is the literature's usual "trustworthy" threshold.
+icasso_clusters <- function(con, dataset_id, rank) {
+  DBI::dbGetQuery(con,
+    "SELECT cluster_id, iq, n_members, centrotype_fit_id, centrotype_factor_index
+     FROM icasso_clusters WHERE dataset_id = ? AND method = 'ica' AND rank = ?
+     ORDER BY cluster_id",
+    params = list(dataset_id, rank))
+}
+
+#' ICASSO per-run membership for one (dataset, rank) -- every (fit,
+#' factor)'s cluster assignment, needed to color a rendered dendrogram or
+#' recompute a cluster's composition. See R/lib/ingest/icasso.R.
+icasso_membership <- function(con, dataset_id, rank) {
+  DBI::dbGetQuery(con,
+    "SELECT cluster_id, fit_id, factor_index, intra_sim
+     FROM icasso_membership WHERE dataset_id = ? AND method = 'ica' AND rank = ?",
+    params = list(dataset_id, rank))
+}
+
+#' ICASSO cluster quality (Iq) across every rank this dataset's ICA grid
+#' swept -- long frame (rank, cluster_id, iq, n_members), one row per
+#' cluster, for the Level-1 "Iq vs n.comp" overview plot.
+icasso_iq_by_rank <- function(con, dataset_id) {
+  DBI::dbGetQuery(con,
+    "SELECT rank, cluster_id, iq, n_members FROM icasso_clusters
+     WHERE dataset_id = ? AND method = 'ica' ORDER BY rank, cluster_id",
+    params = list(dataset_id))
+}
+
+#' The cross-run ICASSO clustering tree for one (dataset, rank),
+#' reconstructed as a real `hclust`-classed object -- same shape/idiom as
+#' load_wgcna_dendro(). `hc$labels` are "fit_id:factor_index" strings (see
+#' R/lib/ingest/icasso.R) -- join back to icasso_membership() to color
+#' leaves by cluster. NULL if this rank's ICASSO clustering hasn't been
+#' computed yet (e.g. fewer than 2 ok fits still exist at this rank).
+load_icasso_dendro <- function(con, dataset_id, rank) {
+  f <- DBI::dbGetQuery(con,
+    "SELECT dendro_file FROM icasso_dendrograms WHERE dataset_id = ? AND method = 'ica' AND rank = ?",
+    params = list(dataset_id, rank))
+  if (nrow(f) == 0 || is.na(f$dendro_file[1])) return(NULL)
+  path <- resolve_artifact(f$dendro_file[1])
+  if (!file.exists(path)) return(NULL)
+  tree <- readRDS(path)
+  hc <- list(merge = tree$merge, height = tree$height, order = tree$order,
+             labels = tree$labels, method = "average", dist.method = "1 - |cosine|")
   class(hc) <- "hclust"
   hc
 }
@@ -549,6 +696,30 @@ wgcna_module_sizes <- function(con, fit_id) {
     params = list(fit_id))
 }
 
+#' Module sizes at every power for a dataset, with modules ranked
+#' largest-to-smallest WITHIN each power (module 0 / "unassigned" kept as
+#' its own unranked category). Ranking rather than raw module number is
+#' the robust key for a size-profile-across-power plot: WGCNA numbers
+#' modules by descending size within a fit already, but the profile
+#' shouldn't silently depend on that holding exactly.
+wgcna_module_size_profile <- function(con, dataset_id) {
+  fits <- wgcna_fits(con, dataset_id)
+  if (nrow(fits) == 0) return(data.frame(power = integer(), module = integer(),
+                                          n_genes = integer(), rank = integer()))
+  rows <- lapply(seq_len(nrow(fits)), function(i) {
+    sizes <- wgcna_module_sizes(con, fits$fit_id[i])
+    sizes$power <- fits$power[i]
+    sizes
+  })
+  d <- do.call(rbind, rows)
+  d$rank <- NA_integer_
+  for (p in unique(d$power)) {
+    idx <- which(d$power == p & d$module != 0)
+    d$rank[idx] <- rank(-d$n_genes[idx], ties.method = "first")
+  }
+  d[, c("power", "module", "n_genes", "rank")]
+}
+
 #' One module's member genes ranked by kME (intramodular connectivity /
 #' module membership, WGCNA::signedKME()) -- the standard hub-gene
 #' ranking blockwiseModules() computes internally but never returns (see
@@ -595,6 +766,90 @@ wgcna_module_jaccard <- function(con, fit_a, fit_b) {
      SELECT module_b AS module_a, module_a AS module_b, jaccard, matched
      FROM wgcna_module_pairs WHERE fit_a = ?2 AND fit_b = ?1",
     params = list(fit_a, fit_b))
+}
+
+#' This fit pair's Hungarian-BEST-matched module correspondences only
+#' (matched = 1), in both directions -- the building block for tracing a
+#' module's identity forward one power step at a time.
+wgcna_module_best_match_pairs <- function(con, fit_a, fit_b) {
+  DBI::dbGetQuery(con,
+    "SELECT module_a, module_b, jaccard FROM wgcna_module_pairs
+     WHERE fit_a = ?1 AND fit_b = ?2 AND matched = 1
+     UNION ALL
+     SELECT module_b AS module_a, module_a AS module_b, jaccard
+     FROM wgcna_module_pairs WHERE fit_a = ?2 AND fit_b = ?1 AND matched = 1",
+    params = list(fit_a, fit_b))
+}
+
+#' Traces each module's identity across the dataset's full tested power
+#' sequence by chaining the already-computed Hungarian best-matches
+#' (wgcna_module_pairs) between ADJACENT powers only -- adjacent in the
+#' tested grid (e.g. 10 -> 12 -> 14, respecting real gaps), not adjacent
+#' by arithmetic power value. A lineage starts at the lowest power's
+#' modules and is extended forward as long as a matched=1 row carries it
+#' to the next power; when no such row exists (its genes were absorbed
+#' elsewhere without it being anyone's best match), the lineage
+#' terminates. A module at a later power that is nobody's match target
+#' starts a new lineage there, so genuinely new/re-split modules show up
+#' rather than being silently dropped. Returns long data.frame:
+#' lineage_id, power, module, n_genes, jaccard_to_prev (NA at a lineage's
+#' first power).
+wgcna_module_lineages <- function(con, dataset_id) {
+  fits <- wgcna_fits(con, dataset_id)
+  empty <- data.frame(lineage_id = character(), power = integer(), module = integer(),
+                       n_genes = integer(), jaccard_to_prev = double())
+  if (nrow(fits) == 0) return(empty)
+
+  sizes_by_fit <- lapply(fits$fit_id, function(fid) wgcna_module_sizes(con, fid))
+  names(sizes_by_fit) <- as.character(fits$fit_id)
+  size_of <- function(fit_id, module) {
+    s <- sizes_by_fit[[as.character(fit_id)]]
+    v <- s$n_genes[s$module == module]
+    if (length(v) == 0) NA_integer_ else v[1]
+  }
+
+  first_sizes <- sizes_by_fit[[as.character(fits$fit_id[1])]]
+  active <- first_sizes$module[first_sizes$module != 0]
+  next_id <- 1L
+  lineage_of <- setNames(paste0("L", seq_along(active)), active)
+  next_id <- length(active) + 1L
+
+  out <- list()
+  for (m in active) {
+    out[[length(out) + 1]] <- data.frame(
+      lineage_id = lineage_of[[as.character(m)]], power = fits$power[1], module = m,
+      n_genes = size_of(fits$fit_id[1], m), jaccard_to_prev = NA_real_)
+  }
+
+  for (i in seq_len(nrow(fits) - 1)) {
+    matches <- wgcna_module_best_match_pairs(con, fits$fit_id[i], fits$fit_id[i + 1])
+    new_lineage_of <- list()
+    claimed_targets <- character()
+    for (m_char in names(lineage_of)) {
+      m <- as.integer(m_char)
+      row <- matches[matches$module_a == m, , drop = FALSE]
+      if (nrow(row) == 0) next
+      target <- row$module_b[1]
+      lid <- lineage_of[[m_char]]
+      new_lineage_of[[as.character(target)]] <- lid
+      claimed_targets <- c(claimed_targets, as.character(target))
+      out[[length(out) + 1]] <- data.frame(
+        lineage_id = lid, power = fits$power[i + 1], module = target,
+        n_genes = size_of(fits$fit_id[i + 1], target), jaccard_to_prev = row$jaccard[1])
+    }
+    next_sizes <- sizes_by_fit[[as.character(fits$fit_id[i + 1])]]
+    unclaimed <- setdiff(as.character(next_sizes$module[next_sizes$module != 0]), claimed_targets)
+    for (m_char in unclaimed) {
+      lid <- paste0("L", next_id); next_id <- next_id + 1L
+      new_lineage_of[[m_char]] <- lid
+      out[[length(out) + 1]] <- data.frame(
+        lineage_id = lid, power = fits$power[i + 1], module = as.integer(m_char),
+        n_genes = size_of(fits$fit_id[i + 1], as.integer(m_char)), jaccard_to_prev = NA_real_)
+    }
+    lineage_of <- new_lineage_of
+  }
+  if (length(out) == 0) return(empty)
+  do.call(rbind, out)
 }
 
 #' WGCNA::pickSoftThreshold()'s scale-free-topology fit per power -- see
@@ -658,6 +913,300 @@ wgcna_module_gs_kme <- function(con, fit_id, module, dataset_id, field) {
      JOIN wgcna_gene_significance g ON g.dataset_id = ?3 AND g.gene = m.gene AND g.field = ?4
      WHERE m.fit_id = ?1 AND m.module = ?2 AND g.test = 'spearman'",
     params = list(fit_id, module, dataset_id, field))
+}
+
+## ---- projectR projections ------------------------------------------------------
+## Read-only from this app's side -- all projection computation happens in
+## the cluster ingest pipeline (R/ingest_jobs/projectr_job.R +
+## R/ingest_projectr_results.R), which writes the `projections` table +
+## each row's projection_file artifact directly.
+
+#' Every OTHER dataset in this fit's own timecourse family that its basis
+#' has been projectR-projected onto -- i.e. real data for a trajectory
+#' view (see app.R's "Trajectory across time" tab). `projection_type =
+#' 'within_dataset'` is exactly this project's definition of "same
+#' family" (config/dataset_families.yml, e.g. ANEMONES's own 4
+#' timepoint-split sub-datasets) -- see R/lib/ingest/projectr_pairs.R's
+#' header. Empty for a fit whose dataset has no family siblings (most
+#' datasets), or whose projectr_within_grid hasn't been run/ingested yet.
+within_family_projections <- function(con, fit_id) {
+  DBI::dbGetQuery(con,
+    "SELECT target_dataset_id, projection_file FROM projections
+     WHERE source_fit_id = ? AND projection_type = 'within_dataset'",
+    params = list(fit_id))
+}
+
+#' Every dataset that has EVER been the source of a real projectR
+#' projection -- the "Compare bases" screen's source-dataset choices.
+projection_source_datasets <- function(con) {
+  DBI::dbGetQuery(con, "SELECT DISTINCT source_dataset_id FROM projections ORDER BY source_dataset_id")$source_dataset_id
+}
+
+#' Every dataset a given source dataset's bases have actually been
+#' projected onto (within OR cross family -- both are real, already-
+#' computed projectR runs; see projectr_pairs.R for how the two grids
+#' differ). Only pairs with this real, already-computed data can be
+#' compared -- nothing here ever triggers a new full-dataset projection.
+projection_targets_for_dataset <- function(con, source_dataset_id) {
+  DBI::dbGetQuery(con,
+    "SELECT DISTINCT target_dataset_id FROM projections WHERE source_dataset_id = ? ORDER BY target_dataset_id",
+    params = list(source_dataset_id))$target_dataset_id
+}
+
+#' Every real projectR projection from one dataset onto another --
+#' one row per (method, fit) already run, joined to `fits` for real
+#' rank/seed/alpha labels via fit_descriptor(). This is the data behind
+#' the "Compare bases" screen's R²-comparison and sample-space-alignment
+#' tabs -- both entirely free reads, no new computation.
+projections_for_pair <- function(con, source_dataset_id, target_dataset_id) {
+  DBI::dbGetQuery(con,
+    "SELECT p.source_fit_id, p.method, p.mean_r_squared, p.median_r_squared,
+            p.n_genes_matched, p.n_samples, p.projection_file, f.rank, f.seed, f.alpha
+     FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id
+     WHERE p.source_dataset_id = ? AND p.target_dataset_id = ?
+     ORDER BY p.method, f.rank",
+    params = list(source_dataset_id, target_dataset_id))
+}
+
+## ---- Overview: cross-dataset "which method/rank is best" -------------------
+## Backs the new "Overview" screen (app.R, nav$mode == "overview"), answering
+## four questions in order: (1) optimal hyperparameter per (dataset, method),
+## (2) best method per dataset, (3) cross-method agreement within a dataset,
+## (4) cross-dataset agreement for one method.
+
+#' All currently-supported methods' names, used to drive Overview loops
+#' generically -- kept here as a plain hardcoded vector, not read from
+#' app.R's method-family constants (STABILITY_METHODS etc.), since
+#' db_helpers.R is sourced before those are defined and this file's
+#' existing convention is to hardcode method names directly (see e.g.
+#' method_overview()'s wgcna branch) rather than depend on app.R's load
+#' order. CP/Tucker removed 2026-09-29 (see FACTORIZATION_METHODS's header
+#' in app.R) -- their historical fits remain in the DB but are excluded
+#' here deliberately.
+OVERVIEW_METHODS <- c("pca", "spca", "nmf", "cogaps", "ica", "wgcna")
+
+#' crossrank_matrix()-shaped data.frame (rank_a, rank_b, cosine, ...) ->
+#' data.frame(rank, cosine), symmetrized. `factor_pairs` stores each pair
+#' once with fit_a always the lower-fit_id side (see
+#' compute_factor_pairs_from_universe()'s `i < j` loop, R/lib/ingest/
+#' pairs.R) -- for a seed-sweep/param-grid family where fit_id roughly
+#' tracks rank, that means the HIGHEST rank tested only ever appears as
+#' rank_b, never rank_a. Aggregating on rank_a alone (as crossrank_matrix()
+#' itself returns it) silently gives that highest rank NA stability --
+#' confirmed live as a real bug once optimal_fit_for_method() started
+#' picking the single highest-quality value directly (almost always the
+#' highest rank, since quality tends to rise monotonically with it).
+#' Combining both directions before aggregating fixes this for every
+#' crossrank_matrix() consumer at once.
+symmetric_rank_stability <- function(cr) {
+  if (nrow(cr) == 0) return(data.frame(rank = numeric(0), cosine = numeric(0)))
+  long <- data.frame(rank = c(cr$rank_a, cr$rank_b), cosine = c(cr$cosine, cr$cosine))
+  aggregate(cosine ~ rank, data = long, FUN = mean)
+}
+
+#' Per-hyperparameter (rank/power) in-sample R² + stability curve for one
+#' (dataset, method) -- the data behind Overview Tab 1 and the input to
+#' optimal_fit_for_method() below. One row per distinct hyperparameter
+#' value, with `fit_id` a REPRESENTATIVE fit at that value (for methods
+#' with a seed dimension, whichever seed has the highest in-sample R² --
+#' same "collapse to one representative" idiom as best_fit_per_rank() in
+#' app.R's Compare-bases screen). `stability` means three genuinely
+#' different things depending on method family (seed-stability for
+#' nmf/cogaps/ica; cross-rank persistence for pca/spca; cross-power ARI
+#' for wgcna) -- always "how much does the answer change when this
+#' hyperparameter's neighbors are perturbed", never blended across
+#' families, and `rank_label` always says which hyperparameter it is so
+#' this is never silently ambiguous. Returns
+#' data.frame(rank_label, rank_key, fit_id, in_sample_r2, stability), or an
+#' empty frame (not an error) if this method has no ok fits for this
+#' dataset -- a real, common case (NMF/CoGAPS exist for only 10/32
+#' datasets).
+method_rank_curve <- function(con, dataset_id, method) {
+  empty <- data.frame(rank_label = character(0), rank_key = numeric(0), fit_id = integer(0),
+                       in_sample_r2 = numeric(0), stability = numeric(0))
+  val_sd <- DBI::dbGetQuery(con, "SELECT val_sd FROM matrix_diagnostics WHERE dataset_id = ?",
+                             params = list(dataset_id))$val_sd
+  val_sd <- if (length(val_sd) == 1 && !is.na(val_sd)) val_sd else NA_real_
+
+  if (method %in% c("pca", "spca")) {
+    fits <- DBI::dbGetQuery(con,
+      "SELECT fit_id, rank, alpha, mse FROM fits
+       WHERE dataset_id = ? AND method = ? AND status = 'ok' AND mse IS NOT NULL",
+      params = list(dataset_id, method))
+    if (nrow(fits) == 0) return(empty)
+    # sPCA has multiple alpha per rank -- keep the lowest-mse (highest
+    # quality) alpha as that rank's representative.
+    agg <- do.call(rbind, lapply(split(fits, fits$rank), function(g) g[which.min(g$mse), ]))
+    stab <- symmetric_rank_stability(crossrank_matrix(con, dataset_id, method))
+    agg$stability <- stab$cosine[match(agg$rank, stab$rank)]
+    agg$in_sample_r2 <- if (method == "pca") 1 - agg$mse / val_sd^2 else 1 - agg$mse
+    data.frame(rank_label = paste("rank", agg$rank), rank_key = agg$rank, fit_id = agg$fit_id,
+               in_sample_r2 = agg$in_sample_r2, stability = agg$stability)
+
+  } else if (method %in% c("nmf", "cogaps", "ica")) {
+    q <- seed_sweep_mse_by_rank(con, dataset_id, method)   # mean_mse per rank, already averaged over seeds
+    if (nrow(q) == 0) return(empty)
+    fits <- DBI::dbGetQuery(con,
+      "SELECT fit_id, rank, mse FROM fits
+       WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok' AND mse IS NOT NULL
+         AND (bootstrap IS NULL OR bootstrap = 0)",
+      params = list(dataset_id, method))
+    rep_fit <- do.call(rbind, lapply(split(fits, fits$rank), function(g) g[which.min(g$mse), ]))
+    ss <- seed_stability_by_rank(con, dataset_id, method)
+    stab <- if (nrow(ss) > 0) aggregate(cosine ~ rank, data = ss, FUN = mean) else
+      data.frame(rank = numeric(0), cosine = numeric(0))
+    q$in_sample_r2 <- 1 - q$mean_mse / val_sd^2
+    q$fit_id <- rep_fit$fit_id[match(q$rank, rep_fit$rank)]
+    q$stability <- stab$cosine[match(q$rank, stab$rank)]
+    data.frame(rank_label = paste("rank", q$rank), rank_key = q$rank, fit_id = q$fit_id,
+               in_sample_r2 = q$in_sample_r2, stability = q$stability)
+
+  } else if (method == "wgcna") {
+    f <- wgcna_fits(con, dataset_id)
+    if (nrow(f) == 0) return(empty)
+    kme_r2 <- DBI::dbGetQuery(con, sprintf(
+      "SELECT fit_id, AVG(kme*kme) AS r2 FROM wgcna_kme WHERE module != 0 AND fit_id IN (%s) GROUP BY fit_id",
+      paste(f$fit_id, collapse = ",")))
+    ari <- wgcna_ari_matrix(con, dataset_id)
+    stab <- if (nrow(ari) > 0) aggregate(ari ~ power_a, data = ari, FUN = mean) else
+      data.frame(power_a = numeric(0), ari = numeric(0))
+    f$in_sample_r2 <- kme_r2$r2[match(f$fit_id, kme_r2$fit_id)]
+    f$stability <- stab$ari[match(f$power, stab$power_a)]
+    data.frame(rank_label = paste("power", f$power), rank_key = f$power, fit_id = f$fit_id,
+               in_sample_r2 = f$in_sample_r2, stability = f$stability)
+
+  } else {
+    empty
+  }
+}
+
+#' The "optimal" hyperparameter setting for one (dataset, method), used as
+#' that method's representative fit on Overview Tabs 2-3 -- simply the
+#' hyperparameter value with the highest in-sample R². Quality tends to
+#' rise with more components for every method here, so in practice this
+#' picks (at or near) the largest hyperparameter value tested; Tab 1 shows
+#' the full curve (quality AND stability) so that's always visible, not
+#' hidden behind a single pick. Returns NULL if the method has no ok fits
+#' for this dataset.
+optimal_fit_for_method <- function(con, dataset_id, method) {
+  d <- method_rank_curve(con, dataset_id, method)
+  d <- d[!is.na(d$in_sample_r2), ]
+  if (nrow(d) == 0) return(NULL)
+  d[which.max(d$in_sample_r2), ]
+}
+
+#' One row per method PRESENT for this dataset, combining (a) the
+#' optimal-fit in-sample quality + stability from optimal_fit_for_method(),
+#' and (b) out-of-sample R² -- median `mean_r_squared` across every target
+#' this dataset's fits have been projected onto, split by within/cross
+#' family (`projections.projection_type`), since the investigation found
+#' rankings differ between the two. WGCNA has no out-of-sample columns
+#' (never projectable) -- NA, not zero. This is Overview Tab 2's data --
+#' one method-comparison scatter per DATASET, not aggregated across the
+#' whole collection (a method can win on one dataset and lose on another).
+method_dataset_summary <- function(con, dataset_id) {
+  rows <- lapply(OVERVIEW_METHODS, function(m) {
+    opt <- optimal_fit_for_method(con, dataset_id, m)
+    if (is.null(opt)) return(NULL)
+    data.frame(method = m, fit_id = opt$fit_id, rank_label = opt$rank_label,
+               in_sample_r2 = opt$in_sample_r2, stability = opt$stability)
+  })
+  rows <- Filter(Negate(is.null), rows)
+  if (length(rows) == 0) return(data.frame())
+  out <- do.call(rbind, rows)
+
+  oos <- DBI::dbGetQuery(con,
+    "SELECT method, projection_type, mean_r_squared FROM projections WHERE source_dataset_id = ?",
+    params = list(dataset_id))
+  if (nrow(oos) > 0) {
+    agg <- aggregate(mean_r_squared ~ method + projection_type, data = oos, FUN = median)
+    within <- agg[agg$projection_type == "within_dataset", ]
+    cross  <- agg[agg$projection_type == "cross_dataset", ]
+    out$oos_r2_within <- within$mean_r_squared[match(out$method, within$method)]
+    out$oos_r2_cross  <- cross$mean_r_squared[match(out$method, cross$method)]
+  } else {
+    out$oos_r2_within <- NA_real_
+    out$oos_r2_cross <- NA_real_
+  }
+  out
+}
+
+#' Method x method agreement matrix for ONE dataset -- Overview Tab 3.
+#' Runs the same pairwise comparisons the "Compare methods" screen already
+#' offers one-pair-at-a-time (comparator_gene_sets()/jaccard_matrix() for
+#' gene-set overlap, cluster_and_ari() for sample-space agreement) across
+#' every pair of methods PRESENT for this dataset, each represented by its
+#' optimal_fit_for_method() pick. Returns
+#' list(methods = character vector actually compared,
+#'      gene_jaccard = methods x methods matrix of mean best-Hungarian-
+#'        matched |Jaccard| (diagonal = 1),
+#'      sample_ari = methods x methods matrix of Adjusted Rand Index
+#'        between k=4 sample/eigengene clusters (diagonal = 1)).
+#' A method is silently dropped from both matrices if it has no optimal
+#' fit for this dataset (e.g. NMF/CoGAPS on 22/32 datasets) -- never
+#' forced into an NA-filled row that would look like a real comparison.
+method_pairwise_agreement <- function(con, dataset_id, methods = OVERVIEW_METHODS, top_n = 50) {
+  opts <- lapply(methods, function(m) optimal_fit_for_method(con, dataset_id, m))
+  names(opts) <- methods
+  present <- methods[!vapply(opts, is.null, logical(1))]
+  if (length(present) < 2) return(list(methods = present, gene_jaccard = NULL, sample_ari = NULL))
+
+  gj <- matrix(NA_real_, length(present), length(present), dimnames = list(present, present))
+  sa <- matrix(NA_real_, length(present), length(present), dimnames = list(present, present))
+  diag(gj) <- 1; diag(sa) <- 1
+
+  for (i in seq_along(present)) {
+    for (j in seq_along(present)) {
+      if (i >= j) next
+      m_a <- present[i]; m_b <- present[j]
+      fit_a <- opts[[m_a]]$fit_id; fit_b <- opts[[m_b]]$fit_id
+
+      sets_a <- comparator_gene_sets(con, m_a, fit_a, top_n)
+      sets_b <- comparator_gene_sets(con, m_b, fit_b, top_n)
+      if (!is.null(sets_a) && !is.null(sets_b)) {
+        jm <- jaccard_matrix(sets_a$sets, sets_b$sets)
+        match_idx <- hungarian_match_abs(jm)
+        val <- mean(abs(jm[match_idx]), na.rm = TRUE)
+        gj[i, j] <- val; gj[j, i] <- val
+      }
+
+      ca <- tryCatch(cluster_and_ari(con, fit_a, fit_b), error = function(e) NULL)
+      if (!is.null(ca)) { sa[i, j] <- ca$ari; sa[j, i] <- ca$ari }
+    }
+  }
+  list(methods = present, gene_jaccard = gj, sample_ari = sa)
+}
+
+#' Dataset x dataset out-of-sample R², aggregated (median across every
+#' fit/rank/seed of this method) per (source, target) pair -- Overview Tab
+#' 4's data. Long format; coverage is exactly whatever `projections`
+#' already has for this method (comprehensive for pca/spca/ica; sparse and
+#' source-gated for nmf/cogaps -- see the plan's coverage-map finding).
+#' Empty for wgcna (never projected).
+dataset_similarity_matrix <- function(con, method) {
+  d <- DBI::dbGetQuery(con,
+    "SELECT source_dataset_id, target_dataset_id, mean_r_squared FROM projections WHERE method = ?",
+    params = list(method))
+  empty <- data.frame(source_dataset_id = character(0), target_dataset_id = character(0), median_r2 = numeric(0))
+  if (nrow(d) == 0) return(empty)
+  agg <- aggregate(mean_r_squared ~ source_dataset_id + target_dataset_id, data = d, FUN = median)
+  names(agg)[3] <- "median_r2"
+  agg
+}
+
+#' Dataset x dataset gene-space agreement for one method -- Overview Tab
+#' 4's second view, reading `gene_space_agreement` (populated offline by
+#' R/backfill_gene_space_agreement.R, NOT computed live -- see that
+#' script's header for why). Deliberately sparser than
+#' dataset_similarity_matrix()'s sample-space R²: only pairs the backfill
+#' has actually been run for exist here at all (by design, scoped to
+#' within-family pairs first -- see the plan). Empty data.frame (not an
+#' error) if the backfill hasn't been run yet for this method.
+gene_space_similarity_matrix <- function(con, method) {
+  DBI::dbGetQuery(con,
+    "SELECT source_dataset_id, target_dataset_id, mean_abs_diagonal, n_genes_matched
+     FROM gene_space_agreement WHERE method = ?",
+    params = list(method))
 }
 
 ## ---- enrichment cache ---------------------------------------------------------

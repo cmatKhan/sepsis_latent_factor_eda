@@ -49,14 +49,15 @@ if (!exists("%||%")) `%||%` <- function(a, b) if (is.null(a)) b else a
 #' @param manifest optional method manifest, as returned by
 #'   `discover_method_registries()` (see R/lib/method_registry.R) --
 #'   used both to check that every configured method was actually
-#'   discovered, and to generically check per-method requirements (e.g.
-#'   cp/tucker's subject/timepoint columns) via each registry's
-#'   `requires_subject_timepoint` flag, instead of hardcoding method names
-#'   here. Defaults to NULL for callers (e.g. R/legacy/*.R) that never
-#'   source R/methods/*.R at all -- both checks are skipped entirely when
-#'   no manifest is supplied (see validate_dataset_metadata() below); the
-#'   cp/tucker check falls back to a hardcoded name check instead so those
-#'   (already-stale) legacy callers keep their original guardrail.
+#'   discovered, and to generically check per-method requirements via
+#'   each registry's `requires_subject_timepoint` flag (no current method
+#'   sets it, following CP/Tucker's removal 2026-09-29 -- see
+#'   R/README.md's "CP/Tucker (removed)" section -- but it's left in place
+#'   as generic infrastructure a future method could reuse), instead of
+#'   hardcoding method names here. Defaults to NULL for callers (e.g.
+#'   R/legacy/*.R) that never source R/methods/*.R at all -- both checks
+#'   are skipped entirely when no manifest is supplied (see
+#'   validate_dataset_metadata() below).
 read_dataset_metadata <- function(path, manifest = NULL) {
   meta <- yaml::read_yaml(path)
   validate_dataset_metadata(meta, manifest)
@@ -139,20 +140,15 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
     }
   }
 
-  # Tensor methods (cp/tucker today) need dataset:-level subject/timepoint
-  # columns to reshape the standard matrix into a genes x subjects x
-  # timepoints array -- see R/lib/tensors.R::build_tensor(). Presence-only
-  # check here (fails fast); the columns' actual existence in
-  # sample_metadata_path is checked at build_tensor() runtime.
-  #
-  # Driven by each method's registry (`requires_subject_timepoint`, see
-  # R/lib/method_registry.R) rather than a hardcoded cp/tucker name list --
-  # this is the ONLY reason `manifest` is threaded through to this
-  # function, and only fires when a manifest is actually supplied (i.e.
-  # from R/create_slurm_bundle.R, which sources R/methods/*.R before
-  # calling read_dataset_metadata()). Callers that never discover method
-  # registries at all (R/legacy/*.R) fall back to the original cp/tucker-
-  # only check so they keep the same guardrail they've always had.
+  # Tensor methods (CP/Tucker) used to need dataset:-level subject/
+  # timepoint columns here, driven by each method's registry
+  # (`requires_subject_timepoint`, see R/lib/method_registry.R) rather
+  # than a hardcoded name list -- this is why `manifest` is threaded
+  # through to this function at all. Removed along with CP/Tucker
+  # 2026-09-29 (see app.R's FACTORIZATION_METHODS header) -- no current
+  # method sets `requires_subject_timepoint`, so this loop is a no-op
+  # today, but left in place (rather than deleted) since it's generic,
+  # registry-driven infrastructure a future method could still use.
   if (!is.null(manifest)) {
     check_subject_timepoint <- function(nm) {
       reg <- manifest[[nm]]$registry
@@ -168,16 +164,6 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
       }
     }
     for (nm in setdiff(names(meta$methods), "network")) check_subject_timepoint(nm)
-  } else if (!is.null(meta$methods$cp) || !is.null(meta$methods$tucker)) {
-    if (is.null(meta$dataset$subject_id_col) || is.null(meta$dataset$timepoint_col)) {
-      stop("methods.cp / methods.tucker are configured but dataset.subject_id_col and ",
-           "dataset.timepoint_col are not both set -- required to build the genes x ",
-           "subjects x timepoints tensor. See R/README.md's config reference.")
-    }
-    if (is.null(meta$dataset$sample_metadata_path)) {
-      stop("methods.cp / methods.tucker are configured but dataset.sample_metadata_path ",
-           "is not set -- required to look up each sample's subject/timepoint")
-    }
   }
 
   validate_slurm_config(meta$slurm, names(meta$methods))

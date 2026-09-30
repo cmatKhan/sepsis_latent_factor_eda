@@ -17,12 +17,13 @@ same_family <- function(families, ds_a, ds_b) {
   length(fam_a) == 1 && length(fam_b) == 1 && fam_a == fam_b
 }
 
-#' @param methods loadings-bearing methods to project -- cp/tucker's gene
-#'   loadings are included by default despite their subject/time modes
-#'   being tensor-specific (the gene x pattern loadings themselves are a
-#'   perfectly valid plain-matrix projectR input).
+#' @param methods loadings-bearing methods to project. (CP/Tucker used to
+#'   be included by default too, despite their subject/time modes being
+#'   tensor-specific -- their gene x pattern loadings were a perfectly
+#'   valid plain-matrix projectR input. Removed 2026-09-29, see
+#'   R/README.md's "CP/Tucker (removed)" section.)
 build_projectr_pairs <- function(con, dataset_ids, families,
-                                  methods = c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker")) {
+                                  methods = c("pca", "nmf", "cogaps", "spca", "ica")) {
   rows <- list()
   for (ds_a in dataset_ids) {
     for (ds_b in setdiff(dataset_ids, ds_a)) {

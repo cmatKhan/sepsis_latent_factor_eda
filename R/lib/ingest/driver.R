@@ -124,8 +124,7 @@ run_pattern_driver <- function(con, db_path, fit_id, factor_index, dataset_id,
 
 #' Batch pass for one dataset: every representative fit of every
 #' loadings-bearing method (same scope as fgsea -- pca/nmf/cogaps/spca/ica;
-#' cp/tucker's subject/time modes make "sample grouping" ambiguous, wgcna
-#' has no continuous pattern to weight by), first 2 factors only (keep it
+#' wgcna has no continuous pattern to weight by), first 2 factors only (keep it
 #' minimal, matching fgsea_job.R's own scope), against every 2-4-level
 #' categorical sample-metadata column (skips the id column itself and
 #' anything with >4 levels -- avoids combinatorial blowup on high-

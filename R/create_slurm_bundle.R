@@ -12,7 +12,6 @@ library(here)
 library(optparse)
 source(here("R/lib/metadata.R"))
 source(here("R/lib/matrices.R"))
-source(here("R/lib/tensors.R"))
 source(here("R/lib/grids.R"))
 source(here("R/lib/submit.R"))
 source(here("R/lib/method_registry.R"))
@@ -110,20 +109,17 @@ for (name in names(METHOD_MANIFEST)) {
     active_specs[[name]] <- list(spec = spec, method_meta = method_meta, slurm_cfg = slurm_cfg)
 }
 
-# The raw matrix is always needed; the non-negative-shifted variant and/or
-# the tensor reshape are each built at most once, and only if some active
-# method's registry actually asks for them (registry$needs_nonneg /
-# registry$needs_tensor) -- no lazy cache required now that "active" is
-# known up front.
+# The raw matrix is always needed; the non-negative-shifted variant is
+# built at most once, and only if some active method's registry actually
+# asks for it (registry$needs_nonneg) -- no lazy cache required now that
+# "active" is known up front. (A tensor-reshape variant used to live here
+# too, for CP/Tucker's registry$needs_tensor -- removed along with those
+# methods 2026-09-29, see app.R's FACTORIZATION_METHODS header.)
 raw_mat <- load_input_matrix(dataset_meta)
 # if any active method needs the non-negative matrix, set this flag to TRUE.
 # else FALSE
 needs_nonneg <- any(vapply(active_specs, function(s) isTRUE(s$spec$registry$needs_nonneg), logical(1)))
-# if any active method needs a tensor matrix (ie it has multiple timepionts),
-# set this flag to TRUE. else FALSE
-needs_tensor <- any(vapply(active_specs, function(s) isTRUE(s$spec$registry$needs_tensor), logical(1)))
 nn_mat <- if (needs_nonneg) shift_nonneg(raw_mat) else NULL
-tnsr_arr <- if (needs_tensor) build_tensor(raw_mat, dataset_meta) else NULL
 
 sjobs <- list()
 
@@ -135,9 +131,7 @@ for (name in names(active_specs)) {
     registry <- spec$registry
 
     mat_name <- registry$global_object
-    mat_value <- if (isTRUE(registry$needs_tensor)) {
-        tnsr_arr
-    } else if (isTRUE(registry$needs_nonneg)) {
+    mat_value <- if (isTRUE(registry$needs_nonneg)) {
         nn_mat
     } else {
         raw_mat

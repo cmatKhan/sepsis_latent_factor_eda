@@ -1,19 +1,102 @@
 # rslurm stability-grid setup
 
 Metadata-driven setup (not submission) of `rslurm` batch-array jobs that
-test stability of latent factors from PCA, NMF, CoGAPS, sPCA, CP, Tucker,
-and WGCNA across seeds and across the swept structural parameter
-(rank / power / per-mode rank).
+test stability of latent factors from PCA, NMF, CoGAPS, sPCA, ICA, and
+WGCNA across seeds and across the swept structural parameter
+(rank / power).
 
-CP and Tucker (both via the `rTensor` package) decompose a THIRD kind of
-input -- a genes x subjects x timepoints array, built from the usual
-feature x sample matrix plus two dataset-level sample-metadata columns
+### CP/Tucker (removed)
+
+Tensor factor models -- CP (CANDECOMP/PARAFAC) and Tucker decomposition,
+both via the `rTensor` package -- were implemented in this framework and
+evaluated, but removed 2026-09-29. They decomposed a THIRD kind of input
+-- a genes x subjects x timepoints array, built from the usual feature x
+sample matrix plus two dataset-level sample-metadata columns
 (`subject_id_col`/`timepoint_col`) -- rather than the plain feature x
-sample matrix every other method uses. They're treated as two entirely
-separate methods (own config blocks, own `fits.method`, own ingest
-branches) despite sharing `R/lib/tensors.R::build_tensor()` and the
-`rTensor` package, since CP (one shared rank across all three modes) and
+sample matrix every other method here uses, and were treated as two
+entirely separate methods (own config blocks, own `fits.method`, own
+ingest branches) since CP (one shared rank across all three modes) and
 Tucker (an independent rank per mode) are genuinely different analyses.
+
+**Why removed:** this project's planned data collection will have only 2
+real timepoints per subject. That's too little to responsibly fit a
+tensor factor model's time mode -- with only 2 points there's no way to
+tell a real temporal pattern from noise, and there isn't enough data to
+support the training a tensor decomposition needs. On top of that, both
+this framework's own empirical testing (e.g. the sPCA `para`/`lambda`
+sensitivity findings documented in `config/*.yml`'s `methods.spca` grids)
+and the tensor-factor-models literature independently confirmed that
+CP/Tucker's hyperparameter and preprocessing choices have an outsized
+effect on the result. See
+[https://rpubs.com/ivanricardo/tensorfactormodels](https://rpubs.com/ivanricardo/tensorfactormodels),
+whose "Drawbacks" section documents (among other things) that:
+- determining a tensor's rank is NP-hard, and a best rank-r decomposition
+  may not even exist for some tensors;
+- the best rank-1 approximation isn't generally part of the best rank-2
+  (or 3, or ...) approximation, unlike PCA's nested components;
+- CP's factor matrices aren't required to be orthogonal and can have
+  linearly dependent columns;
+- CP is unique only up to permutation and scaling of its components --
+  unlike PCA, you can't rotate a CP solution and get an equivalent one;
+- for Tucker specifically, "the choice of K1, K2, K3 [the per-mode ranks]
+  matters significantly ... as higher values get richer patterns across
+  fibers ... but have less correlation among one another" -- i.e. Tucker's
+  three independent per-mode ranks are a substantially larger, harder-to-
+  select hyperparameter space than a single rank.
+
+Put together: a 2-timepoint design can't supply enough data for a
+principled rank choice, and the literature and our own testing agree the
+wrong choice has a large effect on what the decomposition finds. CP/Tucker
+were dropped in favor of the remaining methods (PCA/NMF/CoGAPS/sPCA/ICA/
+WGCNA), all of which operate on the plain feature x sample matrix and
+don't need a third tensor mode at all.
+
+**What's left behind:** CP/Tucker's historical fits (ANEMONES and
+GSE54514, run before this removal) remain in `results/stability.sqlite`
+and `stability_artifacts/` as-is -- not purged, just no longer surfaced by
+the app or reachable via new `R/create_slurm_bundle.R` runs. Deleting
+`R/methods/cp.R`/`R/methods/tucker.R` and `R/lib/tensors.R` is what
+actually deregisters them (see `R/lib/method_registry.R::
+discover_method_registries()`, which auto-sources every `R/methods/*.R`
+file). A handful of schema columns that existed for their sake
+(`fits.rank_genes`/`rank_subjects`/`rank_time`/`converged`,
+`fits.time_loadings_file`, `dataset_metadata_sources.subject_id_col`) are
+kept, either because historical rows still populate them or because
+another feature (the app's trajectory-across-time view) uses them too --
+see each column's own comment in `R/lib/ingest/db.R`.
+
+### ICAclust (considered, not adopted)
+
+ICAclust (Nascimento et al., "Independent Component Analysis (ICA)
+based-clustering of temporal RNA-seq data," PLoS One 2017,
+[https://pmc.ncbi.nlm.nih.gov/articles/PMC5513449/](https://pmc.ncbi.nlm.nih.gov/articles/PMC5513449/))
+is a two-step method for clustering GENES by their temporal expression
+pattern: run `fastICA` on a genes x timepoints matrix with `n.comp` fixed
+to *exactly* the number of timepoints, then hierarchically cluster genes
+(Ward's method) in that rotated space, with the cluster count chosen
+automatically via Mojena's stopping rule. It was reviewed as a candidate
+for time-series-aware clustering in this project (a reference copy
+briefly lived at `R/new_methods/ICAclust.R`, since deleted), but never
+adopted or wired into the method-registry system.
+
+**Why not adopted:** `n.comp` fixed to the timepoint count means this is
+a full-rank ROTATION of the temporal-shape space, not a dimensionality
+reduction -- it's picking a non-Gaussian-motivated basis for the same
+information, not reducing to a smaller one. With only 2 real timepoints
+planned for this project's data collection, that rotation has exactly one
+free angle: there's no meaningful distribution over many candidate
+directions for a non-Gaussianity criterion to search across, so the
+method's whole mechanism is degenerate at that scale. This is the same
+"too few timepoints for the method's own axis" problem CP/Tucker were
+removed for above, just showing up in ICA's time dimension instead of a
+tensor mode. Unlike CP/Tucker, this was never implemented against real
+project data, so there's no historical DB data to preserve.
+
+This project's own ICA method (`R/methods/ica.R`, see "ICASSO" under
+Stage 2 below) is unrelated and unaffected -- it runs ICA on the usual
+feature x sample matrix to find independent expression PROGRAMS across
+the sample cohort, the same orientation as PCA/NMF/CoGAPS/sPCA, not a
+rotation of the time axis.
 
 Each config file (`dataset_metadata.yml`) describes **one run against one
 matrix**. There's no built-in concept of multiple named subsets ("bases")
@@ -87,8 +170,7 @@ file for exactly which keys it wires through and what its `defaults` are.
 | `cogaps.distributed_params` | `nSets`, `cut`, `minNS`, `maxNS` | `setDistributedParams(params, ...)` -- a sibling key to `params`, not nested inside it |
 | `cogaps.run` | `nThreads`, `uncertainty`, ... | `CoGAPS(data, params, ...)` -- a sibling key to `params`, not nested inside it |
 | `spca` | `K` (swept), `para` (swept, CROSSED with `K`), `type`, `sparse`, `use.corr`, `lambda`, `max.iter`, `eps.conv` | `elasticnet::spca()` |
-| `cp` | `num_components` (swept) | `rTensor::cp()` |
-| `tucker` | `rank_genes`/`rank_subjects`/`rank_time` (each independently swept) | *documented exception* -- `rTensor::tucker()`'s real argument is one length-3 vector `ranks = c(r1, r2, r3)`; assembled internally by `run_tucker_job()` from these three independent keys |
+| `ica` | `n.comp` (swept), `seed` (swept, framework-applied), `bootstrap` (swept, framework-applied), `alpha` (static) | `fastICA::fastICA()` -- `seed` has no `fastICA()` equivalent; applied via `set.seed()` before the call, per `R/methods/ica.R`. `bootstrap` (default `c(FALSE, TRUE)`) is ALSO framework-applied, not a `fastICA()` argument -- `TRUE` resamples sample columns with replacement before fitting, ICASSO's second randomization axis (see "ICASSO" under Stage 2 below) |
 | `network.wgcna` | `power` (swept), `minModuleSize`, `mergeCutHeight`, `networkType` | `WGCNA::blockwiseModules()` |
 
 **CoGAPS's `params`/`distributed_params`/`run`** exist as separate
@@ -116,16 +198,15 @@ checks for a literal `TRUE`/`FALSE` key anywhere in `methods:` and errors
 with a pointer to this section, but quote proactively (`"n": [...]`) if
 you're ever adding a new single-letter or word-like argument name.
 
-**Tensor methods (`cp`/`tucker`)** additionally need, at the `dataset:`
-level (not inside `methods:`): `subject_id_col` and `timepoint_col`, both
-columns in `dataset.sample_metadata_path`. `R/lib/tensors.R::build_tensor()`
-uses them (plus `sample_id_col`) to reshape the usual feature x sample
-matrix into a genes x subjects x timepoints array. `rTensor::cp()`/
-`tucker()` require a COMPLETE (dense) array -- there's no native
-missing-entry handling -- so any subject missing a timepoint, or with a
-duplicate sample at one, is dropped automatically, and this is always
-reported (never silent) via a `message()` at setup time listing exactly
-which subjects were dropped and why.
+**`subject_id_col`**, at the `dataset:` level (not inside `methods:`), is
+optional -- a column of `dataset.sample_metadata_path` identifying which
+subject a sample belongs to. Used by the app's trajectory-across-time
+feature to collapse per-sample metadata to one row per subject when
+matching a subject across sibling per-timepoint datasets (see
+`app/R/metadata_helpers.R::subject_level_metadata()`). (This column,
+alongside a now-removed `timepoint_col`, used to also be required by
+CP/Tucker's genes x subjects x timepoints tensor -- see "CP/Tucker
+(removed)" above.)
 
 ## Preparing your input matrix
 
@@ -304,7 +385,8 @@ network access from compute nodes), built from these sources:
 | pca, nmf | `tidyverse_latest.sif` | `docker://rocker/tidyverse:latest` |
 | cogaps | `cogaps_sha-3b3e002.sif` | `docker://ghcr.io/fertiglab/cogaps:sha-3b3e002` |
 | network.wgcna | `r-wgcna_1.74--5149c638df2976dd.sif` | `oras://community.wave.seqera.io/library/r-wgcna:1.74--5149c638df2976dd` |
-| spca, cp, tucker | **TODO** -- not built yet | need an image with `elasticnet` (spca) / `rTensor` (cp, tucker) installed; `container: "TODO"` in every dataset config's `slurm.spca`/`slurm.cp`/`slurm.tucker` is a deliberate placeholder, not a bug -- both packages are only confirmed available in local/interactive R for now |
+| spca | `r-elasticnet_1.3--81dc98c2fe6e7ac6.sif` | `oras://community.wave.seqera.io/library/r-elasticnet:1.3--81dc98c2fe6e7ac6` |
+| ica | `r-fastica_1.2_8--5dbdb92af2e4386b.sif` | `oras://community.wave.seqera.io/library/r-fastica:1.2_8--5dbdb92af2e4386b` |
 
 `config/dataset_metadata.example.yml`'s `slurm:` section uses these same
 local paths as a starting point -- a new dataset/cluster without them
@@ -349,8 +431,8 @@ method:
 
 | Design | Question | Methods |
 |---|---|---|
-| seed-sweep | Do factors change across random seeds? | PCA (deterministic, degenerate), NMF, CoGAPS |
-| param-grid | How do structures change as the swept parameter(s) increase? | WGCNA (power), sPCA (K/para), CP (num_components), Tucker (rank_genes/rank_subjects/rank_time) -- all deterministic given their parameters, so (like PCA) there's no genuine cross-seed stability question |
+| seed-sweep | Do factors change across random seeds? | PCA (deterministic, degenerate), NMF, CoGAPS, ICA |
+| param-grid | How do structures change as the swept parameter(s) increase? | WGCNA (power), sPCA (K/para) -- both deterministic given their parameters, so (like PCA) there's no genuine cross-seed stability question |
 
 A held-out-entry reconstruction design (masking-CV) and a held-out-subject
 projection design (fitting on a subsample and projecting the rest onto the
@@ -368,7 +450,7 @@ one file -- nothing in `R/create_slurm_bundle.R` or `R/lib/metadata.R`
 needs to change.**
 
 Write ONE `R/methods/<name>.R` file:
-1. Job function(s) operating on the global `mat`/`mat_nn`/`tnsr` object (no
+1. Job function(s) operating on the global `mat`/`mat_nn` object (no
    basis argument) -- formals are whatever your `build_grid()` puts in its
    output columns (see below). If your tool has multiple call sites like
    CoGAPS, give your job function one formal per named sub-block instead
@@ -400,20 +482,22 @@ Write ONE `R/methods/<name>.R` file:
      derived from cluster config (e.g. CoGAPS's nSets/nThreads).
 
    Two further optional fields (default `FALSE` if omitted):
-   - `needs_nonneg` / `needs_tensor` -- which cached input
-     (`mat`/`mat_nn`/`tnsr`) `global_object` refers to.
+   - `needs_nonneg` -- whether `global_object` refers to the cached
+     non-negativity-shifted matrix (`mat_nn`) instead of the raw one
+     (`mat`).
    - `network` -- `TRUE` if this method's config/slurm entries nest under
      `methods.network.<name>`/`slurm.network.<name>` instead of the flat
      `methods.<name>`/`slurm.<name>` every other method uses (WGCNA today).
    - `requires_subject_timepoint` -- `TRUE` if this method needs
-     `dataset.subject_id_col`/`timepoint_col`/`sample_metadata_path`
-     (CP/Tucker today); checked generically by `R/lib/metadata.R` off this
-     flag rather than a hardcoded method-name list.
+     `dataset.subject_id_col`/`timepoint_col`/`sample_metadata_path`;
+     checked generically by `R/lib/metadata.R` off this flag rather than a
+     hardcoded method-name list. No current method sets it (CP/Tucker did,
+     before their removal -- see "CP/Tucker (removed)" above), but the
+     generic check is left in place for a future method that reuses it.
 
    Any existing `R/methods/*.R` is a template -- `R/methods/pca.R` for the
    simplest case, `R/methods/cogaps.R` for nested sub-blocks,
-   `R/methods/wgcna.R` for `network`,
-   `R/methods/cp.R`/`R/methods/tucker.R` for `requires_subject_timepoint`.
+   `R/methods/wgcna.R` for `network`.
 3. That's it -- run `R/create_slurm_bundle.R` (or restart your R session
    first, so the new file gets sourced) and the method shows up. If the
    registry variable is missing or misnamed, or a required field is
@@ -440,8 +524,8 @@ Semantics (fully decoupled from the app; DB path is always a parameter):
 - **Additive across job families**: families are discovered as the
   subdirectories of `<results_dir>` containing `results_*.RDS`; families
   already in the DB are skipped with a message. So: ingest now without
-  `cp_grid/`, drop it into the results dir when its jobs finish, re-run
-  the same command -- only `cp_grid` gets added.
+  `ica_grid/`, drop it into the results dir when its jobs finish, re-run
+  the same command -- only `ica_grid` gets added.
 - **Overwrite is explicit and whole-family**: `--overwrite` (bare = every
   family present in the results dir) or `--overwrite nmf_grid,cogaps_grid`
   deletes and re-ingests those families -- plain replacement, never
@@ -453,19 +537,51 @@ Semantics (fully decoupled from the app; DB path is always a parameter):
 
 What gets computed at ingest (see `R/lib/ingest/`):
 
-- **Factorization methods** (PCA/NMF/CoGAPS/sPCA/CP/Tucker): loading
-  matrices saved as artifacts under
-  `<db_dir>/stability_artifacts/<dataset_id>/`; cosine, Pearson, and
-  Spearman similarity for EVERY factor pair across EVERY fit pair of a
-  method (all rank pairs x all seed pairs, where applicable), with
-  Hungarian 1-to-1 matching (`clue::solve_LSAP` on the cosine matrix);
-  per-factor stability summaries (median matched same-rank similarity per
-  metric). Incremental: adding a family later computes new x (new +
-  existing) pairs only. **CP/Tucker caveat**: `factor_pairs.same_rank` is
-  keyed off the single `fits.rank` column, which Tucker never sets (it has
-  `rank_genes`/`rank_subjects`/`rank_time` instead) -- pairs are still
-  computed (no crash), just never flagged `same_rank` against each other;
-  this framework doesn't yet have a "same 3-tuple of ranks" concept.
+- **Factorization methods** (PCA/NMF/CoGAPS/sPCA/ICA): loading matrices
+  saved as artifacts under `<db_dir>/stability_artifacts/<dataset_id>/`;
+  cosine, Pearson, and Spearman similarity for EVERY factor pair across
+  EVERY fit pair of a method (all rank pairs x all seed pairs, where
+  applicable), with Hungarian 1-to-1 matching (`clue::solve_LSAP`,
+  `R/lib/ingest/similarity.R`). PCA/sPCA/ICA components are unique only up
+  to SIGN (unlike NMF/CoGAPS's non-negative factors), so their matching is
+  costed on `|cosine|` (`hungarian_match_abs()`, `sign_ambiguous = TRUE`
+  in `R/lib/ingest/pairs.R`) -- otherwise a component that flips sign
+  between two fits (expected, not a bug) gets matched wrong or scored as
+  strongly dissimilar even when it's the same source; per-factor stability
+  summaries (median matched same-rank similarity per metric). Incremental:
+  adding a family later computes new x (new + existing) pairs only.
+- **ICA -- ICASSO + kurtosis**: two further ICA-specific diagnostics, both
+  ICA-only (not run for any other method):
+  - **ICASSO** (Himberg, Hyvärinen & Esposito 2004, "Validating the
+    independent components of neuroimaging time series via clustering and
+    visualization," NeuroImage 22(3):1214-1222): the standard rigor-check
+    for ICA rank/stability. `methods.ica.bootstrap` (default
+    `c(FALSE, TRUE)`, see the config reference above) crosses a second
+    randomization axis onto the usual seed sweep -- a `bootstrap = TRUE`
+    fit resamples sample columns with replacement before fitting (its
+    `scores` is NULL as a result: resampled columns duplicate sample ids,
+    so there's no real per-sample identity to report, and its `mse` is
+    reconstruction error against the resampled data, excluded from every
+    reconstruction-quality query, see `fits.bootstrap`'s comment in
+    `R/lib/ingest/db.R`). `R/lib/ingest/icasso.R::compute_icasso_clusters()`
+    pools EVERY ok fit (seed-sweep and bootstrap together) at one
+    `n.comp`, clusters every recovered component by `|cosine|` similarity
+    (average-linkage `hclust`, cut to `k = n.comp`), and scores each
+    cluster's robustness via `Iq = mean intra-cluster similarity - mean
+    similarity to everything outside the cluster` (0.7 is the literature's
+    usual "trustworthy" threshold) -- stored in `icasso_clusters`/
+    `icasso_membership`/`icasso_dendrograms`, surfaced in the app as ICA's
+    "ICASSO cluster quality (Iq) vs n.comp" (Level 1) and "ICASSO
+    clustering" (Level 2, the cross-run dendrogram) tabs.
+  - **Per-component kurtosis** (Lee & Batzoglou 2003): excess kurtosis of
+    each component's sample scores -- the actual non-Gaussianity
+    fastICA's own objective maximizes, so a positive ("super-Gaussian")
+    value is the expected signature of a real biological-process
+    component, not noise. Computed at the source in
+    `R/methods/ica.R::run_ica_seed_sweep_job()` (available for bootstrap
+    fits too, which have no `scores_file` for a post-hoc computation to
+    use) and written to `ica_component_kurtosis` at ingest time; surfaced
+    in the app as ICA Level 2's "Component non-Gaussianity" tab.
 - **WGCNA**: gene -> module tables; ARI between module assignments for
   every power pair (`mclust::adjustedRandIndex`); module x module Jaccard
   with Hungarian matching; `WGCNA::pickSoftThreshold()`'s scale-free-
@@ -477,12 +593,6 @@ What gets computed at ingest (see `R/lib/ingest/`):
   for every module of every WGCNA fit (`wgcna_ora_grid`, `R/ingest_jobs/
   wgcna_ora_job.R` -- no GSEA equivalent, modules have no continuous
   ranking to run preranked GSEA against).
-- **CP/Tucker only**: a third, time-mode loading matrix (rows = timepoint
-  levels) saved alongside the usual feature-loadings/sample-scores
-  artifacts -- `fits.time_loadings_file`. Their "scores" artifact is
-  SUBJECT-mode, not sample-mode (one row per subject, not per sample) --
-  the app's sample-metadata-association machinery doesn't yet reconcile
-  this distinction (deferred, see below).
 
 Artifact paths are stored relative to the DB file's directory, so the DB
 and its `stability_artifacts/` folder move together as a unit.
@@ -555,6 +665,3 @@ each side.
   `family` column accommodates it later).
 - Multi-dataset comparison views in the app (schema-ready via `dataset_id`).
 - Fetching parquet files directly from the HF Hub (local paths only for now).
-- CP/Tucker container images (`slurm.{spca,cp,tucker}.container` is
-  `"TODO"` in every dataset config) -- `elasticnet`/`rTensor` are only
-  confirmed available in local/interactive R for now.

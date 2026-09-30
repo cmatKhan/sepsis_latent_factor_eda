@@ -36,6 +36,7 @@
 
 library(here)
 source(here("R/lib/ingest/db.R"))
+if (!exists("%||%")) `%||%` <- function(a, b) if (is.null(a)) b else a
 
 args <- commandArgs(trailingOnly = TRUE)
 positional <- args[!grepl("^--", args)]
@@ -83,6 +84,46 @@ backfill_spca <- function(con, db_path, force) {
   invisible(nrow(rows))
 }
 
+#' Per-component non-Gaussianity (kurtosis) for every ICA fit, computed
+#' directly from its already-stored scores_file (samples x n.comp) -- no
+#' re-fit, no cluster needed, unlike ica_diag_file's W/K/prewhiten_sdev
+#' (fastICA's own unmixing/whitening matrices, which genuinely cannot be
+#' recovered post hoc from scores/loadings alone -- those need a real
+#' ica_grid re-fit; see R/lib/ingest/db.R's ica_component_kurtosis
+#' comment). This is the core validity signature the ICA-for-expression
+#' literature relies on: real biological-process components are expected
+#' to be highly non-Gaussian/"super-Gaussian" (positive excess kurtosis),
+#' unlike Gaussian noise (Lee & Batzoglou 2003).
+#'
+#' `force`: only fits with zero existing ica_component_kurtosis rows are
+#' computed unless TRUE (additive across fits, like wgcna_kme -- a newly
+#' ingested fit just adds its own rows on the next run).
+backfill_ica_kurtosis <- function(con, db_path, force) {
+  where <- if (force) "1=1" else "fit_id NOT IN (SELECT DISTINCT fit_id FROM ica_component_kurtosis)"
+  rows <- DBI::dbGetQuery(con, sprintf(
+    "SELECT fit_id, dataset_id, scores_file FROM fits
+     WHERE method = 'ica' AND status = 'ok' AND scores_file IS NOT NULL AND %s", where))
+  message("ica kurtosis: backfilling ", nrow(rows), " fits")
+  for (i in seq_len(nrow(rows))) {
+    fit_id <- rows$fit_id[i]
+    S <- as.matrix(readRDS(resolve_artifact(rows$scores_file[i], db_path)))
+    mu <- colMeans(S)
+    centered <- sweep(S, 2, mu, "-")
+    sigma <- sqrt(colMeans(centered^2))
+    ok <- sigma > 0
+    kurt <- rep(NA_real_, ncol(S))
+    kurt[ok] <- colMeans(centered[, ok, drop = FALSE]^4) / sigma[ok]^4
+
+    if (force) DBI::dbExecute(con, "DELETE FROM ica_component_kurtosis WHERE fit_id = ?", params = list(fit_id))
+    DBI::dbWriteTable(con, "ica_component_kurtosis", data.frame(
+      fit_id = fit_id, component = colnames(S) %||% paste0("Component_", seq_len(ncol(S))),
+      kurtosis = kurt, excess_kurtosis = kurt - 3, stringsAsFactors = FALSE
+    ), append = TRUE)
+    if (i %% 200 == 0) message("  ", i, "/", nrow(rows))
+  }
+  invisible(nrow(rows))
+}
+
 #' Recompute fits.mse for every sPCA fit from its already-stored
 #' spca_diag_file$pev vector -- see this file's header for why the
 #' original value (`1 - pev[length(pev)]`) was wrong. Skips fits whose
@@ -111,8 +152,10 @@ on.exit(if (!committed) DBI::dbExecute(con, "ROLLBACK"))
 n_cogaps  <- backfill_cogaps(con, db_path, force)
 n_spca    <- backfill_spca(con, db_path, force)
 n_spca_mse <- backfill_spca_mse(con, db_path)
+n_ica_kurtosis <- backfill_ica_kurtosis(con, db_path, force)
 DBI::dbExecute(con, "COMMIT")
 committed <- TRUE
 
-message("done: ", n_cogaps, " cogaps + ", n_spca, " spca (sparsity) + ", n_spca_mse, " spca (mse fix) fits backfilled")
+message("done: ", n_cogaps, " cogaps + ", n_spca, " spca (sparsity) + ", n_spca_mse, " spca (mse fix) + ",
+        n_ica_kurtosis, " ica (kurtosis) fits backfilled")
 DBI::dbDisconnect(con)

@@ -31,6 +31,13 @@
 # see R/lib/ingest/ingest_dataset.R::compute_wgcna_sft(). No-ops for
 # datasets with no methods.network.wgcna config.
 #
+# `--recompute-matrix-diag` forces the preprocessing sanity-check
+# diagnostics (per-gene skew/kurtosis, value range, matrix conditioning)
+# to recompute for the listed dataset ids (bare = all) even if already
+# present -- see R/lib/ingest/ingest_dataset.R::compute_matrix_diagnostics().
+# Always attempted (like --recompute-sft), just a no-op without this flag
+# if a dataset already has a row.
+#
 # `datasets.txt` is the SAME file used by --stage core: one results-dir
 # path per line (e.g. "/scratch/.../GSE110487_T2_results") -- only its
 # basename (with a trailing "_results" stripped) is used here to derive
@@ -48,7 +55,9 @@ option_list <- list(
   make_option("--recache-matrix", type = "character", default = NULL,
               help = "bare flag = recache every dataset's matrix; or a comma-separated list of dataset ids"),
   make_option("--recompute-sft", type = "character", default = NULL,
-              help = "bare flag = recompute SFT fit for every dataset; or a comma-separated list of dataset ids")
+              help = "bare flag = recompute SFT fit for every dataset; or a comma-separated list of dataset ids"),
+  make_option("--recompute-matrix-diag", type = "character", default = NULL,
+              help = "bare flag = recompute matrix diagnostics for every dataset; or a comma-separated list of dataset ids")
 )
 # optparse itself has no concept of a bare flag for a `type = "character"`
 # option -- `--recache-matrix` with no following value errors with "long
@@ -70,6 +79,7 @@ inject_bare_flag_value <- function(args, flag) {
 raw_args <- commandArgs(trailingOnly = TRUE)
 raw_args <- inject_bare_flag_value(raw_args, "--recache-matrix")
 raw_args <- inject_bare_flag_value(raw_args, "--recompute-sft")
+raw_args <- inject_bare_flag_value(raw_args, "--recompute-matrix-diag")
 opt <- parse_args(OptionParser(option_list = option_list), args = raw_args)
 
 result_dirs <- readLines(opt$datasets) |> trimws()
@@ -93,11 +103,13 @@ parse_flag_list <- function(x) {
 }
 recache_matrix <- parse_flag_list(opt$`recache-matrix`)
 recompute_sft <- parse_flag_list(opt$`recompute-sft`)
+recompute_matrix_diag <- parse_flag_list(opt$`recompute-matrix-diag`)
 
 con <- open_stability_db(opt$db)
 for (i in seq_len(nrow(targets))) {
   force_i <- isTRUE(recache_matrix) || (is.character(recache_matrix) && targets$dataset_id[i] %in% recache_matrix)
   sft_force_i <- isTRUE(recompute_sft) || (is.character(recompute_sft) && targets$dataset_id[i] %in% recompute_sft)
+  matrix_diag_force_i <- isTRUE(recompute_matrix_diag) || (is.character(recompute_matrix_diag) && targets$dataset_id[i] %in% recompute_matrix_diag)
   ds_yaml <- yaml::read_yaml(targets$config_path[i])
   cache_dataset_matrix(con, targets$dataset_id[i], ds_yaml, opt$db, force = force_i)
   # Also cache sample/feature metadata -- needed so
@@ -110,9 +122,13 @@ for (i in seq_len(nrow(targets))) {
   # WGCNA (available here, wherever this script runs) -- see that
   # function's header.
   compute_wgcna_sft(con, targets$dataset_id[i], ds_yaml, opt$db, force = sft_force_i)
+  # compute_matrix_diagnostics() only needs the matrix just (re)cached
+  # above -- see that function's header. Runs for every method's shared
+  # matrix, not just WGCNA's.
+  compute_matrix_diagnostics(con, targets$dataset_id[i], ds_yaml, opt$db, force = matrix_diag_force_i)
 }
 DBI::dbDisconnect(con)
 
-message("\nDone -- cached matrices + sample/feature metadata + WGCNA scale-free-topology fits for ",
+message("\nDone -- cached matrices + sample/feature metadata + WGCNA scale-free-topology fits + matrix diagnostics for ",
         nrow(targets), " dataset(s) into ", dirname(opt$db), "/stability_artifacts/ and recorded in ", opt$db)
 message("Sync both of those to the cluster before running create_ingest_slurm_bundle.R there.")

@@ -207,6 +207,90 @@ compute_wgcna_sft <- function(con, dataset_id, dataset_yaml, db_path, force = FA
   invisible(NULL)
 }
 
+#' Preprocessing sanity-check diagnostics for the shared cached matrix
+#' (datasets.matrix_file) -- dataset-level, not tied to any one method/
+#' fit, same rationale as compute_wgcna_sft() above. Motivated directly
+#' by real methodological questions around applying ICA/PCA to mixed
+#' RNA-seq(VST)/microarray(log2) data with heterogeneous per-gene
+#' distributions (see R/methods/ica.R's header and the ICA literature it
+#' cites): this doesn't decide whether a dataset's preprocessing is
+#' "good enough" -- it just makes the numbers needed to judge that
+#' visible and comparable across datasets, once, cheaply.
+#'
+#' - val_min/max/mean/sd: a tripwire for a silent unit-scale mistake
+#'   (e.g. a "log2 microarray" dataset that's actually linear-scale
+#'   would show up immediately as an outlier here).
+#' - skew_p50/p95, kurtosis_p50/p95: quantiles of PER-GENE skewness/
+#'   kurtosis across the cached matrix (raw, uncentered-convention
+#'   kurtosis -- 3 for a Gaussian, matching the ICA literature's own
+#'   convention so this is directly comparable to
+#'   ica_component_kurtosis below).
+#' - min/max_singular_value, condition_number, max_sample_cor:
+#'   near-singularity / near-duplicate-sample check, from one economy
+#'   SVD of the (samples x genes) matrix and the sample x sample
+#'   correlation matrix -- Lee & Batzoglou (2003) explicitly removed an
+#'   experiment that made their input matrix nearly singular, since
+#'   that destabilizes ICA algorithms; nothing in this pipeline checked
+#'   for that before.
+#'
+#' `force = TRUE` always recomputes; otherwise no-ops if this dataset
+#' already has a row (replace-on-recompute like matrix_file/wgcna_sft).
+compute_matrix_diagnostics <- function(con, dataset_id, dataset_yaml, db_path, force = FALSE) {
+  n_existing <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM matrix_diagnostics WHERE dataset_id = ?",
+                                 params = list(dataset_id))$n
+  if (!force && n_existing > 0) return(invisible(NULL))
+
+  mat_row <- DBI::dbGetQuery(con, "SELECT matrix_file FROM datasets WHERE dataset_id = ?",
+                              params = list(dataset_id))
+  if (nrow(mat_row) == 0 || is.na(mat_row$matrix_file)) {
+    message("  no cached matrix for ", dataset_id, " -- run cache_dataset_matrix() first -- skipping matrix diagnostics")
+    return(invisible(NULL))
+  }
+  mat <- as.matrix(readRDS(resolve_artifact(mat_row$matrix_file, db_path)))
+
+  message("  computing matrix diagnostics for ", dataset_id, " (", nrow(mat), " genes x ", ncol(mat), " samples)...")
+
+  mu <- rowMeans(mat)
+  centered <- mat - mu   # matrix - vector recycles down COLUMNS = per-row (per-gene) centering here
+  sigma <- sqrt(rowMeans(centered^2))
+  ok <- sigma > 0
+  skew <- rep(NA_real_, nrow(mat))
+  kurt <- rep(NA_real_, nrow(mat))
+  skew[ok] <- rowMeans(centered[ok, , drop = FALSE]^3) / sigma[ok]^3
+  kurt[ok] <- rowMeans(centered[ok, , drop = FALSE]^4) / sigma[ok]^4
+
+  # Mean-centering always removes exactly one degree of freedom, so the
+  # centered matrix's smallest singular value is ~0 (floating-point
+  # noise, e.g. 1e-13) BY CONSTRUCTION for every dataset regardless of
+  # real conditioning -- confirmed directly on real ANEMONES/ROSE data
+  # (condition numbers of 1e14-1e15, meaningless). Drop singular values
+  # below a relative-to-the-largest floor before computing min/condition,
+  # so what's left reflects genuine near-duplicate-sample structure (a
+  # real such case would still be many orders of magnitude above pure
+  # floating-point noise) rather than this trivial centering artifact.
+  sv <- svd(scale(t(mat), center = TRUE, scale = FALSE), nu = 0, nv = 0)$d
+  sv <- sv[sv > max(sv) * 1e-8]
+
+  sample_cor <- cor(mat)
+  diag(sample_cor) <- NA_real_
+
+  DBI::dbExecute(con, "DELETE FROM matrix_diagnostics WHERE dataset_id = ?", params = list(dataset_id))
+  DBI::dbWriteTable(con, "matrix_diagnostics", data.frame(
+    dataset_id = dataset_id, n_genes = nrow(mat), n_samples = ncol(mat),
+    val_min = min(mat), val_max = max(mat), val_mean = mean(mat), val_sd = sd(mat),
+    skew_p50 = unname(quantile(skew, 0.5, na.rm = TRUE)),
+    skew_p95 = unname(quantile(skew, 0.95, na.rm = TRUE)),
+    kurtosis_p50 = unname(quantile(kurt, 0.5, na.rm = TRUE)),
+    kurtosis_p95 = unname(quantile(kurt, 0.95, na.rm = TRUE)),
+    min_singular_value = min(sv), max_singular_value = max(sv),
+    condition_number = max(sv) / min(sv),
+    max_sample_cor = max(sample_cor, na.rm = TRUE),
+    computed_at = as.character(Sys.time()),
+    stringsAsFactors = FALSE
+  ), append = TRUE)
+  invisible(NULL)
+}
+
 #' Compute WGCNA intramodular connectivity / module membership (kME) for
 #' every already-ingested WGCNA fit of this dataset that has module
 #' eigengenes (fits.scores_file -- see extract.R's wgcna branch; older
@@ -487,13 +571,13 @@ compute_ingest_bundle <- function(config_path, results_dir, db_path,
 
   bundle <- list(dataset_id = dataset_id,
                  description = dataset_yaml$dataset$description %||% NA_character_,
-                 sample_metadata = dataset_yaml$dataset[c("sample_metadata_path", "sample_id_col")],
+                 sample_metadata = dataset_yaml$dataset[c("sample_metadata_path", "sample_id_col", "subject_id_col")],
                  feature_metadata = list(path = dataset_yaml$dataset$feature_metadata_path,
                                          id_col = dataset_yaml$dataset$feature_id_col,
                                          ensembl_col = dataset_yaml$dataset$ensembl_col %||% "ensembl",
                                          symbol_col = dataset_yaml$dataset$symbol_col %||% NA_character_),
                  families = list(), report = list(),
-                 fits = NULL, factors = NULL, wgcna_modules = NULL,
+                 fits = NULL, factors = NULL, wgcna_modules = NULL, ica_kurtosis = NULL,
                  factor_pairs = NULL, wgcna_fit_pairs = NULL, wgcna_module_pairs = NULL,
                  factor_stability_updates = NULL,
                  fit_redundancy = NULL, pattern_markers = NULL, redundancy_deletes = integer(0))
@@ -526,6 +610,7 @@ compute_ingest_bundle <- function(config_path, results_dir, db_path,
 
   local_counter <- 0L
   fits_rows <- list(); factors_rows <- list(); wgcna_modules_rows <- list()
+  ica_kurtosis_rows <- list()
   new_local_ids_by_method <- list()
 
   for (k in seq_along(jobnames)) {
@@ -608,6 +693,12 @@ compute_ingest_bundle <- function(config_path, results_dir, db_path,
       # columns / extract_result()'s `diag`) -- one small named-list
       # artifact per method, saved into the ONE column that method uses;
       # every other method's *_diag_file column stays NULL for this row.
+      # cp/tucker_diag_file are always NA from here on (extract_result()
+      # never returns ext$method == "cp"/"tucker" any more, those methods
+      # having been removed 2026-09-29 -- see R/README.md's "CP/Tucker
+      # (removed)" section); the columns/entries below are kept only so
+      # every INSERT still lists every column the `fits` table has,
+      # historical rows included.
       diag_cols <- c(cogaps = "cogaps_diag_file", pca = "pca_diag_file",
                       spca = "spca_diag_file", ica = "ica_diag_file",
                       nmf = "nmf_diag_file", cp = "cp_diag_file", tucker = "tucker_diag_file")
@@ -628,6 +719,7 @@ compute_ingest_bundle <- function(config_path, results_dir, db_path,
         jobname = jobname, rank = fit$rank, seed = fit$seed, alpha = fit$alpha, power = fit$power,
         rank_genes = fit$rank_genes, rank_subjects = fit$rank_subjects, rank_time = fit$rank_time,
         mse = fit$mse, n_factors = fit$n_factors, status = fit$status, converged = fit$converged,
+        bootstrap = fit$bootstrap,
         loadings_file = loadings_file, scores_file = scores_file, time_loadings_file = time_loadings_file,
         raw_result_file = raw_result_file,
         cogaps_diag_file = diag_file_val$cogaps_diag_file, pca_diag_file = diag_file_val$pca_diag_file,
@@ -635,6 +727,21 @@ compute_ingest_bundle <- function(config_path, results_dir, db_path,
         nmf_diag_file = diag_file_val$nmf_diag_file, cp_diag_file = diag_file_val$cp_diag_file,
         tucker_diag_file = diag_file_val$tucker_diag_file,
         stringsAsFactors = FALSE)
+
+      # ICA-only: per-component non-Gaussianity, written directly into
+      # ica_component_kurtosis rather than a saved diag artifact (see
+      # R/lib/ingest/extract.R's ica branch) -- the forward-going source
+      # of truth, available for bootstrap fits too (which have no
+      # scores_file for R/backfill_diagnostics.R::backfill_ica_kurtosis()'s
+      # older post-hoc path to use).
+      if (ext$method == "ica" && fit$status == "ok" && !is.null(ext$diag$kurtosis)) {
+        kurt <- ext$diag$kurtosis
+        comp_names <- if (!is.null(ext$loadings)) colnames(ext$loadings) else NULL
+        if (is.null(comp_names)) comp_names <- paste0("Component_", seq_along(kurt))
+        ica_kurtosis_rows[[length(ica_kurtosis_rows) + 1]] <- data.frame(
+          fit_ref = -local_id, component = comp_names, kurtosis = kurt,
+          excess_kurtosis = kurt - 3, stringsAsFactors = FALSE)
+      }
 
       if (fit$status == "ok") {
         n_ok <- n_ok + 1L
@@ -667,6 +774,7 @@ compute_ingest_bundle <- function(config_path, results_dir, db_path,
   bundle$fits <- if (length(fits_rows)) do.call(rbind, fits_rows) else NULL
   bundle$factors <- if (length(factors_rows)) do.call(rbind, factors_rows) else NULL
   bundle$wgcna_modules <- if (length(wgcna_modules_rows)) do.call(rbind, wgcna_modules_rows) else NULL
+  bundle$ica_kurtosis <- if (length(ica_kurtosis_rows)) do.call(rbind, ica_kurtosis_rows) else NULL
 
   resolve_local <- function(rel_paths) vapply(rel_paths, resolve_artifact, character(1), db_path = db_path)
 
@@ -707,7 +815,8 @@ compute_ingest_bundle <- function(config_path, results_dir, db_path,
       } else NULL
 
       universe <- rbind(existing_u, new_u)
-      rows <- compute_factor_pairs_from_universe(universe, new_ids)
+      rows <- compute_factor_pairs_from_universe(universe, new_ids,
+                                                  sign_ambiguous = method %in% SIGN_AMBIGUOUS_METHODS)
       if (!is.null(rows)) {
         message("  [pairs:", method, "] computed ", nrow(rows), " factor-pair rows for ", length(new_ids), " new fits")
         bundle$factor_pairs <- rbind(bundle$factor_pairs, rows)
@@ -729,10 +838,10 @@ compute_ingest_bundle <- function(config_path, results_dir, db_path,
 
   for (method in c("nmf", "cogaps", "spca", "ica")) {
     existing_all <- DBI::dbGetQuery(con,
-      "SELECT fit_id AS id, method, family, rank, alpha, mse, status FROM fits WHERE dataset_id = ? AND method = ?",
+      "SELECT fit_id AS id, method, family, rank, alpha, mse, status, bootstrap FROM fits WHERE dataset_id = ? AND method = ?",
       params = list(dataset_id, method))
     new_all <- if (!is.null(bundle$fits)) bundle$fits[bundle$fits$method == method,
-      c("local_id", "method", "family", "rank", "alpha", "mse", "status"), drop = FALSE] else NULL
+      c("local_id", "method", "family", "rank", "alpha", "mse", "status", "bootstrap"), drop = FALSE] else NULL
     if (!is.null(new_all) && nrow(new_all)) {
       new_all$id <- -new_all$local_id
       new_all$local_id <- NULL
@@ -804,7 +913,8 @@ write_ingest_bundle <- function(con, db_path, bundle) {
 
   ensure_dataset(con, dataset_id, bundle$description)
   register_metadata_source(con, dataset_id, "sample", bundle$sample_metadata$sample_metadata_path,
-                            bundle$sample_metadata$sample_id_col)
+                            bundle$sample_metadata$sample_id_col,
+                            subject_id_col = bundle$sample_metadata$subject_id_col %||% NA_character_)
   register_metadata_source(con, dataset_id, "feature", bundle$feature_metadata$path, bundle$feature_metadata$id_col,
                             ensembl_col = bundle$feature_metadata$ensembl_col, symbol_col = bundle$feature_metadata$symbol_col)
 
@@ -823,12 +933,12 @@ write_ingest_bundle <- function(con, db_path, bundle) {
       DBI::dbExecute(con,
         "INSERT INTO fits (dataset_id, method, family, jobname, rank, seed, alpha, power,
                            rank_genes, rank_subjects, rank_time,
-                           mse, n_factors, status, converged, loadings_file, scores_file, time_loadings_file, raw_result_file,
+                           mse, n_factors, status, converged, bootstrap, loadings_file, scores_file, time_loadings_file, raw_result_file,
                            cogaps_diag_file, pca_diag_file, spca_diag_file, ica_diag_file, nmf_diag_file, cp_diag_file, tucker_diag_file)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params = list(r$dataset_id, r$method, r$family, r$jobname, r$rank, r$seed, r$alpha, r$power,
                       r$rank_genes, r$rank_subjects, r$rank_time, r$mse, r$n_factors, r$status, r$converged,
-                      r$loadings_file, r$scores_file, r$time_loadings_file, r$raw_result_file,
+                      r$bootstrap, r$loadings_file, r$scores_file, r$time_loadings_file, r$raw_result_file,
                       r$cogaps_diag_file, r$pca_diag_file, r$spca_diag_file, r$ica_diag_file,
                       r$nmf_diag_file, r$cp_diag_file, r$tucker_diag_file))
       fit_id <- DBI::dbGetQuery(con, "SELECT last_insert_rowid() AS id")$id
@@ -849,6 +959,11 @@ write_ingest_bundle <- function(con, db_path, bundle) {
     df <- bundle$wgcna_modules
     df$fit_id <- remap(df$fit_ref); df$fit_ref <- NULL
     DBI::dbWriteTable(con, "wgcna_modules", df, append = TRUE)
+  }
+  if (!is.null(bundle$ica_kurtosis)) {
+    df <- bundle$ica_kurtosis
+    df$fit_id <- remap(df$fit_ref); df$fit_ref <- NULL
+    DBI::dbWriteTable(con, "ica_component_kurtosis", df, append = TRUE)
   }
   if (!is.null(bundle$factor_pairs)) {
     df <- bundle$factor_pairs
@@ -895,6 +1010,24 @@ write_ingest_bundle <- function(con, db_path, bundle) {
   for (jobname in names(bundle$families)) {
     fam <- bundle$families[[jobname]]
     record_ingest(con, dataset_id, jobname, fam$family, fam$method, n_results = fam$n_results, results_dir = fam$results_dir)
+  }
+
+  # ICASSO (R/lib/ingest/icasso.R): runs AFTER every fits/pairs write above
+  # so it can query real fit_ids/loadings_file paths (this bundle's own
+  # negative -local_id fits aren't DB-queryable until the INSERT loop near
+  # the top of this function has run) -- SQLite sees this transaction's
+  # own uncommitted writes, so newly-ingested fits are already visible
+  # here. Full recompute per distinct rank this bundle touched with an ok
+  # ICA fit (cheap: only ~5 ranks per dataset); a no-op scan for every
+  # other method's ingest.
+  ica_new <- if (!is.null(bundle$fits)) {
+    bundle$fits[bundle$fits$method == "ica" & bundle$fits$status == "ok", , drop = FALSE]
+  } else NULL
+  if (!is.null(ica_new) && nrow(ica_new) > 0) {
+    for (rk in sort(unique(ica_new$rank))) {
+      message("  [icasso] recomputing clusters for rank ", rk)
+      compute_icasso_clusters(con, db_path, dataset_id, rk)
+    }
   }
 
   DBI::dbExecute(con, "COMMIT")

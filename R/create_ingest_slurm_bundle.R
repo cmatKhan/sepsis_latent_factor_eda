@@ -340,15 +340,14 @@ if (opt$stage == "core") {
   }
 
   # ---- fgsea (+ local ORA/GSEA replacing gprofiler_grid): representative
-  # fits only. Includes cp/tucker (added when the app's live-compute
-  # enrichment path was retired -- they have the same loadings-based
-  # shape as every other method here and representative_fit_ids() already
-  # has a working fallback for them: "every ok fit is representative",
-  # same idea as sPCA before it got its own per-K collapse, appropriate
-  # since cp/tucker grids are small). WGCNA is NOT here -- no loadings to
-  # rank, see R/ingest_jobs/wgcna_ora_job.R's separate job family below. ----
+  # fits only. (CP/Tucker used to be included here too, back when the
+  # app's live-compute enrichment path was retired -- they had the same
+  # loadings-based shape as every other method here. Removed 2026-09-29,
+  # see R/README.md's "CP/Tucker (removed)" section.) WGCNA is NOT here --
+  # no loadings to rank, see R/ingest_jobs/wgcna_ora_job.R's separate job
+  # family below. ----
   rep_rows <- do.call(rbind, lapply(all_dataset_ids, function(ds) {
-    do.call(rbind, lapply(c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker"), function(m) {
+    do.call(rbind, lapply(c("pca", "nmf", "cogaps", "spca", "ica"), function(m) {
       fids <- representative_fit_ids(con, ds, m)
       if (length(fids) == 0) return(NULL)
       f <- DBI::dbGetQuery(con, sprintf("SELECT fit_id, loadings_file FROM fits WHERE fit_id IN (%s)",

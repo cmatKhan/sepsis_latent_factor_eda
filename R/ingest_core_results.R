@@ -36,6 +36,7 @@ source(here("R/lib/ingest/db.R"))
 source(here("R/lib/ingest/similarity.R"))
 source(here("R/lib/ingest/extract.R"))
 source(here("R/lib/ingest/pairs.R"))
+source(here("R/lib/ingest/icasso.R"))
 source(here("R/lib/ingest/redundancy.R"))
 source(here("R/lib/ingest/ingest_dataset.R"))
 

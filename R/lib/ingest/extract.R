@@ -13,10 +13,16 @@
 #                       ingested before that change lack it, so eigengene
 #                       scores are simply NULL for those fits (see below)
 #   spca_grid:     list(rank, mse, loadings, scores)
-#   ica_grid:      list(rank, seed, mse, loadings, scores)
-#   cp_grid:       list(rank, mse, converged, loadings, scores, time_loadings)
-#   tucker_grid:   list(rank_genes, rank_subjects, rank_time, mse, converged,
-#                       loadings, scores, time_loadings, core)
+#   ica_grid:      list(rank, seed, bootstrap, mse, loadings, scores, kurtosis)
+#                       -- `scores` is NULL for bootstrap = 1 fits (see
+#                       R/methods/ica.R's header)
+#
+# CP/Tucker (tensor factor models) were evaluated and removed 2026-09-29 --
+# see R/README.md's "CP/Tucker (removed)" section. Their historical fits
+# remain in the DB (rank_genes/rank_subjects/rank_time/converged/
+# time_loadings_file columns and the `fit` list's defaults for them below
+# still exist so those old rows keep reading correctly), but no method now
+# populates them -- they're always NA for every fit extracted from here on.
 #
 # params.RDS column shapes (post config-driven-method-registry refactor --
 # see R/create_slurm_bundle.R / R/methods/*.R). These are the AUTHORITATIVE
@@ -28,23 +34,19 @@
 #           R/methods/cogaps.R's three-call-site sub-block design
 #   wgcna:  power                             (flat; unchanged)
 #   spca:   K, para                           (flat; `para` -> fit$alpha, see below)
-#   ica:    n.comp, alpha, seed               (flat; fastICA's own `alpha`, unrelated to CoGAPS/sPCA's use of the same fits.alpha column)
-#   cp:     num_components                    (flat)
-#   tucker: rank_genes, rank_subjects, rank_time  (flat, three separate columns)
+#   ica:    n.comp, alpha, seed, bootstrap    (flat; fastICA's own `alpha`, unrelated to CoGAPS/sPCA's use of the same fits.alpha column. `bootstrap` added 2026-09-29 for ICASSO -- see R/methods/ica.R's header)
 #
 # In addition to the feature-loadings matrix (rows = features), pca/nmf/
-# cogaps/wgcna/spca/cp/tucker results also yield a sample-level "scores"
-# matrix (rows = samples for pca/nmf/cogaps/spca, module number for wgcna,
-# or SUBJECTS -- not samples -- for cp/tucker; see R/methods/cp.R)
-# used for the sample/metadata drill-down views. cp/tucker additionally
-# yield a third, time-mode matrix (rows = timepoint levels).
+# cogaps/wgcna/spca results also yield a sample-level "scores" matrix (rows
+# = samples for pca/nmf/cogaps/spca, module number for wgcna) used for the
+# sample/metadata drill-down views.
 
 #' jobname -> (method, family) mapping. Generalizes by suffix so new
 #' methods following the same naming convention need no change here.
 #' `PARAM_GRID_METHODS` are deterministic, parameter-only sweeps with no
 #' genuine cross-seed stability question (unlike pca/nmf/cogaps's
 #' "seed_sweep", which does) -- see each R/methods/<name>.R.
-PARAM_GRID_METHODS <- c("wgcna", "spca", "cp", "tucker")
+PARAM_GRID_METHODS <- c("wgcna", "spca")
 
 classify_jobname <- function(jobname) {
   method <- sub("_grid$", "", jobname)
@@ -63,7 +65,8 @@ extract_result <- function(jobname, result, params_row) {
   fit <- list(
     rank = NA_integer_, seed = NA_integer_, alpha = NA_real_, power = NA_integer_,
     rank_genes = NA_integer_, rank_subjects = NA_integer_, rank_time = NA_integer_,
-    mse = NA_real_, n_factors = NA_integer_, status = "ok", converged = NA_integer_
+    mse = NA_real_, n_factors = NA_integer_, status = "ok", converged = NA_integer_,
+    bootstrap = NA_integer_
   )
 
   # method-specific: params.RDS's column shape differs by method (see file
@@ -93,12 +96,7 @@ extract_result <- function(jobname, result, params_row) {
     if (!is.null(params_row$n.comp)) fit$rank  <- as.integer(params_row$n.comp)
     if (!is.null(params_row$seed))   fit$seed  <- suppressWarnings(as.integer(params_row$seed))
     if (!is.null(params_row$alpha))  fit$alpha <- as.numeric(params_row$alpha)
-  } else if (method == "cp") {
-    if (!is.null(params_row$num_components)) fit$rank <- as.integer(params_row$num_components)
-  } else if (method == "tucker") {
-    if (!is.null(params_row$rank_genes))    fit$rank_genes    <- as.integer(params_row$rank_genes)
-    if (!is.null(params_row$rank_subjects)) fit$rank_subjects <- as.integer(params_row$rank_subjects)
-    if (!is.null(params_row$rank_time))     fit$rank_time     <- as.integer(params_row$rank_time)
+    if (!is.null(params_row$bootstrap)) fit$bootstrap <- as.integer(as.logical(params_row$bootstrap))
   }
 
   loadings <- NULL
@@ -174,37 +172,20 @@ extract_result <- function(jobname, result, params_row) {
     }
   } else if (method == "ica") {
     loadings <- result$loadings
-    scores   <- result$scores
+    scores   <- result$scores   # NULL for bootstrap fits -- see R/methods/ica.R's header
     if (!is.null(result$W)) {
       # W/K: fastICA's own unmixing/whitening matrices -- W's
       # orthonormality is a cheap real convergence/quality check fastICA
       # doesn't self-report. prewhiten_sdev: the prewhitening PCA step's
       # full spectrum, the only way to verify how much variance that
       # dimensionality reduction actually retained (R/methods/ica.R's own
-      # comment).
-      diag <- list(W = result$W, K = result$K, prewhiten_sdev = result$prewhiten_sdev)
-    }
-  } else if (method %in% c("cp", "tucker")) {
-    fit$converged <- if (is.null(result$converged)) NA_integer_ else as.integer(isTRUE(result$converged))
-    if (isFALSE(result$converged) && is.null(result$loadings)) {
-      fit$status <- "failed"
-    } else {
-      loadings      <- result$loadings
-      scores        <- result$scores        # SUBJECT-mode, not sample-mode -- see file header
-      time_loadings <- result$time_loadings
-      if (method == "cp") {
-        # lambdas: per-component scale -- U's columns are unit-norm, so
-        # without this the fitted tensor can't be reconstructed and
-        # loadings have no comparable relative magnitude (R/methods/cp.R's
-        # own comment). all_resids: iteration-by-iteration residual-norm
-        # trace, rTensor's own recommended convergence check.
-        diag <- list(lambdas = result$lambdas, all_resids = result$all_resids)
-      } else {
-        # core: the one Tucker-specific object with no CP analogue --
-        # encodes cross-mode interactions via its non-diagonal structure.
-        # all_resids: same convergence-trace rationale as CP's own.
-        diag <- list(core = result$core, all_resids = result$all_resids)
-      }
+      # comment). kurtosis: per-component non-Gaussianity, computed at
+      # the source on fit$S (see R/methods/ica.R) -- written into the
+      # ica_component_kurtosis table by R/lib/ingest/ingest_dataset.R,
+      # not into a saved diag artifact file (unlike W/K/prewhiten_sdev,
+      # it's small and query-friendly as plain rows).
+      diag <- list(W = result$W, K = result$K, prewhiten_sdev = result$prewhiten_sdev,
+                   kurtosis = result$kurtosis)
     }
   } else {
     stop("no extractor for method: ", method)

@@ -15,14 +15,17 @@
 #' didn't set that path/id_col). `ensembl_col`/`symbol_col` (kind =
 #' "feature" only; NA otherwise) are NA for datasets ingested before those
 #' columns existed -- re-run --stage core (or R/ingest_results.R) for that
-#' dataset to populate them.
+#' dataset to populate them. `subject_id_col` (kind = "sample" only; NA
+#' otherwise) is NA for datasets with no dataset.subject_id_col configured
+#' (not CP/Tucker-eligible) or ingested before this column existed.
 metadata_source <- function(con, dataset_id, kind = c("sample", "feature")) {
   kind <- match.arg(kind)
   d <- DBI::dbGetQuery(con,
-    "SELECT path, id_col, ensembl_col, symbol_col FROM dataset_metadata_sources WHERE dataset_id = ? AND kind = ?",
+    "SELECT path, id_col, ensembl_col, symbol_col, subject_id_col FROM dataset_metadata_sources WHERE dataset_id = ? AND kind = ?",
     params = list(dataset_id, kind))
   if (nrow(d) == 0) return(NULL)
-  list(path = d$path[1], id_col = d$id_col[1], ensembl_col = d$ensembl_col[1], symbol_col = d$symbol_col[1])
+  list(path = d$path[1], id_col = d$id_col[1], ensembl_col = d$ensembl_col[1], symbol_col = d$symbol_col[1],
+       subject_id_col = d$subject_id_col[1])
 }
 
 #' Build (and cache for the life of this Shiny session) a dataset's
@@ -343,4 +346,71 @@ biplot_metadata_data <- function(scores_mat, meta_df, comp_x, comp_y, id_col = "
   }
 
   list(scores = scores_df, vectors = vectors, centroids = centroids)
+}
+
+#' Collapse per-sample metadata to one row per SUBJECT -- needed by the
+#' trajectory-across-time feature, which matches a subject across sibling
+#' per-timepoint datasets and so needs one row per subject (not per
+#' sample_id) to join against. Per-field, this means deciding whether it's
+#' genuinely subject-level (sex, disease, outcome -- constant across a
+#' subject's own samples) or sample/timepoint-level (a per-visit lab
+#' value, say -- no well-defined single value at subject granularity).
+#' Rather than guess an aggregation rule for the latter, this keeps ONLY
+#' fields that are constant within every subject (ignoring NAs) and drops
+#' the rest outright -- the same "never a guess" convention as
+#' build_display_map()'s header. Returns NULL if `subject_col` isn't a
+#' real column of `meta_df` (e.g. this dataset has no dataset.subject_id_col
+#' configured -- see metadata_source()'s header).
+subject_level_metadata <- function(meta_df, subject_col) {
+  if (is.null(meta_df) || is.na(subject_col) || !(subject_col %in% names(meta_df))) return(NULL)
+  subj <- meta_df[[subject_col]]
+  fields <- setdiff(names(meta_df), subject_col)
+
+  is_constant <- vapply(fields, function(f) {
+    v <- meta_df[[f]]
+    all(vapply(split(v, subj), function(x) {
+      x <- x[!is.na(x)]
+      length(unique(x)) <= 1
+    }, logical(1)))
+  }, logical(1))
+  keep <- fields[is_constant]
+
+  subs <- unique(subj)
+  out <- data.frame(subject_id = subs, stringsAsFactors = FALSE)
+  for (f in keep) {
+    numeric_field <- is.numeric(meta_df[[f]])
+    vals <- vapply(subs, function(s) {
+      x <- meta_df[[f]][subj == s]
+      x <- x[!is.na(x)]
+      if (length(x)) as.character(x[1]) else NA_character_
+    }, character(1))
+    out[[f]] <- if (numeric_field) as.numeric(vals) else vals
+  }
+  out
+}
+
+#' Best-effort chronological ordering for timecourse dataset_id labels
+#' (e.g. ANEMONES_DAY1/DAY2/DAY5/DISCHARGE, CORTICUS_PRE/POST24H) with no
+#' ground-truth order available to the app -- config/dataset_families.yml
+#' (the only place a real order would live) is config-only and never read
+#' here (see metadata_source()'s header for why). Primary signal: the
+#' LAST embedded integer in the label (DAY3 -> 3, D01 -> 1, T2 -> 2)
+#' sorts 7 of this project's 8 real timecourse families correctly on its
+#' own. Two keyword exceptions this project's real data actually needs:
+#' a "PRE" suffix (no digit, must sort first) and a "DISCHARGE" suffix or
+#' "POST" anywhere (CORTICUS_POST24H's "24" is a duration in hours, not a
+#' sequence number, and must still sort last). Falls back to plain
+#' alphabetical for anything unrecognized. Returns a permutation (like
+#' base order()), not the sorted labels themselves.
+order_timepoint_labels <- function(labels) {
+  key <- rep(NA_real_, length(labels))
+  key[grepl("PRE$", labels, ignore.case = TRUE)] <- -Inf
+  key[is.na(key) & grepl("DISCHARGE$|POST", labels, ignore.case = TRUE)] <- Inf
+  need <- is.na(key)
+  last_number <- function(s) {
+    m <- regmatches(s, gregexpr("\\d+", s))[[1]]
+    if (length(m) == 0) NA_real_ else as.numeric(m[length(m)])
+  }
+  key[need] <- vapply(labels[need], last_number, numeric(1))
+  order(key, labels, na.last = TRUE)
 }

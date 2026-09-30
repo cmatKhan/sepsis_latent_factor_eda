@@ -26,7 +26,23 @@
 #' `universe$id` to treat as new (at least one side of a pair must be
 #' new). Loading matrices are prepared (see similarity.R) once per fit
 #' and cached in memory for the duration of the call.
-compute_factor_pairs_from_universe <- function(universe, new_ids) {
+#'
+#' `sign_ambiguous` (default FALSE): set TRUE for PCA/sPCA/ICA -- methods
+#' whose components are unique only up to SIGN (unlike NMF/CoGAPS, whose
+#' non-negativity makes a genuine sign flip essentially impossible). When
+#' TRUE, the 1-to-1 `matched` assignment is decided by
+#' `hungarian_match_abs()` (costed on |cosine|) instead of plain
+#' `hungarian_match()` (costed on signed cosine) -- otherwise a component
+#' that flips sign between two fits (expected for these methods) either
+#' gets matched to the wrong factor entirely, or gets correctly matched
+#' but its strongly-negative signed cosine makes a genuinely stable
+#' component look highly unstable downstream (see app/R/db_helpers.R's
+#' consumers of `factor_pairs.matched`/`.cosine`, which wrap the value in
+#' ABS() for exactly this reason). The raw signed `cosine`/`pearson`/
+#' `spearman` values stored for every cell (matched or not) are
+#' UNCHANGED either way -- this only changes which pairs get flagged
+#' `matched = 1`.
+compute_factor_pairs_from_universe <- function(universe, new_ids, sign_ambiguous = FALSE) {
   if (nrow(universe) < 2 || length(new_ids) == 0) return(NULL)
 
   is_new <- universe$id %in% new_ids
@@ -50,7 +66,7 @@ compute_factor_pairs_from_universe <- function(universe, new_ids) {
     i <- idx[p, 1]; j <- idx[p, 2]
     sims <- pair_similarities(get_prep(i), get_prep(j))
     if (is.null(sims)) next
-    match_idx <- hungarian_match(sims$cosine)
+    match_idx <- if (sign_ambiguous) hungarian_match_abs(sims$cosine) else hungarian_match(sims$cosine)
     matched_flag <- matrix(0L, nrow(sims$cosine), ncol(sims$cosine))
     matched_flag[match_idx] <- 1L
 
@@ -73,6 +89,12 @@ compute_factor_pairs_from_universe <- function(universe, new_ids) {
   do.call(rbind, rows)
 }
 
+#' Methods whose components are unique only up to sign (see
+#' compute_factor_pairs_from_universe()'s `sign_ambiguous` doc) -- kept
+#' here, not in app.R's NEG_DIRECTION_METHODS, since this file is used by
+#' plain Rscript ingest entry points with no Shiny dependency.
+SIGN_AMBIGUOUS_METHODS <- c("pca", "spca", "ica")
+
 #' Thin DB-querying wrapper around compute_factor_pairs_from_universe() --
 #' unchanged public behavior for the single-dataset direct path
 #' (R/ingest_results.R) and for merge-time use once every fit (old and
@@ -88,7 +110,8 @@ compute_factor_pairs <- function(con, db_path, dataset_id, method, new_fit_ids) 
                                     character(1), db_path = db_path)
 
   rows <- compute_factor_pairs_from_universe(
-    fits[, c("id", "rank", "loadings_file_abs")], new_fit_ids)
+    fits[, c("id", "rank", "loadings_file_abs")], new_fit_ids,
+    sign_ambiguous = method %in% SIGN_AMBIGUOUS_METHODS)
   if (is.null(rows)) return(invisible(0L))
 
   for (start in seq(1, nrow(rows), by = 200)) {

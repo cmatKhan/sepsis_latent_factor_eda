@@ -106,15 +106,22 @@ run_redundancy_for_fit <- function(method, loadings_path, raw_result_path = NA_c
 #' independently representative (confirmed directly: doing the latter made
 #' sPCA 81.6% of all fgsea_grid rows across this project's real DB --
 #' 1824 of 2236 -- and was the dominant contributor to fgsea_grid tasks
-#' timing out/OOMing on the cluster). cp/tucker/wgcna have no second
-#' parameter to collapse -- every ok fit is already "representative".
+#' timing out/OOMing on the cluster). wgcna has no second parameter to
+#' collapse -- every ok fit is already "representative".
 #'
 #' Pure version: `fits` is a data.frame(id, method, family, rank, alpha,
-#' mse, status) covering the FULL universe (already-merged + this
-#' bundle's new fits) for one dataset -- same id-sign convention as
+#' mse, status, bootstrap) covering the FULL universe (already-merged +
+#' this bundle's new fits) for one dataset -- same id-sign convention as
 #' R/lib/ingest/pairs.R (positive = real fit_id, negative = local id).
+#' `bootstrap` is only ever non-NA for ica (see R/lib/ingest/db.R's
+#' `fits.bootstrap` comment); a bootstrap fit is never eligible as a
+#' rank's representative (its `mse` is reconstruction error against
+#' resampled data, and enrichment/projectr/pattern-driver analyses want a
+#' real fit with real sample scores, not one whose columns duplicate
+#' sample ids).
 select_representative_ids_from_universe <- function(fits, method) {
-  f <- fits[fits$method == method & fits$status == "ok", , drop = FALSE]
+  f <- fits[fits$method == method & fits$status == "ok" &
+              (is.na(fits$bootstrap) | fits$bootstrap == 0), , drop = FALSE]
   if (nrow(f) == 0) return(integer(0))
 
   if (method == "pca") {
@@ -143,7 +150,7 @@ select_representative_ids_from_universe <- function(fits, method) {
 #' Thin DB-querying wrapper -- unchanged public behavior.
 representative_fit_ids <- function(con, dataset_id, method) {
   fits <- DBI::dbGetQuery(con,
-    "SELECT fit_id AS id, method, family, rank, alpha, mse, status
+    "SELECT fit_id AS id, method, family, rank, alpha, mse, status, bootstrap
      FROM fits WHERE dataset_id = ? AND method = ?", params = list(dataset_id, method))
   select_representative_ids_from_universe(fits, method)
 }

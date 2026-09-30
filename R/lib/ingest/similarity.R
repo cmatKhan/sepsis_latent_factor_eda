@@ -79,3 +79,28 @@ hungarian_match <- function(sim) {
   out <- if (transposed) cbind(a = b, b = a) else cbind(a = a, b = b)
   out
 }
+
+#' Like hungarian_match() but costed on |similarity| rather than raw
+#' similarity -- needed whenever a strongly NEGATIVE similarity is just as
+#' informative a match as a strongly positive one. Plain hungarian_match()
+#' would systematically avoid such matches, since it maximizes raw
+#' (signed) similarity, and would either assign a sign-flipped pair to the
+#' wrong factor entirely or record a stable-but-flipped component as
+#' strongly dissimilar. Needed for any sign-ambiguous method (PCA/sPCA/ICA
+#' -- see R/lib/ingest/pairs.R's `sign_ambiguous` argument) as well as for
+#' cross-method comparisons (e.g. a non-negative CoGAPS/NMF factor aligning
+#' with the negative tail of a signed PCA component). Also used on Jaccard
+#' matrices (always non-negative, so this degenerates to ordinary Hungarian
+#' matching there). Promoted here from app/R/comparison_helpers.R
+#' 2026-09-29 so both the live app comparison screens and the offline
+#' ingest-time stability pipeline share one implementation.
+hungarian_match_abs <- function(sim) {
+  transposed <- FALSE
+  if (nrow(sim) > ncol(sim)) { sim <- t(sim); transposed <- TRUE }
+  a_sim <- abs(sim)
+  cost <- max(a_sim) - a_sim
+  assignment <- clue::solve_LSAP(cost)
+  a <- seq_len(nrow(sim))
+  b <- as.integer(assignment)
+  if (transposed) cbind(a = b, b = a) else cbind(a = a, b = b)
+}

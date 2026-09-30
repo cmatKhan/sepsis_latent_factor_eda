@@ -62,6 +62,32 @@ local({
   # to build the app's on-demand enrichment Ensembl remap.
   ensure_column(con, "dataset_metadata_sources", "ensembl_col", "TEXT")
   ensure_column(con, "dataset_metadata_sources", "symbol_col", "TEXT")
+  # ICA bootstrap+ICASSO (see R/lib/ingest/db.R's matching migration) --
+  # ensure_column(con, "fits", "bootstrap", ...) alone would leave every
+  # STABILITY_METHODS query that references fa.bootstrap/fb.bootstrap
+  # erroring ("no such column") against a DB ingested before this change.
+  ensure_column(con, "fits", "bootstrap", "INTEGER")
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS ica_component_kurtosis (
+       fit_id INTEGER NOT NULL REFERENCES fits(fit_id),
+       component TEXT NOT NULL,
+       kurtosis REAL,
+       excess_kurtosis REAL
+     )")
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS icasso_clusters (
+       dataset_id TEXT NOT NULL, method TEXT NOT NULL, rank INTEGER NOT NULL,
+       cluster_id INTEGER NOT NULL, iq REAL, n_members INTEGER,
+       centrotype_fit_id INTEGER, centrotype_factor_index INTEGER,
+       computed_at TEXT,
+       UNIQUE(dataset_id, method, rank, cluster_id))")
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS icasso_membership (
+       dataset_id TEXT NOT NULL, method TEXT NOT NULL, rank INTEGER NOT NULL,
+       cluster_id INTEGER NOT NULL, fit_id INTEGER NOT NULL, factor_index INTEGER NOT NULL,
+       intra_sim REAL,
+       UNIQUE(dataset_id, method, rank, fit_id, factor_index))")
+  DBI::dbExecute(con, "CREATE TABLE IF NOT EXISTS icasso_dendrograms (
+       dataset_id TEXT NOT NULL, method TEXT NOT NULL, rank INTEGER NOT NULL,
+       dendro_file TEXT, computed_at TEXT,
+       UNIQUE(dataset_id, method, rank))")
 })
 
 #' Larger, darker text for the per-factor (Level 3) plots -- gene/term
@@ -78,28 +104,36 @@ readable_factor_theme <- function(base_size = 15) {
     )
 }
 
-FACTORIZATION_METHODS <- c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker")   # loadings/scores-capable
+FACTORIZATION_METHODS <- c("pca", "nmf", "cogaps", "spca", "ica")   # loadings/scores-capable
 STABILITY_METHODS     <- c("nmf", "cogaps", "ica")   # multi-seed -- stability views apply
 # PCA/sPCA are both deterministic given (rank [+ sPCA's para]) -- no
 # cross-seed stability question -- so Level 1 gets a scree-style
 # reconstruction-error-by-rank plot + "Explore rank" dropdown (see
-# level1_ui()) rather than either the seed-stability tabs
-# (STABILITY_METHODS) or the flat fit list (DIRECT_FIT_METHODS below).
+# level1_ui()) rather than the seed-stability tabs (STABILITY_METHODS).
 # (A masking-CV rank-selection family was planned here at one point but
 # never actually wired into the config-driven method-registry system --
 # no `_maskcv` job has ever been generated for any dataset -- so it was
 # removed entirely rather than left as a permanently-empty panel.)
 SCREE_RANK_METHODS    <- c("pca", "spca")
-DIRECT_FIT_METHODS    <- c("cp", "tucker")           # no rank-selection UI at all -- Level 1 lists fits directly (like WGCNA's power list)
-TENSOR_METHODS        <- c("cp", "tucker")           # third (time-mode) loading matrix; "scores" is SUBJECT-mode, not sample-mode
+# CP/Tucker (tensor factor models, rTensor::cp()/tucker()) were evaluated
+# and removed 2026-09-29 -- see R/README.md's "CP/Tucker (removed)"
+# section for the full rationale (short version: this pipeline's planned
+# data collection only has 2 real timepoints, too little to support a
+# subject x gene x time tensor's training data requirements, and rank/
+# hyperparameter choice was already shown -- both here and in the
+# tensor-factor-models literature, e.g. https://rpubs.com/ivanricardo/
+# tensorfactormodels -- to have an outsized effect on the result). Their
+# 21 historical fits (ANEMONES, GSE54514) are left in the DB, not purged;
+# this app no longer surfaces them or runs new ones.
 # Methods eligible as a side in the standalone "Compare methods" screen's
 # gene-loadings (Jaccard/cosine) comparison -- excludes "wgcna" from this
 # list specifically (it has no continuous loadings) but wgcna still
 # participates via its own module-gene-set path (see gene_sets_from_wgcna()).
-LOADINGS_METHODS      <- c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker")
-# Methods eligible on the sample-level (scores-based) side of that screen --
-# excludes CP/Tucker (subject-mode scores, not sample-mode; see the
-# TENSOR_METHODS note throughout this file).
+LOADINGS_METHODS      <- c("pca", "nmf", "cogaps", "spca", "ica")
+# Overview Tab 2's quality-axis choices -- label -> method_dataset_summary()'s column name.
+OV2_QUALITY_CHOICES   <- c("In-sample R²" = "in_sample_r2",
+                           "Out-of-sample R² (within family)" = "oos_r2_within",
+                           "Out-of-sample R² (cross family)" = "oos_r2_cross")
 SAMPLE_SCORE_METHODS  <- c("pca", "nmf", "cogaps", "spca", "ica", "wgcna")
 # Methods with signed loadings -- both loading directions are meaningful
 # to query separately (NMF/CoGAPS weights are non-negative, so only "pos"
@@ -109,13 +143,11 @@ SAMPLE_SCORE_METHODS  <- c("pca", "nmf", "cogaps", "spca", "ica", "wgcna")
 # from the app.
 NEG_DIRECTION_METHODS <- c("pca", "ica", "spca")
 # Methods R/create_ingest_slurm_bundle.R's --stage enrichment stages
-# fgsea_grid for -- every loadings-bearing method, including cp/tucker
-# (representative_fit_ids() falls through to "every ok fit" for those,
-# same as sPCA used to before it got its own per-K collapse). WGCNA is
-# NOT in this list -- it has no loadings to rank, so it gets its own
-# separate batch job family instead (R/ingest_jobs/wgcna_ora_job.R,
-# whole-module ORA only, no GSEA).
-FGSEA_GRID_METHODS    <- c("pca", "nmf", "cogaps", "spca", "ica", "cp", "tucker")
+# fgsea_grid for -- every loadings-bearing method. WGCNA is NOT in this
+# list -- it has no loadings to rank, so it gets its own separate batch
+# job family instead (R/ingest_jobs/wgcna_ora_job.R, whole-module ORA
+# only, no GSEA).
+FGSEA_GRID_METHODS    <- c("pca", "nmf", "cogaps", "spca", "ica")
 
 #' Enrichment query-type radio choices for one method -- ALL of "ora"/
 #' "gsea"/"fgsea"/"cogaps_fora" are computed exclusively by the cluster
@@ -138,6 +170,18 @@ ui <- page_fillable(
   theme = bs_theme(bootswatch = "flatly"),
   padding = c(8, 12, 8, 12),
   gap = "0.4rem",
+  # bslib's fillable cards set overflow:auto on .bslib-card/.card-body (to
+  # support their own internal scrolling) -- that also clips any selectize
+  # dropdown popup that would otherwise extend past the card's edge, which
+  # is why a select near the bottom/edge of a card gets its option list cut
+  # off. Nothing in this app relies on a card's own scrollbar (plots/tables
+  # all have explicit heights, and DT manages its own internal scroll
+  # regardless of the outer card), so forcing overflow:visible here is safe
+  # app-wide and fixes every such dropdown at once rather than one at a time.
+  tags$head(tags$style(HTML("
+    .card, .card-body, .bslib-card { overflow: visible !important; }
+    .selectize-dropdown { z-index: 1060 !important; }
+  "))),
   layout_columns(
     col_widths = c(3, 2, 2, 5),
     # fill = FALSE keeps this control strip sized to its own (short)
@@ -185,12 +229,18 @@ server <- function(input, output, session) {
 
   output$mode_toggle <- renderUI({
     if (nav$mode == "explore") {
-      actionButton("goto_compare", "Compare methods", class = "btn-outline-primary btn-sm")
+      tagList(
+        actionButton("goto_compare", "Compare methods", class = "btn-outline-primary btn-sm"),
+        actionButton("goto_compare_projection", "Compare bases (projectR)", class = "btn-outline-primary btn-sm"),
+        actionButton("goto_overview", "Overview", class = "btn-outline-primary btn-sm")
+      )
     } else {
       actionButton("goto_explore", "Back to explore", class = "btn-outline-secondary btn-sm")
     }
   })
   observeEvent(input$goto_compare, { nav$mode <- "compare" })
+  observeEvent(input$goto_compare_projection, { nav$mode <- "compare_projection" })
+  observeEvent(input$goto_overview, { nav$mode <- "overview" })
   observeEvent(input$goto_explore, { nav$mode <- "explore" })
 
   ## ---- breadcrumb (dropdowns for lateral switching, "up" to collapse) ------
@@ -198,6 +248,12 @@ server <- function(input, output, session) {
   output$breadcrumb <- renderUI({
     if (nav$mode == "compare") {
       return(div(style = "font-size: 1.1rem; padding-top: 6px;", tags$b(paste(ds(), "\u00bb Compare methods"))))
+    }
+    if (nav$mode == "compare_projection") {
+      return(div(style = "font-size: 1.1rem; padding-top: 6px;", tags$b("Compare bases (projectR)")))
+    }
+    if (nav$mode == "overview") {
+      return(div(style = "font-size: 1.1rem; padding-top: 6px;", tags$b("Overview")))
     }
     sep <- HTML("&nbsp;&raquo;&nbsp;")
     crumbs <- list(actionLink("bc_home", ds()))
@@ -209,12 +265,7 @@ server <- function(input, output, session) {
         choices = setNames(method_choices, toupper(method_choices)),
         selected = nav$method, width = "130px")))
     }
-    if (nav$level >= 2 && nav$method %in% DIRECT_FIT_METHODS) {
-      f <- direct_fits(con, ds(), nav$method)
-      fit_labels <- vapply(f$fit_id, function(id) fit_descriptor(con, nav$method, id), character(1))
-      crumbs <- c(crumbs, list(sep, selectInput("bc_rank", NULL,
-        choices = setNames(f$fit_id, fit_labels), selected = nav$fit, width = "220px")))
-    } else if (nav$level >= 2 && nav$method %in% FACTORIZATION_METHODS) {
+    if (nav$level >= 2 && nav$method %in% FACTORIZATION_METHODS) {
       ranks <- distinct_ranks(con, ds(), nav$method)
       crumbs <- c(crumbs, list(sep, selectInput("bc_rank", NULL,
         choices = setNames(ranks, paste0("rank ", ranks)), selected = nav$rank, width = "130px")))
@@ -256,15 +307,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$bc_rank, {
     req(input$bc_rank, nav$method)
-    if (nav$method %in% DIRECT_FIT_METHODS) {
-      fid <- as.integer(input$bc_rank)
-      if (!identical(fid, nav$fit)) {
-        nav$fit <- fid
-        nav$rank <- get_fit(con, fid)$rank
-        nav$factor_index <- NULL
-        nav$level <- 2
-      }
-    } else if (nav$method == "wgcna") {
+    if (nav$method == "wgcna") {
       fid <- as.integer(input$bc_rank)
       if (!identical(fid, nav$wgcna_fit)) {
         nav$wgcna_fit <- fid
@@ -294,6 +337,8 @@ server <- function(input, output, session) {
 
   output$level_ui <- renderUI({
     if (nav$mode == "compare") return(compare_ui())
+    if (nav$mode == "compare_projection") return(compare_projection_ui())
+    if (nav$mode == "overview") return(overview_ui())
     switch(as.character(nav$level),
       "0" = level0_ui(),
       "1" = level1_ui(),
@@ -334,7 +379,7 @@ server <- function(input, output, session) {
           actionButton("cmp_view_a", "View selected factor (Side A)", class = "btn-outline-primary btn-sm"),
           actionButton("cmp_view_b", "View selected factor (Side B)", class = "btn-outline-primary btn-sm"))),
       nav_panel("Sample-level comparison",
-        p("How do samples project onto each side's factors? Correlation between the two score matrices, plus independent clustering of each side's samples compared via Adjusted Rand Index. CP/Tucker excluded (subject-mode scores, not sample-mode)."),
+        p("How do samples project onto each side's factors? Correlation between the two score matrices, plus independent clustering of each side's samples compared via Adjusted Rand Index."),
         plotOutput("cmp_scores_heatmap", height = "420px"),
         sliderInput("cmp_k", "Number of clusters (k), applied to both sides:", min = 2, max = 10, value = 4),
         verbatimTextOutput("cmp_ari"),
@@ -448,8 +493,7 @@ server <- function(input, output, session) {
   })
   output$cmp_scores_heatmap <- renderPlot({
     cs <- cmp_scores_pair()
-    validate(need(!is.null(cs),
-      "No sample-score overlap (or CP/Tucker involved -- excluded here, subject-mode scores)."))
+    validate(need(!is.null(cs), "No sample-score overlap between these two fits."))
     cm <- cs$matrix
     grid <- expand.grid(a = seq_len(nrow(cm)), b = seq_len(ncol(cm)))
     grid$cor <- as.vector(cm)
@@ -494,12 +538,372 @@ server <- function(input, output, session) {
   })
 
   ## =============================================================================
+  ## COMPARE BASES (projectR) -- standalone cross-DATASET basis comparison.
+  ## Different from "Compare methods" above: that screen compares two fits'
+  ## NATIVE loadings/scores within one dataset. This screen compares a
+  ## basis learned on a SOURCE dataset against how it (and other methods'
+  ## bases) behave when projected (via projectR, already computed offline
+  ## by R/lib/ingest/projectr_pairs.R -- never live here except the
+  ## gene-space tab) onto a TARGET dataset. Tabs 1-2 read the existing
+  ## `projections` table directly (zero new computation); tab 3 makes one
+  ## small, cheap live projectR() call on two fits' own (small) loadings
+  ## matrices.
+  ## =============================================================================
+
+  compare_projection_ui <- function() {
+    navset_card_tab(
+      nav_panel("Setup",
+        p("Compares two fits from the current dataset (top-left dropdown) against another dataset's samples. Pick the other dataset, then Fit A's method and fit, then Fit B -- another already-projected fit to compare Fit A against (any method). Only pairs with real, already-computed projectR projections are offered, and for methods with multiple seeds per rank (NMF/CoGAPS/ICA), only the seed that explains the most variance in the chosen target is listed per rank. Fit A and Fit B are used together on the Sample-space and Gene-space alignment tabs below."),
+        layout_columns(col_widths = c(3, 3, 3, 3),
+          selectInput("cpj_target", "Other dataset:", choices = NULL),
+          selectInput("cpj_basis_method", "Method (Fit A):", choices = NULL),
+          selectInput("cpj_basis_fit", "Fit A:", choices = NULL),
+          selectInput("cpj_fit_b", "Fit B:", choices = NULL))),
+      nav_panel("R² comparison",
+        p("How much of the target dataset's variance does each method's basis explain, projected in? Boxplot of mean R² across every fit of each method already projected onto this target. Note: sPCA's R² typically runs much lower than dense methods (PCA/NMF/ICA/CoGAPS) here -- that's the expected consequence of its sparsity (a basis using a small fraction of genes reconstructs new data worse via least squares), not a bug."),
+        plotOutput("cpj_r2_boxplot", height = "440px")),
+      nav_panel("Sample-space alignment",
+        p("Do Fit A and Fit B (chosen in Setup) score the target dataset's samples similarly? Correlation between their projected per-sample weights, samples matched by id."),
+        plotOutput("cpj_sample_heatmap", height = "440px")),
+      nav_panel("Gene-space alignment",
+        p("Do Fit A and Fit B (chosen in Setup) align with each other at the gene-loadings level? Projects Fit A's own loadings onto Fit B (live projectR() call, genes matched via Ensembl remapping). Components are then reordered by best (Hungarian) match before display -- necessary for methods like NMF/CoGAPS/ICA, whose pattern numbering is arbitrary, so \"Pattern 1 vs Pattern 1\" means nothing on its own."),
+        plotOutput("cpj_gene_heatmap", height = "480px"))
+    )
+  }
+
+  #' Collapses a projections_for_pair()-shaped data.frame down to one row
+  #' per (method, rank) for methods with multiple seeds per rank
+  #' (STABILITY_METHODS) -- keeping whichever seed's basis explains the MOST
+  #' variance in this specific target (highest mean_r_squared), so a fit
+  #' picker doesn't have to list e.g. every one of CoGAPS rank 7's seeds
+  #' separately. Methods with no seed dimension (pca/spca) pass through
+  #' unchanged.
+  best_fit_per_rank <- function(d) {
+    if (nrow(d) == 0) return(d)
+    is_stab <- d$method %in% STABILITY_METHODS
+    stab <- d[is_stab, , drop = FALSE]
+    rest <- d[!is_stab, , drop = FALSE]
+    if (nrow(stab) > 0) {
+      groups <- split(stab, list(stab$method, stab$rank), drop = TRUE)
+      stab <- do.call(rbind, lapply(groups, function(g) g[which.max(g$mean_r_squared), , drop = FALSE]))
+    }
+    rbind(stab, rest)
+  }
+
+  observe({
+    req(nav$mode == "compare_projection")
+    updateSelectInput(session, "cpj_target", choices = projection_targets_for_dataset(con, ds()))
+  })
+  observe({
+    req(nav$mode == "compare_projection", input$cpj_target)
+    d <- projections_for_pair(con, ds(), input$cpj_target)
+    # Intersect with LOADINGS_METHODS -- `projections` still has historical
+    # cp/tucker rows (not purged) that would otherwise still offer those
+    # as a selectable method here.
+    methods <- intersect(LOADINGS_METHODS, sort(unique(d$method)))
+    updateSelectInput(session, "cpj_basis_method", choices = setNames(methods, toupper(methods)))
+  })
+  observe({
+    req(nav$mode == "compare_projection", input$cpj_target, input$cpj_basis_method)
+    d <- projections_for_pair(con, ds(), input$cpj_target)
+    d <- best_fit_per_rank(d[d$method == input$cpj_basis_method, , drop = FALSE])
+    labels <- vapply(seq_len(nrow(d)), function(i) fit_descriptor(con, d$method[i], d$source_fit_id[i]), character(1))
+    updateSelectInput(session, "cpj_basis_fit", choices = setNames(d$source_fit_id, labels))
+  })
+
+  cpj_pair_data <- reactive({
+    req(input$cpj_target)
+    d <- projections_for_pair(con, ds(), input$cpj_target)
+    validate(need(nrow(d) > 0, "No real projections computed yet for this source/target pair."))
+    d
+  })
+
+  output$cpj_r2_boxplot <- renderPlot({
+    d <- cpj_pair_data()
+    ggplot(d, aes(toupper(method), mean_r_squared)) +
+      geom_boxplot(outlier.size = 0.7, fill = "grey85") +
+      geom_jitter(width = 0.15, alpha = 0.5, color = "steelblue") +
+      labs(x = NULL, y = "mean R² (per-sample, projectR full=TRUE)",
+           title = paste0(ds(), " → ", input$cpj_target, ": basis R² by method")) +
+      theme_minimal(base_size = 14)
+  })
+
+  observe({
+    req(nav$mode == "compare_projection", input$cpj_target)
+    d <- best_fit_per_rank(cpj_pair_data())
+    # Exclude whatever's currently chosen as Fit A -- otherwise Fit B can
+    # default to (or be re-selected as) the exact same fit, silently
+    # turning "compare A vs B" into a meaningless self-comparison. This is
+    # a real thing that happened here before this exclusion existed: both
+    # sides defaulted to the same fit with nothing forcing them apart,
+    # producing a perfect 1.0 diagonal that looked like a correlation bug
+    # but was actually just Fit A vs itself.
+    if (!is.null(input$cpj_basis_fit)) {
+      d <- d[d$source_fit_id != as.integer(input$cpj_basis_fit), , drop = FALSE]
+    }
+    req(nrow(d) > 0)
+    labels <- vapply(seq_len(nrow(d)), function(i) paste0(toupper(d$method[i]), " -- ", fit_descriptor(con, d$method[i], d$source_fit_id[i])), character(1))
+    updateSelectInput(session, "cpj_fit_b", choices = setNames(d$source_fit_id, labels))
+  })
+  output$cpj_sample_heatmap <- renderPlot({
+    d <- cpj_pair_data()
+    req(input$cpj_basis_fit, input$cpj_fit_b)
+    validate(need(input$cpj_basis_fit != input$cpj_fit_b, "Fit A and Fit B must be different fits."))
+    row_a <- d[d$source_fit_id == as.integer(input$cpj_basis_fit), , drop = FALSE]
+    row_b <- d[d$source_fit_id == as.integer(input$cpj_fit_b), , drop = FALSE]
+    validate(need(nrow(row_a) == 1 && nrow(row_b) == 1, "Selected fit(s) not found for this pair."))
+    Pa <- tryCatch(readRDS(resolve_artifact(row_a$projection_file[1])), error = function(e) NULL)
+    Pb <- tryCatch(readRDS(resolve_artifact(row_b$projection_file[1])), error = function(e) NULL)
+    validate(need(!is.null(Pa) && !is.null(Pb), "Could not read one or both projection artifacts."))
+    Sa <- t(Pa$projection); Sb <- t(Pb$projection)   # -> samples x components
+    shared <- intersect(rownames(Sa), rownames(Sb))
+    validate(need(length(shared) >= 3, "Not enough shared samples between these two fits' projections."))
+    cm <- cor(Sa[shared, , drop = FALSE], Sb[shared, , drop = FALSE])
+    dd <- as.data.frame(as.table(cm))
+    names(dd) <- c("component_a", "component_b", "cor")
+    ggplot(dd, aes(component_a, component_b, fill = cor)) +
+      geom_tile() + geom_text(aes(label = sprintf("%.2f", cor)), size = 3) +
+      scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick", limits = c(-1, 1)) +
+      labs(x = paste(toupper(row_a$method[1]), "component"), y = paste(toupper(row_b$method[1]), "component"),
+           title = paste0("Sample-space alignment (", length(shared), " shared samples)")) +
+      theme_minimal(base_size = 14)
+  })
+
+  output$cpj_gene_heatmap <- renderPlot({
+    req(input$cpj_basis_fit, input$cpj_fit_b)
+    validate(need(input$cpj_basis_fit != input$cpj_fit_b, "Fit A and Fit B must be different fits."))
+    d <- cpj_pair_data()
+    row_b <- d[d$source_fit_id == as.integer(input$cpj_fit_b), , drop = FALSE]
+    validate(need(nrow(row_b) == 1, "Fit B not found -- pick it in Setup."))
+    # Fit A and Fit B are both fits of the CURRENT dataset (ds()) -- Setup
+    # only ever lists fits of ds() as sources for a target's projections
+    # (see projections_for_pair()'s header), so both loadings live here.
+    proj <- project_basis_onto_basis(con, as.integer(input$cpj_basis_fit), ds(),
+                                      as.integer(input$cpj_fit_b), ds())
+    validate(need(!is.null(proj), "Not enough shared genes (after Ensembl remapping) between these two fits' loadings, or one fit has no loadings artifact."))
+    P <- proj$projection   # components-of-B-basis (rows) x components-of-A-loadings (cols) per projectR's full=TRUE convention
+
+    # Methods like NMF/CoGAPS/ICA have no canonical component order (unlike
+    # PCA's descending-variance convention) -- "Pattern_1" in one fit has no
+    # inherent relationship to "Pattern_1" in another, so the raw index
+    # diagonal is meaningless until the two axes are matched. Reuse the same
+    # Hungarian-on-|value| matcher the "Compare methods" screen already uses
+    # (hungarian_match_abs(), app/R/comparison_helpers.R) so a real best
+    # match -- even a sign-flipped one -- lands on the diagonal regardless
+    # of either method's native pattern numbering.
+    match_idx <- hungarian_match_abs(P)
+    ord <- order(match_idx[, "a"])
+    b_order <- c(match_idx[ord, "a"], setdiff(seq_len(nrow(P)), match_idx[, "a"]))
+    a_order <- c(match_idx[ord, "b"], setdiff(seq_len(ncol(P)), match_idx[, "b"]))
+    P <- P[b_order, a_order, drop = FALSE]
+
+    dd <- as.data.frame(as.table(P))
+    names(dd) <- c("component_b", "component_a", "value")
+    dd$component_a <- factor(dd$component_a, levels = colnames(P))
+    dd$component_b <- factor(dd$component_b, levels = rownames(P))
+    ggplot(dd, aes(component_a, component_b, fill = value)) +
+      geom_tile() + geom_text(aes(label = sprintf("%.2f", value)), size = 3) +
+      # Fixed [-1,1] scale, not auto-ranged to this cell's own min/max --
+      # otherwise a pair with a narrow real range (say -0.2 to 0.3) gets
+      # stretched to look just as saturated as a pair spanning -1 to 1,
+      # making weak and strong alignment visually indistinguishable.
+      # Values here aren't a bounded correlation (unlike sample-space
+      # alignment) -- they're projectR's own projection coefficients and
+      # can genuinely exceed +-1 -- so oob=squish saturates those to the
+      # end-of-scale color instead of ggplot's default of blanking them to
+      # NA; the printed number in each cell is always the real, unclipped
+      # value regardless of how it's colored.
+      scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick",
+                            limits = c(-1, 1), oob = scales::squish) +
+      labs(x = paste(toupper(input$cpj_basis_method), "component (Fit A, projected)"),
+           y = paste(toupper(row_b$method[1]), "component (Fit B, basis)"),
+           title = paste0("Gene-space alignment -- ", proj$n_genes_matched, " genes matched"),
+           subtitle = "Axes reordered by best (Hungarian, |value|) match -- a diagonal-heavy pattern means the two methods found the same underlying structure. Off-diagonal cells are real too: they show how a component correlates with every OTHER match, not just its own.") +
+      theme_minimal(base_size = 14)
+  })
+
+  ## =============================================================================
+  ## OVERVIEW -- four big questions, in order: (1) optimal hyperparameter per
+  ## (dataset, method), (2) best method for this dataset, (3) cross-method
+  ## agreement within this dataset, (4) cross-dataset agreement for one method.
+  ## Tabs 1-3 are scoped to the current dataset (ds()), matching "Compare
+  ## methods"'s own convention; Tab 4 is scoped to one method across the whole
+  ## collection, so it gets its own method selector independent of ds().
+  ## =============================================================================
+
+  overview_ui <- function() {
+    navset_card_tab(
+      nav_panel("1. Optimal hyperparameter",
+        p("For the current dataset, one method's own hyperparameter sweep: in-sample R² (how well it fits its OWN data) and stability (how much the answer changes when the hyperparameter's neighbors are perturbed -- seed for NMF/CoGAPS/ICA, rank for PCA/sPCA, power for WGCNA). The highlighted point is the highest-quality value tested -- used on Tabs 2-3 -- shown alongside the full curve so the tradeoff against stability is always visible, not hidden behind that one pick."),
+        p(tags$em("One known caveat, not a bug: PCA shows stability ≈ 1 at every rank, because its solution is NESTED (an extra component doesn't change earlier ones) -- cross-rank persistence is trivially high and doesn't really discriminate rank choice for it. WGCNA's quality proxy (mean kME²) is expected to be inflated at very low power, since the network is barely thresholded there and genes correlate broadly with whatever dominant module exists -- read a low-power \"winner\" with that in mind.")),
+        layout_columns(col_widths = c(3, 9),
+          selectInput("ov1_method", "Method:", choices = NULL),
+          plotOutput("ov1_curve", height = "440px"))),
+      nav_panel("2. Best method",
+        p("For the current dataset, each present method's optimal hyperparameter (Tab 1 -- highest in-sample R² tested) plotted as stability vs quality. Switch the quality axis -- in-sample (fits its own data) and out-of-sample (generalizes to another real dataset, via projectR) are different, both real, claims, and the ranking can differ between them. A method simply doesn't appear if it has no fits for this dataset (see the coverage table) or no value for the chosen quality axis (WGCNA has no out-of-sample R² at all, for example)."),
+        radioButtons("ov2_quality", "Quality axis:", choices = OV2_QUALITY_CHOICES, selected = "in_sample_r2", inline = TRUE),
+        plotOutput("ov2_scatter", height = "440px"),
+        h6("Fit coverage for this dataset (don't read a ranking without checking this):"),
+        tableOutput("ov2_coverage")),
+      nav_panel("3. Cross-method agreement",
+        p("For the current dataset, every present method's OPTIMAL fit (Tab 1) compared pairwise against every other present method's optimal fit: gene-set overlap (top-50 genes per component, best Hungarian match, mean |Jaccard|) and sample-space agreement (Adjusted Rand Index between k=4 clusters of each method's own sample/eigengene scores). The same comparisons the \"Compare methods\" screen offers one pair at a time, run across everyone present at once."),
+        layout_columns(col_widths = c(6, 6),
+          plotOutput("ov3_jaccard", height = "440px"),
+          plotOutput("ov3_ari", height = "440px"))),
+      nav_panel("4. Cross-dataset agreement",
+        p("For one chosen method, how similar is its basis across datasets? Two views: sample-space R² (how well the basis learned on the ROW dataset explains the COLUMN dataset's samples, via projectR -- real, already-computed data for every one of the 992 possible pairs for PCA/sPCA/ICA, sparser and source-gated for NMF/CoGAPS) and gene-space agreement (do the ROW and COLUMN dataset's OWN bases rely on the same genes, weighted the same way -- an offline backfill, R/backfill_gene_space_agreement.R, scoped to within-family pairs first since each cell costs a live projectR() call; empty until that's been run for a method). Color scale on the R² view is fixed and clipped to [-1, 1] -- real values run much wider (down to -118 for a handful of cross-platform pairs with very few matched genes, a real property of those pairs, not a bug). Datasets are hierarchically reordered so clusters of mutually-similar datasets are visible."),
+        layout_columns(col_widths = c(3, 3, 6),
+          selectInput("ov4_method", "Method:", choices = NULL),
+          radioButtons("ov4_view", "View:", choices = c("Sample-space R²" = "r2", "Gene-space agreement" = "gene_space"), selected = "r2"),
+          plotOutput("ov4_heatmap", height = "600px")),
+        h6("Same data, as a dendrogram:"),
+        plotOutput("ov4_dendro", height = "300px"))
+    )
+  }
+
+  observe({
+    req(nav$mode == "overview")
+    present <- sort(unique(method_overview(con, ds())$counts$method))
+    present <- intersect(OVERVIEW_METHODS, present)
+    updateSelectInput(session, "ov1_method", choices = setNames(present, toupper(present)))
+  })
+  observe({
+    req(nav$mode == "overview")
+    proj_methods <- sort(unique(DBI::dbGetQuery(con, "SELECT DISTINCT method FROM projections")$method))
+    # Intersect with OVERVIEW_METHODS -- `projections` still has 279/372
+    # historical cp/tucker rows (not purged) that would otherwise still
+    # offer those as a selectable method here.
+    proj_methods <- intersect(OVERVIEW_METHODS, proj_methods)
+    updateSelectInput(session, "ov4_method", choices = setNames(proj_methods, toupper(proj_methods)))
+  })
+
+  output$ov1_curve <- renderPlot({
+    req(input$ov1_method)
+    d <- method_rank_curve(con, ds(), input$ov1_method)
+    validate(need(nrow(d) > 0, "No fits for this method on this dataset."))
+    d$rank_key_f <- factor(d$rank_label, levels = d$rank_label[order(d$rank_key)])
+    is_optimal <- rep(FALSE, nrow(d))
+    is_optimal[which.max(d$in_sample_r2)] <- TRUE
+    long <- rbind(
+      data.frame(rank_key_f = d$rank_key_f, panel = "in-sample R² (quality)", value = d$in_sample_r2, is_optimal = is_optimal),
+      data.frame(rank_key_f = d$rank_key_f, panel = "stability", value = d$stability, is_optimal = is_optimal)
+    )
+    ggplot(long, aes(rank_key_f, value, group = panel)) +
+      geom_line(color = "grey70") +
+      geom_point(aes(color = is_optimal, size = is_optimal)) +
+      scale_color_manual(values = c(`TRUE` = "firebrick", `FALSE` = "steelblue"), guide = "none") +
+      scale_size_manual(values = c(`TRUE` = 3.2, `FALSE` = 1.8), guide = "none") +
+      facet_wrap(~panel, ncol = 1, scales = "free_y") +
+      labs(x = NULL, y = NULL, title = paste0(toupper(input$ov1_method), " on ", ds(), " -- hyperparameter sweep"),
+           subtitle = "Red = highest in-sample R² tested (used on Tabs 2-3)") +
+      theme_minimal(base_size = 14) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  })
+
+  output$ov2_scatter <- renderPlot({
+    d <- method_dataset_summary(con, ds())
+    validate(need(nrow(d) > 0, "No fits for this dataset."))
+    d$quality <- d[[input$ov2_quality]]
+    d2 <- d[!is.na(d$quality) & !is.na(d$stability), ]
+    validate(need(nrow(d2) > 0, "No methods have both stability and this quality metric for this dataset."))
+    qual_label <- names(OV2_QUALITY_CHOICES)[OV2_QUALITY_CHOICES == input$ov2_quality]
+    ggplot(d2, aes(stability, quality, label = toupper(method))) +
+      geom_point(color = "steelblue", size = 4) +
+      ggrepel::geom_text_repel(size = 4.5, max.overlaps = Inf) +
+      labs(x = "stability", y = qual_label,
+           title = paste0(ds(), " -- method comparison at each method's optimal hyperparameter")) +
+      theme_minimal(base_size = 14)
+  })
+  output$ov2_coverage <- renderTable({
+    cov <- DBI::dbGetQuery(con,
+      "SELECT method, COUNT(*) AS n_ok_fits FROM fits WHERE status = 'ok' AND dataset_id = ? GROUP BY method ORDER BY method",
+      params = list(ds()))
+    cov
+  }, rownames = FALSE)
+
+  output$ov3_jaccard <- renderPlot({
+    r <- method_pairwise_agreement(con, ds())
+    validate(need(!is.null(r$gene_jaccard) && length(r$methods) >= 2, "Fewer than 2 methods with fits for this dataset -- nothing to compare."))
+    dd <- as.data.frame(as.table(r$gene_jaccard))
+    names(dd) <- c("method_a", "method_b", "jaccard")
+    ggplot(dd, aes(toupper(method_a), toupper(method_b), fill = jaccard)) +
+      geom_tile() + geom_text(aes(label = sprintf("%.2f", jaccard)), size = 4) +
+      scale_fill_viridis_c(limits = c(0, 1), name = "mean |Jaccard|") +
+      labs(x = NULL, y = NULL, title = "Gene-set overlap (top-50, Hungarian-matched)") +
+      theme_minimal(base_size = 14)
+  })
+  output$ov3_ari <- renderPlot({
+    r <- method_pairwise_agreement(con, ds())
+    validate(need(!is.null(r$sample_ari) && length(r$methods) >= 2, "Fewer than 2 methods with fits for this dataset -- nothing to compare."))
+    dd <- as.data.frame(as.table(r$sample_ari))
+    names(dd) <- c("method_a", "method_b", "ari")
+    ggplot(dd, aes(toupper(method_a), toupper(method_b), fill = ari)) +
+      geom_tile() + geom_text(aes(label = sprintf("%.2f", ari)), size = 4) +
+      scale_fill_viridis_c(limits = c(0, 1), name = "ARI (k=4)") +
+      labs(x = NULL, y = NULL, title = "Sample-space agreement (k=4 clusters)") +
+      theme_minimal(base_size = 14)
+  })
+
+  ov4_ordered_matrix <- reactive({
+    req(input$ov4_method, input$ov4_view)
+    if (input$ov4_view == "r2") {
+      d <- dataset_similarity_matrix(con, input$ov4_method)
+      validate(need(nrow(d) > 0, "No projections computed for this method."))
+      value_col <- "median_r2"
+      limits <- c(-1, 1); midpoint <- 0
+      legend_name <- "median R²"
+    } else {
+      d <- gene_space_similarity_matrix(con, input$ov4_method)
+      validate(need(nrow(d) > 0, "No gene-space agreement backfilled yet for this method -- see R/backfill_gene_space_agreement.R (currently scoped to within-family pairs)."))
+      names(d)[names(d) == "mean_abs_diagonal"] <- "median_r2"   # reuse the same column name so downstream code doesn't branch further
+      value_col <- "median_r2"
+      limits <- c(0, 1); midpoint <- 0.5
+      legend_name <- "mean |diagonal|"
+    }
+    all_ds <- sort(unique(c(d$source_dataset_id, d$target_dataset_id)))
+    m <- matrix(NA_real_, length(all_ds), length(all_ds), dimnames = list(all_ds, all_ds))
+    m[cbind(match(d$source_dataset_id, all_ds), match(d$target_dataset_id, all_ds))] <- d[[value_col]]
+    sym <- (m + t(m)) / 2
+    sym[is.na(sym)] <- 0
+    hc <- tryCatch(hclust(dist(sym)), error = function(e) NULL)
+    ord_ds <- if (!is.null(hc)) all_ds[hc$order] else all_ds
+    list(m = m, ord_ds = ord_ds, hc = hc, limits = limits, midpoint = midpoint, legend_name = legend_name)
+  })
+  output$ov4_heatmap <- renderPlot({
+    r <- ov4_ordered_matrix()
+    dd <- as.data.frame(as.table(r$m[r$ord_ds, r$ord_ds]))
+    names(dd) <- c("source", "target", "value")
+    dd$source <- factor(dd$source, levels = r$ord_ds)
+    dd$target <- factor(dd$target, levels = r$ord_ds)
+    view_label <- if (input$ov4_view == "r2") "cross-dataset R²" else "gene-space agreement"
+    ggplot(dd, aes(target, source, fill = value)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick", midpoint = r$midpoint,
+                            limits = r$limits, oob = scales::squish, na.value = "grey90", name = r$legend_name) +
+      labs(x = "target dataset", y = "source dataset",
+           title = paste0(toupper(input$ov4_method), " -- ", view_label, " (hierarchically reordered)")) +
+      theme_minimal(base_size = 11) +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+  })
+  output$ov4_dendro <- renderPlot({
+    r <- ov4_ordered_matrix()
+    validate(need(!is.null(r$hc), "Not enough datasets to cluster."))
+    plot(r$hc, main = paste0(toupper(input$ov4_method), " -- dataset similarity dendrogram"), xlab = "", sub = "")
+  })
+
+  ## =============================================================================
   ## LEVEL 0 -- dataset overview
   ## =============================================================================
 
   level0_ui <- function() {
     ov <- method_overview(con, ds())
-    methods <- sort(unique(ov$counts$method))
+    # Intersect with the methods this app actually still supports, not
+    # just whatever distinct fits.method values happen to exist for this
+    # dataset -- ANEMONES/GSE54514 still have 21 historical CP/Tucker fits
+    # left in the DB (not purged, see FACTORIZATION_METHODS's header
+    # comment) that would otherwise still surface here with a dead-end
+    # "Explore" button once CP/Tucker's own UI/server code is gone.
+    methods <- intersect(c(FACTORIZATION_METHODS, "wgcna"), sort(unique(ov$counts$method)))
     cards <- lapply(methods, function(m) {
       cnt <- ov$counts[ov$counts$method == m, ]
       headline <- if (m == "wgcna") {
@@ -513,11 +917,6 @@ server <- function(input, output, session) {
         if (nrow(mc) > 0 && any(!is.na(mc$mse))) {
           sprintf("best rank (lowest MSE): %d", mc$rank[which.min(mc$mse)])
         } else "--"
-      } else if (m %in% DIRECT_FIT_METHODS) {
-        # CP/Tucker: deterministic, no masking-CV family at all --
-        # headline off the ordinary (in-sample) reconstruction MSE instead
-        bf <- best_direct_fit(con, ds(), m)
-        if (!is.null(bf)) sprintf("best fit (lowest MSE): %s", fit_descriptor(con, m, bf$fit_id)) else "--"
       } else {
         s <- ov$stability[ov$stability$method == m, metric()]
         if (length(s) == 1 && !is.na(s)) sprintf("mean matched %s %.2f", metric(), s) else "--"
@@ -608,7 +1007,7 @@ server <- function(input, output, session) {
                          style = "margin-top: 24px;")))
       )
     } else if (m %in% STABILITY_METHODS) {
-      navset_card_tab(
+      stability_panels <- list(
         nav_panel("Seed stability vs rank",
           p("Distribution of matched factor similarity across all seed pairs, per rank. Click a rank to drill in."),
           plotOutput("l1_stability", click = "l1_stability_click", height = "420px")),
@@ -622,20 +1021,21 @@ server <- function(input, output, session) {
             selectInput("l1_ref_rank", "Track factors from rank:", choices = NULL),
             plotOutput("l1_trajectory", height = "320px")))
       )
-    } else if (m %in% DIRECT_FIT_METHODS) {
-      # sPCA/CP/Tucker: no seed dimension to sweep -- every parameter
-      # combination is a single deterministic fit, so Level 1 just lists
-      # them directly (same idiom as WGCNA's power list) rather than the
-      # rank-then-seed drill-down the other factorization methods use.
-      navset_card_tab(
-        nav_panel("All fits",
-          p("No seed sweep for this method -- each parameter combination below is a single deterministic fit."),
-          DTOutput("l1_direct_table"),
-          layout_columns(col_widths = c(6, 6),
-            selectInput("l1_direct_fit", "Explore fit:", choices = NULL),
-            actionButton("l1_direct_go", "Explore this fit", class = "btn-primary btn-sm",
-                         style = "margin-top: 24px;")))
-      )
+      if (m == "ica") {
+        # ICASSO (Himberg, Hyvärinen & Esposito 2004): every ICA component
+        # recovered across ALL seed-sweep (reinit-only) AND bootstrap
+        # (bootstrap+reinit) runs at a given n.comp, clustered by |cosine|
+        # similarity -- see R/lib/ingest/icasso.R. Distinct from (and
+        # additive alongside) the plain "Seed stability vs rank" tab above,
+        # which stays reinit-only on purpose (see seed_stability_by_rank()'s
+        # own comment in app/R/db_helpers.R).
+        stability_panels <- c(stability_panels, list(
+          nav_panel("ICASSO cluster quality (Iq) vs n.comp",
+            p("Every ICA component recovered across all seed-sweep AND bootstrap-resampled runs at each n.comp, clustered by |cosine| similarity (ICASSO). Iq = mean intra-cluster similarity - mean similarity to everything outside the cluster -- a tight, well-separated cluster (high Iq) is a trustworthy, reproducible component; 0.7 (dashed line) is the literature's usual threshold. One point per cluster. Click a rank to drill into its clustering."),
+            plotOutput("l1_icasso_iq", click = "l1_icasso_iq_click", height = "420px"))
+        ))
+      }
+      do.call(navset_card_tab, stability_panels)
     } else if (m == "wgcna") {
       navset_card_tab(
         nav_panel("Module stability (ARI)",
@@ -643,6 +1043,12 @@ server <- function(input, output, session) {
           plotOutput("l1_wgcna_ari", height = "420px"),
           selectInput("l1_wgcna_power", "Drill into power:", choices = NULL),
           actionButton("l1_wgcna_go", "Explore power", class = "btn-primary btn-sm")),
+        nav_panel("Module size profile",
+          p("Module sizes at every power, ranked largest (rank 1) to smallest within each power; grey = unassigned genes (module 0). A rank suddenly growing while a neighboring rank shrinks/vanishes is the signature of one module's genes being absorbed into another as power changes."),
+          plotOutput("l1_wgcna_size_profile", height = "440px")),
+        nav_panel("Module lineage",
+          p("Each line follows one module's Hungarian-best-match identity from one power to the next (using the same matching already computed for the 'Module overlap vs another power' tab). A line that breaks, or whose size jumps sharply, marks exactly where that module's genes got reassigned -- e.g. absorbed into a larger module -- as power changes."),
+          plotOutput("l1_wgcna_lineage", height = "440px")),
         nav_panel("Modules vs power",
           plotOutput("l1_wgcna_counts", height = "420px")),
         nav_panel("Scale-free topology fit",
@@ -673,6 +1079,32 @@ server <- function(input, output, session) {
     d <- l1_stab_data(); req(nrow(d) > 0)
     ranks <- sort(unique(d$rank))
     i <- round(input$l1_stability_click$x)
+    if (i >= 1 && i <= length(ranks)) {
+      nav$rank <- ranks[i]
+      nav$level <- 2
+    }
+  })
+
+  l1_icasso_iq_data <- reactive({
+    req(nav$method == "ica")
+    icasso_iq_by_rank(con, ds())
+  })
+  output$l1_icasso_iq <- renderPlot({
+    d <- l1_icasso_iq_data()
+    validate(need(nrow(d) > 0,
+      "No ICASSO clustering yet for this dataset -- needs >= 2 ok ICA fits at a rank (re-run/re-ingest ica_grid)."))
+    ggplot(d, aes(x = factor(rank), y = iq)) +
+      geom_hline(yintercept = 0.7, linetype = "dashed", color = "firebrick") +
+      geom_boxplot(outlier.shape = NA, fill = "grey85") +
+      geom_jitter(width = 0.15, size = 1.2, alpha = 0.7) +
+      labs(x = "n.comp", y = "cluster quality (Iq)",
+           title = "ICA -- ICASSO cluster quality by n.comp") +
+      theme_minimal(base_size = 14)
+  })
+  observeEvent(input$l1_icasso_iq_click, {
+    d <- l1_icasso_iq_data(); req(nrow(d) > 0)
+    ranks <- sort(unique(d$rank))
+    i <- round(input$l1_icasso_iq_click$x)
     if (i >= 1 && i <= length(ranks)) {
       nav$rank <- ranks[i]
       nav$level <- 2
@@ -815,6 +1247,32 @@ server <- function(input, output, session) {
            title = "Module count vs power") +
       theme_minimal(base_size = 14)
   })
+  output$l1_wgcna_size_profile <- renderPlot({
+    d <- wgcna_module_size_profile(con, ds())
+    validate(need(nrow(d) > 0, "No WGCNA fits for this dataset."))
+    d$power <- factor(d$power, levels = sort(unique(d$power)))
+    d$fill_key <- ifelse(is.na(d$rank), "unassigned", as.character(d$rank))
+    rank_levels <- as.character(sort(unique(d$rank[!is.na(d$rank)])))
+    d$fill_key <- factor(d$fill_key, levels = c(rank_levels, "unassigned"))
+    pal <- c(setNames(viridisLite::viridis(length(rank_levels)), rank_levels), unassigned = "grey80")
+    ggplot(d, aes(power, n_genes, fill = fill_key)) +
+      geom_col(position = "stack") +
+      scale_fill_manual(name = "size rank", values = pal) +
+      labs(x = "power", y = "genes", title = "Module size profile across power") +
+      theme_minimal(base_size = 14)
+  })
+  output$l1_wgcna_lineage <- renderPlot({
+    d <- wgcna_module_lineages(con, ds())
+    validate(need(nrow(d) > 0, "No WGCNA fits for this dataset."))
+    d$power <- factor(d$power, levels = sort(unique(d$power)))
+    ggplot(d, aes(power, n_genes, group = lineage_id, color = lineage_id)) +
+      geom_line(linewidth = 0.8) +
+      geom_point(size = 1.8) +
+      labs(x = "power", y = "genes",
+           title = "Module lineage: size of each Hungarian-matched module chain across power") +
+      theme_minimal(base_size = 14) +
+      theme(legend.position = "none")
+  })
   output$l1_wgcna_sft <- renderPlot({
     d <- wgcna_sft_fit(con, ds())
     validate(need(nrow(d) > 0,
@@ -846,62 +1304,13 @@ server <- function(input, output, session) {
     nav$level <- 2
   })
 
-  # sPCA/CP/Tucker level 1 -- direct fit list (see level1_ui())
-  output$l1_direct_table <- renderDT({
-    req(nav$method %in% DIRECT_FIT_METHODS)
-    f <- direct_fits(con, ds(), nav$method); req(nrow(f) > 0)
-    f$fit <- vapply(f$fit_id, function(id) fit_descriptor(con, nav$method, id), character(1))
-    datatable(f[, c("fit", "mse", "n_factors")], rownames = FALSE, options = list(pageLength = 15)) |>
-      formatSignif("mse", 4)
-  })
-  observe({
-    req(nav$level == 1, nav$method %in% DIRECT_FIT_METHODS)
-    f <- direct_fits(con, ds(), nav$method)
-    labels <- vapply(f$fit_id, function(id) fit_descriptor(con, nav$method, id), character(1))
-    updateSelectInput(session, "l1_direct_fit", choices = setNames(f$fit_id, labels))
-  })
-  observeEvent(input$l1_direct_go, {
-    req(input$l1_direct_fit)
-    nav$fit <- as.integer(input$l1_direct_fit)
-    nav$rank <- get_fit(con, nav$fit)$rank   # NA for Tucker (no single rank) -- harmless
-    nav$level <- 2
-  })
-
   ## =============================================================================
   ## LEVEL 2 -- rank / parameter view
   ## =============================================================================
 
   level2_ui <- function() {
     m <- nav$method
-    if (m %in% DIRECT_FIT_METHODS) {
-      # CP/Tucker: single fit already chosen at Level 1 (nav$fit) -- no
-      # seed selector needed, unlike the pca/spca/nmf/cogaps/ica branch
-      # below. "scores" are SUBJECT-mode, not sample-mode -- sample-
-      # metadata association is deferred (would need subject-id
-      # reconciliation, see R/README.md); factor correlation still works
-      # generically regardless of what the rows represent. (sPCA used to
-      # live in this branch too -- it moved to the rank-selector
-      # FACTORIZATION_METHODS branch below once it got its own scree-style
-      # rank view; see SCREE_RANK_METHODS.)
-      panels <- list(
-        nav_panel("Factor correlation (this fit)",
-          p("How redundant are this fit's own components with each other -- computed on the SUBJECT-mode scores (not sample-mode; sample-metadata association isn't available yet for tensor methods)."),
-          plotOutput("l2_direct_factor_corr", height = "420px")),
-        nav_panel("Time profile",
-          p("Each component's value across timepoint levels -- the third, time-mode loading matrix CP/Tucker produce that no other method has."),
-          plotOutput("l2_time_profile", height = "420px"))
-      )
-      panels <- c(panels, list(
-        nav_panel("Enrichment overview",
-          p("Whatever functional enrichment the cluster ingest pipeline has already computed for every factor in this fit -- ORA and GSEA, positive direction (this method has no meaningful negative side). Jump straight to any one factor's full detail via Level 3's Enrichment tab."),
-          DTOutput("l2_direct_enrich_overview_table"),
-          layout_columns(col_widths = c(6, 6),
-            radioButtons("l2_direct_enrich_overview_type", "Query shown:", c("ORA" = "ora", "GSEA" = "gsea"), inline = TRUE),
-            actionButton("l2_direct_enrich_overview_view", "View selected factor at Level 3", class = "btn-outline-primary btn-sm",
-                         style = "margin-top: 24px;")))
-      ))
-      do.call(navset_card_tab, panels)
-    } else if (m %in% FACTORIZATION_METHODS) {
+    if (m %in% FACTORIZATION_METHODS) {
       f <- fits_at_rank(con, ds(), m, nav$rank)
       # sPCA has no real seed -- multiple fits at the same rank are
       # disambiguated by `para` (stored in fits.alpha, see
@@ -932,6 +1341,23 @@ server <- function(input, output, session) {
         ))
       }
 
+      if (m == "ica") {
+        # ICASSO clustering (R/lib/ingest/icasso.R) pools this rank's plain
+        # seed-sweep AND bootstrap-resampled runs -- so unlike the
+        # seed-only tabs above, these two reflect every run at this rank,
+        # not just the reinit-only ones.
+        panels <- c(panels, list(
+          nav_panel("ICASSO clustering",
+            p("Every ICA component recovered across all seed-sweep and bootstrap runs at this rank, clustered by |cosine| similarity. Boxes mark the cluster cut (k = n.comp); red boxes flag a cluster with Iq < 0.7 (less trustworthy)."),
+            plotOutput("l2_icasso_dendro", height = "440px")),
+          nav_panel("Component non-Gaussianity",
+            layout_columns(col_widths = c(3, 9),
+              selectInput("l2_kurtosis_fit", "Fit (seed):", choices = seed_choices),
+              p("Excess kurtosis of each component's sample scores (fastICA's own maximized non-Gaussianity criterion). Positive = \"super-Gaussian\" -- the profile real biological-process components are expected to have (Lee & Batzoglou 2003); near zero looks Gaussian/noise-like.")),
+            plotOutput("l2_kurtosis", height = "380px"))
+        ))
+      }
+
       if (m %in% c("pca", "spca")) {
         panels <- c(panels, list(
           nav_panel("Biplot (genes)",
@@ -952,20 +1378,27 @@ server <- function(input, output, session) {
         ))
       }
 
-      panels <- c(panels, list(
-        nav_panel("Sample scores",
-          layout_columns(col_widths = c(3, 9),
-            selectInput("l2_scores_fit", "Fit:", choices = seed_choices),
-            selectInput("l2_scores_sort", "Sort/group by metadata field:", choices = NULL)),
-          DTOutput("l2_scores_table"))
-      ))
-      if (!(m %in% c("pca", "spca"))) {
+      if (m != "pca") {
+        # Not meaningful for PCA: sample scores are just the coordinates
+        # already shown in every biplot/scatter tab, and a bare numeric
+        # table of them doesn't visualize anything a plot doesn't already.
+        panels <- c(panels, list(
+          nav_panel("Sample scores",
+            layout_columns(col_widths = c(3, 9),
+              selectInput("l2_scores_fit", "Fit:", choices = seed_choices),
+              selectInput("l2_scores_sort", "Sort/group by metadata field:", choices = NULL)),
+            DTOutput("l2_scores_table"))
+        ))
+      }
+      if (!(m %in% c("pca", "spca", "ica"))) {
         # PCA/sPCA's components are uncorrelated by construction (PCA:
         # orthogonal eigenvectors; sPCA: elastic-net-penalized toward the
-        # same near-orthogonal solution) -- a within-fit correlation
-        # heatmap has nothing to show for either. NMF/CoGAPS/ICA have no
-        # such guarantee (non-negativity or non-orthogonal rotation), so
-        # they keep this tab.
+        # same near-orthogonal solution); ICA's components are independent
+        # by construction too (that's the entire point of the algorithm --
+        # it optimizes for statistical independence, not just decorrelation).
+        # A within-fit correlation heatmap has nothing real to show for any
+        # of the three. NMF/CoGAPS have no such guarantee (non-negativity
+        # gives no orthogonality/independence), so they keep this tab.
         panels <- c(panels, list(
           nav_panel("Factor correlation (this fit)",
             p("How redundant are this fit's own factors with each other, at the sample-score level?"),
@@ -986,7 +1419,13 @@ server <- function(input, output, session) {
             radioButtons("l2_enrich_overview_type", "Query shown:", enrich_query_choices(m), inline = TRUE),
             radioButtons("l2_enrich_overview_dir", "Direction shown:", c("positive" = "pos", "negative" = "neg"), inline = TRUE),
             actionButton("l2_enrich_overview_view", "View selected factor at Level 3", class = "btn-outline-primary btn-sm",
-                         style = "margin-top: 24px;")))
+                         style = "margin-top: 24px;"))),
+        nav_panel("Trajectory across time",
+          p("For datasets with sibling per-timepoint datasets in the same family, this fit's basis projected (via projectR, already computed offline) onto each timepoint's own samples -- shows how each subject's weight on this component moves across the time course."),
+          layout_columns(col_widths = c(4, 4, 4),
+            selectInput("l2_traj_fit", "Fit:", choices = seed_choices),
+            selectInput("l2_traj_component", "Component:", choices = NULL)),
+          plotOutput("l2_traj_plot", height = "480px"))
       ))
       do.call(navset_card_tab, panels)
     } else if (m == "wgcna") {
@@ -1108,6 +1547,38 @@ server <- function(input, output, session) {
       theme_minimal(base_size = 14)
   })
 
+  output$l2_icasso_dendro <- renderPlot({
+    req(nav$method == "ica")
+    hc <- load_icasso_dendro(con, ds(), nav$rank)
+    validate(need(!is.null(hc),
+      "No ICASSO clustering for this rank yet (needs >= 2 ok ICA fits -- re-run/re-ingest ica_grid)."))
+    clusters <- icasso_clusters(con, ds(), nav$rank)
+    low_quality <- clusters$cluster_id[clusters$iq < 0.7]
+    plot(hc, labels = FALSE, hang = -1, xlab = "", sub = "",
+         main = paste0("ICA rank ", nav$rank, " -- ICASSO clustering (1 - |cosine| distance)"))
+    # rect.hclust() draws boxes in LEFT-TO-RIGHT dendrogram leaf order, not
+    # numeric cluster_id order -- `border` must be recomputed in that same
+    # order or the wrong box gets flagged.
+    groups <- cutree(hc, k = nav$rank)
+    dendro_order <- unique(groups[hc$order])
+    border <- ifelse(dendro_order %in% low_quality, "firebrick", "grey30")
+    rect.hclust(hc, k = nav$rank, border = border)
+  })
+
+  output$l2_kurtosis <- renderPlot({
+    req(input$l2_kurtosis_fit)
+    d <- ica_component_kurtosis(con, as.integer(input$l2_kurtosis_fit))
+    validate(need(nrow(d) > 0,
+      "No kurtosis diagnostics for this fit (re-run/re-ingest ica_grid with current code)."))
+    d$component <- factor(d$component, levels = d$component[order(as.integer(gsub("\\D", "", d$component)))])
+    ggplot(d, aes(component, excess_kurtosis)) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+      geom_col(fill = "steelblue") +
+      labs(x = "component", y = "excess kurtosis",
+           title = "Per-component non-Gaussianity (fastICA's own maximized criterion)") +
+      theme_minimal(base_size = 14)
+  })
+
   # ---- generic sample-scores / metadata-association helpers, shared by
   # factorization methods (factor scores) and WGCNA (module eigengenes) ----
 
@@ -1187,10 +1658,67 @@ server <- function(input, output, session) {
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
   }
 
+  #' For a fit whose basis has already been projectR'd (offline, see
+  #' R/lib/ingest/projectr_pairs.R) onto every sibling per-timepoint
+  #' dataset in its family, pulls each timepoint's per-subject weight on
+  #' one component -- the raw material for a trajectory-across-time plot.
+  #' Requires the target dataset's subject_id_col to be registered (see
+  #' metadata_source()'s header) to collapse sample-level projections down
+  #' to one subject per row per timepoint. Returns NULL if this fit has no
+  #' usable within-family projections at all.
+  trajectory_data <- function(fit_id, component) {
+    targets <- within_family_projections(con, fit_id)
+    if (nrow(targets) == 0) return(NULL)
+    rows <- list()
+    for (i in seq_len(nrow(targets))) {
+      target_ds <- targets$target_dataset_id[i]
+      proj <- tryCatch(readRDS(resolve_artifact(targets$projection_file[i])), error = function(e) NULL)
+      P <- proj$projection
+      if (is.null(P) || !(component %in% rownames(P))) next
+      ms <- metadata_source(con, target_ds, "sample")
+      if (is.null(ms) || is.na(ms$subject_id_col)) next
+      meta <- dataset_metadata(con, target_ds, "sample")
+      if (is.null(meta) || !(ms$subject_id_col %in% names(meta))) next
+      w <- P[component, ]
+      subj <- meta[[ms$subject_id_col]][match(names(w), meta$sample_id)]
+      ok <- !is.na(subj)
+      if (sum(ok) == 0) next
+      rows[[length(rows) + 1]] <- data.frame(
+        dataset_id = target_ds, subject_id = as.character(subj[ok]), weight = unname(w[ok]),
+        stringsAsFactors = FALSE)
+    }
+    if (length(rows) == 0) return(NULL)
+    do.call(rbind, rows)
+  }
+  trajectory_plot <- function(fit_id, component, method) {
+    validate(need(!is.null(fit_id) && !is.na(fit_id), "Select a fit."))
+    d <- trajectory_data(fit_id, component)
+    validate(need(!is.null(d), "No within-family projectR projections usable for this fit -- needs sibling per-timepoint datasets with subject_id_col registered."))
+    lev <- unique(d$dataset_id)
+    d$dataset_id <- factor(d$dataset_id, levels = lev[order_timepoint_labels(lev)])
+    ggplot(d, aes(dataset_id, weight, group = subject_id)) +
+      geom_line(alpha = 0.3, color = "steelblue") +
+      geom_point(alpha = 0.4, color = "steelblue", size = 1.5) +
+      labs(x = NULL, y = paste(component, "projected weight"),
+           title = paste0(toupper(method), " -- ", component, " projected across time"),
+           subtitle = paste0(length(unique(d$subject_id)), " subjects across ", length(lev), " timepoints")) +
+      theme_minimal(base_size = 14)
+  }
+
   # factorization methods
   observe({
     req(nav$level == 2, nav$method %in% FACTORIZATION_METHODS)
     update_meta_field_choices(session, "l2_scores_sort")
+  })
+
+  observeEvent(input$l2_traj_fit, {
+    L <- load_loadings(con, as.integer(input$l2_traj_fit))
+    comps <- if (is.null(L)) character(0) else colnames(L)
+    updateSelectInput(session, "l2_traj_component", choices = comps, selected = comps[1])
+  })
+  output$l2_traj_plot <- renderPlot({
+    req(input$l2_traj_fit, input$l2_traj_component)
+    trajectory_plot(as.integer(input$l2_traj_fit), input$l2_traj_component, nav$method)
   })
 
   # ---- Biplot (PCA/sPCA only) ----
@@ -1294,37 +1822,6 @@ server <- function(input, output, session) {
   output$l2_assoc_heatmap <- renderPlot({
     req(input$l2_assoc_fit)
     assoc_heatmap_plot(as.integer(input$l2_assoc_fit), toupper(nav$method))
-  })
-
-  # ---- CP/Tucker Level 2 (direct fit, no seed selector) ----
-
-  output$l2_direct_factor_corr <- renderPlot({
-    req(nav$fit)
-    L <- load_scores(con, nav$fit)
-    validate(need(!is.null(L), "No sample/subject scores available for this fit."))
-    cm <- cor(L)
-    d <- as.data.frame(as.table(cm))
-    names(d) <- c("factor_a", "factor_b", "cor")
-    ggplot(d, aes(factor_a, factor_b, fill = cor)) +
-      geom_tile() + geom_text(aes(label = sprintf("%.2f", cor)), size = 3) +
-      scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick", limits = c(-1, 1)) +
-      labs(x = NULL, y = NULL, title = "Within-fit factor correlation") +
-      theme_minimal(base_size = 14)
-  })
-  output$l2_time_profile <- renderPlot({
-    req(nav$fit)
-    tl <- load_time_loadings(con, nav$fit)
-    validate(need(!is.null(tl), "No time-mode loadings available for this fit."))
-    d <- data.frame(
-      time = factor(rep(rownames(tl), ncol(tl)), levels = rownames(tl)),
-      component = factor(rep(colnames(tl), each = nrow(tl)), levels = colnames(tl))
-    )
-    d$value <- as.vector(tl)
-    ggplot(d, aes(time, value, group = component, color = component)) +
-      geom_line() + geom_point(size = 2) +
-      labs(x = "timepoint", y = "loading", color = "component",
-           title = paste(toupper(nav$method), "-- component trajectories across timepoints")) +
-      theme_minimal(base_size = 14)
   })
 
   # WGCNA level 2
@@ -1451,8 +1948,8 @@ server <- function(input, output, session) {
   #' nothing at all -- this is a pure read-time lookup (no DB write) that
   #' finds the equivalent factor's already-computed result instead.
   #' Restricted to PCA since that's the only method with this guarantee --
-  #' NMF/CoGAPS/sPCA/CP/Tucker fits are never numerically identical to one
-  #' another, so the search below would just waste time looking.
+  #' NMF/CoGAPS/sPCA fits are never numerically identical to one another,
+  #' so the search below would just waste time looking.
   #' Thin wrapper -- see db_helpers.R::resolve_enrichment_factor_id() for
   #' the actual exact-loadings-match reuse logic (generalized 2026-09-22
   #' from a PCA-only special case to every seed-sweep method with
@@ -1516,24 +2013,6 @@ server <- function(input, output, session) {
     sel <- input$l2_enrich_overview_table_rows_selected
     req(length(sel) == 1)
     nav$fit <- as.integer(input$l2_enrich_all_fit)
-    nav$factor_index <- d$factor[sel]
-    nav$level <- 3
-  })
-
-  # sPCA/CP/Tucker -- single fit already chosen at Level 1 (nav$fit)
-  l2_direct_enrich_overview_data <- reactive({
-    req(nav$fit)
-    enrich_overview_table(nav$fit, input$l2_direct_enrich_overview_type %||% "ora", "pos")
-  })
-  output$l2_direct_enrich_overview_table <- renderDT({
-    d <- l2_direct_enrich_overview_data()
-    datatable(d, rownames = FALSE, selection = "single", options = list(pageLength = 15)) |>
-      formatSignif("min_p_value", 3)
-  })
-  observeEvent(input$l2_direct_enrich_overview_view, {
-    d <- l2_direct_enrich_overview_data()
-    sel <- input$l2_direct_enrich_overview_table_rows_selected
-    req(length(sel) == 1)
     nav$factor_index <- d$factor[sel]
     nav$level <- 3
   })
