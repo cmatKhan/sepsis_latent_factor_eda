@@ -1,6 +1,6 @@
 # Differential expression for dilgom (E-TABM-1036) -- CROSS-SECTIONAL
 # (confirmed: 518 samples, 518 distinct sample_id, no repeat/subject
-# column). See R/de/README.md.
+# column). See docs/methods.qmd ("Differential expression").
 #
 # ** This cohort has NO sepsis or disease-relevant covariate at all ** --
 # it's a healthy population reference cohort (real metadata: sample_id,
@@ -17,10 +17,11 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/dilgom_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/dilgom_config.yml"))$dataset
 
 message("[dilgom] loading raw expression matrix...")
 mat <- pivot_expression_long(ds_meta)

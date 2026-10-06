@@ -1,0 +1,239 @@
+# Project-level settings for the targets pipeline (_targets.R).
+#
+# Per-dataset settings (data paths, method parameter grids) stay in
+# config/<ID>_config.yml; this file holds what is shared across datasets:
+# which datasets the pipeline builds, where the raw data lives on this
+# machine, how SLURM workers get R, and one resource profile per method.
+# The `slurm:` blocks in the dataset configs are only read by the legacy
+# rslurm driver (R/create_slurm_bundle.R).
+
+# Dataset ids to include -- each must have a config/<ID>_config.yml.
+# Adding an id here adds that dataset's targets; removing one leaves its
+# results in the store (see targets::tar_prune()).
+# Not listed (inputs missing, 2026-10-04): ROSE, ROSE_DAY0, ROSE_DAY2 (data
+# paths point at /home/chase/...; no ROSE data in data_root) and MARS,
+# SHIP-TREND (preprocessing scripts don't exist); gains (its preprocessing
+# script is an unfinished stub that never writes a matrix).
+datasets:
+  - ANEMONES
+  - ANEMONES_DAY1
+  - ANEMONES_DAY2
+  - ANEMONES_DAY5
+  - ANEMONES_DISCHARGE
+  - CORTICUS
+  - CORTICUS_POST24H
+  - CORTICUS_PRE
+  - dilgom
+  - EARLI
+  - GSE110487
+  - GSE110487_T1
+  - GSE110487_T2
+  - GSE13904
+  - GSE13904_DAY1
+  - GSE13904_DAY3
+  - GSE273700
+  - GSE273700_DAY1
+  - GSE273700_DAY8
+  - GSE54514
+  - GSE54514_DAY1
+  - GSE54514_DAY2
+  - GSE54514_DAY3
+  - GSE54514_DAY4
+  - GSE54514_DAY5
+  - GSE95233
+  - GSE95233_D01
+  - GSE95233_D02
+  - GSE95233_D03
+  - hfgp-500fg
+
+# Methods configured in a dataset config but not built by the pipeline
+# (no targets are created for them), e.g. `skip_methods: [cogaps]`.
+skip_methods: []
+
+# Root that the RELATIVE data paths in config/<ID>_config.yml resolve
+# against (R/lib/data_paths.R). The SEPSIS_DATA_ROOT environment variable
+# overrides this, so another machine can point elsewhere without editing it.
+data_root: /scratch/mblab/chasem/hf_sepsis_collection
+
+# The stability DB the pipeline writes (R/targets/db_write.R), relative to
+# the project root; artifacts go in stability_artifacts/ next to it. The
+# app reads it via STABILITY_DB.
+db_path: results/targets/stability.sqlite
+
+cluster:
+  # Spack environment workers activate before starting R -- the same one
+  # rstudio_spack.sbatch launches RStudio Server from.
+  spack_env: /ref/mblab/software/chasem/spack_envs/rstudio-4.6.1
+  # Portability: on a cluster without spack, set the shell lines that put
+  # R 4.6 on PATH instead, e.g.
+  #   setup_lines: ["module load R/4.6.1"]
+  # These replace the spack activation; workers still `cd` to the project
+  # so renv activates the project library.
+  setup_lines: null
+  # null = the cluster's default partition (`general` on HTCF).
+  partition: null
+
+# One crew_controller_slurm() per entry (R/targets/controllers.R). Each
+# method's fits run on the controller with the method's name; `prep` runs
+# matrix loading/preprocessing. Values match the per-method `slurm:` blocks
+# every dataset config carried for rslurm, then tuned from seff/seff-array
+# (target: ~75% average memory/CPU use, never under 50%; size for the
+# largest dataset, ANEMONES, not EARLI). crew scales each controller's
+# workers with the task backlog and back down when idle: a worker exits
+# after `seconds_idle` (default 30) with nothing to do. There is no worker
+# cap by default -- SLURM's scheduler and per-user limits decide what runs
+# when (R/targets/controllers.R's UNCAPPED_WORKERS stands in for "no cap").
+# Set `workers` only for a reason other than limiting submissions: pca, nmf
+# and ica cap it because their fits take seconds, far less than a worker's
+# ~30 s R start-up, so one worker per task would mostly pay for start-ups. `time_minutes` is the SLURM --time of one
+# worker, not of one fit: a worker stops taking new fits after
+# `seconds_wall` (default: half of time_minutes) and finishes the one it's
+# on, so time_minutes * 60 must cover seconds_wall + the longest fit.
+# `tasks_max` (default unlimited) makes each worker exit after that many
+# tasks. Memory is requested for the typical dataset, with a `backup:` for
+# the large ones -- a task whose worker is killed (e.g. out of memory on
+# ANEMONES, 8000 genes x 447 samples) is retried on the backup's larger
+# request. Optional `backup:` (crew backup controllers): after `crashes_max`
+# consecutive crashes of a task's worker, the task is retried on a
+# "<name>_backup" controller -- this entry with the `backup:` fields
+# overridden (e.g. more memory). targets does the retry automatically.
+controllers:
+  # Tuning notes are from EARLI (7465 genes x 189 samples) on 2026-10-02.
+  # Other datasets top out near 8000 genes x 518 samples, so memory is
+  # sized with headroom for those. An R worker with targets loaded idles
+  # at ~0.2-0.3 GB, which sets the floor for the cheap methods.
+  #
+  # batch_size = grid rows fitted per dynamic branch. The main process
+  # spends ~1 s of bookkeeping per branch, so batch methods whose fits
+  # take seconds (changing it re-runs that method's fits).
+  prep:
+    # 1.5 GB peak, 40 s
+    memory_gigabytes_required: 3
+    cpus_per_task: 1
+    time_minutes: 60
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 12
+      crashes_max: 2
+  ingest:
+    # Per (dataset, method): extraction + artifact writes, factor pairs,
+    # redundancy, ICASSO (R/targets/ingest.R). Not yet tuned.
+    memory_gigabytes_required: 8
+    cpus_per_task: 1
+    time_minutes: 240
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 16
+      crashes_max: 2
+  fgsea:
+    # Enrichment per representative fit (R/ingest_jobs/fgsea_job.R) and
+    # module ORA per WGCNA fit; BiocParallel uses cpus_per_task. The rslurm
+    # setup used 80 GB / 8 CPUs / 24 h; not yet tuned under targets.
+    memory_gigabytes_required: 32
+    cpus_per_task: 8
+    time_minutes: 720
+    tasks_max: 1
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 64
+      crashes_max: 2
+  projectr:
+    # One branch per (source dataset, target dataset): every representative
+    # fit of the source projected onto one target (projection_rows(),
+    # R/targets/projections.R). The rslurm setup used 4 GB / 1 CPU per
+    # projection. Not yet tuned under targets.
+    memory_gigabytes_required: 4
+    cpus_per_task: 1
+    time_minutes: 120
+    batch_size: 1
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 8
+      crashes_max: 2
+  pca:
+    # One fit per dataset at the max configured rank (R/methods/pca.R):
+    # 0.3 GB peak, ~0.5 s. Less work than one worker's ~30 s start-up, so
+    # CPU efficiency can't reach 50% -- the waste is under a core-minute.
+    memory_gigabytes_required: 0.5
+    cpus_per_task: 1
+    time_minutes: 30
+    workers: 1
+    seconds_idle: 10
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 2
+      crashes_max: 2
+  nmf:
+    # 0.24 GB peak; ~16 s per fit, 160 fits; 59% CPU at batch_size 2
+    memory_gigabytes_required: 0.5
+    cpus_per_task: 1
+    time_minutes: 60
+    workers: 10
+    batch_size: 2
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 2
+      crashes_max: 2
+  cogaps:
+    # EARLI (2026-10-04, 60 fits, nIterations 15000, distributed
+    # genome-wide): median 5.6 min per fit (2.7-9), 13.0-13.7 GB peak
+    # (~75% of 18), ~89% CPU across the 10 cores -- distributed CoGAPS runs
+    # nSets subsets in parallel (BiocParallel), and nSets defaults to
+    # cpus_per_task (cogaps_resource_defaults()), so CPUs and nSets move
+    # together. (An earlier run looked ~20x slower: CoGAPS was printing the
+    # whole matrix into the log -- fixed in R/methods/cogaps.R.)
+    memory_gigabytes_required: 18
+    cpus_per_task: 10   # also CoGAPS's nSets/nThreads (cogaps_resource_defaults())
+    time_minutes: 120
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 30
+      crashes_max: 2
+  spca:
+    # EARLI, 2026-10-02/03: 1.67 GB mean / 1.80 GB max peak per worker
+    # (one fit hit 4.27 GB on the 5 GB backup), 98% CPU, single-threaded.
+    # Fit time grows steeply with para (fraction of genes nonzero) and K:
+    # median 1-7 min at para 0.1, 37-160 min at 0.5, 1.5-3.5 h at >= 0.7.
+    # The IS search (R/methods/spca.R) keeps the grid at para <= 0.5 plus
+    # refinement, ~99 fits per dataset at K 2-12. One worker per fit (tasks_max 1):
+    # fits are long next to R's ~30 s start-up, and a worker can't then be
+    # cut off by --time partway through a fit it picked up late. SLURM
+    # queues whatever can't start yet.
+    memory_gigabytes_required: 4
+    cpus_per_task: 1
+    # Each fit stops itself at 8 h (run_spca_job()'s max_hours) and is
+    # reported killed_not_converged, so the SLURM limit only has to cover
+    # 8 h plus worker start-up (one fit per worker, tasks_max 1).
+    time_minutes: 600
+    tasks_max: 1
+    # A fit whose worker crashes once (killed for exceeding --mem) is
+    # retried on the spca_backup controller with 1 GB more.
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 5
+  ica:
+    # 0.32 GB peak; 0.5 s per fit, 100 fits (~30 s total, see pca)
+    memory_gigabytes_required: 0.5
+    cpus_per_task: 1
+    time_minutes: 30
+    workers: 2
+    batch_size: 10
+    seconds_idle: 10
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 2
+      crashes_max: 2
+  wgcna:
+    # 0.93 GB peak; ~32 s per fit, 15 fits. Used ~0.8 cores whether given
+    # 2 or 8, and module colors are identical either way -- but WGCNA
+    # refuses nThreads < 2 ("nThreads must be numeric and at least 2").
+    # One block over all genes (maxBlockSize 50000, R/methods/wgcna.R): the
+    # genes x genes adjacency/TOM are ~0.45 GB each at 7.5k genes, ~0.8 GB
+    # at 10k. Measured 0.93 GB peak was with the old 2 x 3.8k-gene blocks.
+    memory_gigabytes_required: 6
+    cpus_per_task: 2    # also blockwiseModules()'s nThreads; WGCNA minimum
+    time_minutes: 60
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 8
+      crashes_max: 2

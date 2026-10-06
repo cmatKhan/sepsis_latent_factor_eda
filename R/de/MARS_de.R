@@ -2,7 +2,7 @@
 # directly: 802 samples, 802 distinct sample_id; `title_identifier1/2` are
 # NOT subject ids -- checked directly, rows sharing a value have different
 # ages/sexes, so it's a site/batch code, not a repeat-subject marker), so
-# this is a simple case/control comparison. See R/de/README.md. Note
+# this is a simple case/control comparison. See docs/methods.qmd ("Differential expression"). Note
 # `preprocessing_script: R/preprocessing/mars_preprocessing.R` in the
 # config does not exist on disk -- irrelevant here since this script reads
 # `expression_path` directly via pivot_expression_long(), the same as
@@ -16,7 +16,7 @@
 # (FALSE 760 / TRUE 42) is used as the primary contrast -- the most direct
 # "relevant to sepsis" signal available. `endotype_class`/`mortality_28d`
 # are natural alternative contrasts for a deeper follow-up pass, not run
-# here (see R/de/README.md's "keep it simple" scope).
+# here (see docs/methods.qmd ("Differential expression") scope).
 #
 # Platform: array (log2-scale intensity, range 0.68-13.5, no DESeq2/count
 # logic anywhere) -- plain limma, no voom.
@@ -24,10 +24,11 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/MARS_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/MARS_config.yml"))$dataset
 
 message("[MARS] loading raw expression matrix...")
 mat <- pivot_expression_long(ds_meta)

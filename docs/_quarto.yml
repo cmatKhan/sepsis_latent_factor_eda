@@ -1,0 +1,32 @@
+project:
+  type: website
+  output-dir: _site
+  # Builds reference.qmd from the code's roxygen comments before every render.
+  pre-render: Rscript build_reference.R
+
+website:
+  title: "Sepsis latent-factor stability"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Overview
+      - href: setup.qmd
+        text: Setup
+      - href: data.qmd
+        text: Data
+      - href: methods.qmd
+        text: Methods
+      - href: database.qmd
+        text: Database
+      - href: workflow.qmd
+        text: Running the workflow
+      - href: app.qmd
+        text: Launching the app
+      - href: reference.qmd
+        text: Function reference
+
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo

@@ -3,7 +3,7 @@
 # metadata, do whatever small amount of dataset-specific cleanup its real
 # metadata needs, then call run_de_timecourse() (the 8 repeated-measures
 # datasets) or run_de_case_control() (the other datasets, no time axis) and
-# write_de_results(). See R/de/README.md for the full per-dataset rationale
+# write_de_results(). See docs/methods.qmd ("Differential expression") for the full per-dataset rationale
 # (platform, design, contrasts) and why this lives outside the main
 # ingest/app pipeline.
 #
@@ -40,16 +40,24 @@ suppressMessages({
   library(limma)
 })
 
+#' Null-or-NA default
+#'
+#' @param a A value, possibly `NULL` or a single `NA`.
+#' @param b The fallback.
+#' @return `a`, or `b` when `a` is `NULL` or a single `NA`.
 `%||%` <- function(a, b) if (is.null(a) || (length(a) == 1 && is.na(a))) b else a
 
-#' Collapse a probe/feature x sample matrix to one row per gene SYMBOL --
-#' microarray-only (this project's RNA-seq datasets already use gene-level
-#' Ensembl feature ids, so collapsing is skipped for those). Keeps, per
-#' symbol, the probe with the highest mean expression across all samples --
-#' the same convention every existing R/preprocessing/<dataset>_preprocessing.R
-#' script already uses for its own probe collapse, applied here to the RAW
-#' matrix (no upstream top-variance filtering, which would bias DE toward
-#' genes pre-selected for high variance -- see R/de/README.md).
+#' Collapse a probe x sample matrix to one row per gene symbol (microarray only)
+#'
+#' Keeps, per symbol, the probe with the highest mean expression -- the
+#' convention the preprocessing scripts use -- applied to the raw matrix (no
+#' top-variance filter, which would bias DE).
+#'
+#' @param mat Probe x sample matrix.
+#' @param feature_meta Feature-metadata data frame.
+#' @param feature_id_col Its probe-id column.
+#' @param symbol_col Its gene-symbol column.
+#' @return Symbol x sample matrix.
 collapse_to_symbol <- function(mat, feature_meta, feature_id_col, symbol_col) {
   fm <- feature_meta[!is.na(feature_meta[[symbol_col]]) & nzchar(feature_meta[[symbol_col]]), ]
   fm <- fm[!duplicated(fm[[feature_id_col]]), ]
@@ -76,34 +84,31 @@ collapse_to_symbol <- function(mat, feature_meta, feature_id_col, symbol_col) {
 #' consolidated onto the single canonical implementation instead of
 #' re-diverging).
 
-#' Drop the bottom `q` quantile of genes by overall variance (across ALL
-#' samples, not per-contrast) -- array-only, the standard low-variance
-#' pre-filter (akin in spirit to edgeR::filterByExpr() for RNA-seq, e.g.
-#' genefilter::varFilter()'s default). This is NOT the same failure mode
-#' as the factor-analysis pipeline's top-8000-by-variance filter: filtering
-#' on TOTAL variance across every sample regardless of group/time doesn't
-#' select for the specific effect this script then tests, it just drops
-#' probes/symbols that are indistinguishable from noise everywhere. Mainly
-#' matters for speed (duplicateCorrelation()/lmFit() cost scales with gene
-#' count) and power (fewer wasted tests -> better FDR) on the larger
-#' microarray platforms here (30k+ genes after symbol collapse).
+#' Drop the least variable genes
+#'
+#' Filters on total variance across every sample, not on the effect being
+#' tested, so it isn't circular; it removes probes indistinguishable from noise
+#' everywhere, for speed and multiple-testing power (array analogue of
+#' edgeR::filterByExpr()).
+#'
+#' @param mat Gene x sample matrix.
+#' @param q Fraction of genes to drop, by variance.
+#' @return `mat` without its bottom-`q` genes.
 filter_low_variance <- function(mat, q = 0.25) {
   v <- matrixStats::rowVars(mat)
   mat[v > stats::quantile(v, q, na.rm = TRUE), , drop = FALSE]
 }
 
-#' Build the cell-means design: one column per (group x time) combination
-#' actually present. `group` may be NULL (no condition to include), in
-#' which case `cell` is just `time`. Returns list(design, cell, level_map)
-#' -- `cell`'s LEVELS are the human-readable "<group>.<time>" (or bare
-#' "<time>") labels, but real-world time/group values are frequently not
-#' syntactically valid R names (e.g. ANEMONES's "Day: 1", CORTICUS's
-#' "Post(24h)" -- confirmed directly, both break makeContrasts() if used
-#' as design column names as-is), so `design`'s actual column names are
-#' `make.names()`-sanitized. `level_map` (named character vector, names =
-#' raw human-readable level, values = sanitized design column name) is how
-#' callers build contrast EXPRESSIONS against the real column names while
-#' still working with the readable labels everywhere else.
+#' Cell-means design
+#'
+#' One column per (group x time) combination present (just time when `group`
+#' is `NULL`). Column names are make.names()-sanitized, since real levels such
+#' as "Day: 1" or "Post(24h)" break makeContrasts().
+#'
+#' @param time Factor of timepoints, one per sample.
+#' @param group Factor of groups, or `NULL`.
+#' @return `list(design, cell, level_map)`: the design matrix, the cell factor
+#'   (readable levels), and readable level -> design column name.
 build_cell_means_design <- function(time, group = NULL) {
   cell <- if (is.null(group)) droplevels(factor(time)) else
     droplevels(interaction(group, time, sep = ".", lex.order = TRUE))
@@ -114,27 +119,23 @@ build_cell_means_design <- function(time, group = NULL) {
   list(design = design, cell = cell, level_map = setNames(safe_levels, raw_levels))
 }
 
-#' Repeated-measures differential expression: expression ~ 0 + group:time
-#' (or ~ 0 + time if `group_col` is NULL), blocked on subject via
-#' duplicateCorrelation(). For every group level with at least `min_pairs`
-#' subjects sampled at >=2 of that group's timepoints, reports an overall
-#' F-test across all of that group's timepoint contrasts (the headline
-#' "does expression change over time within this group" result -- an
-#' ANOVA-style omnibus test built from CONTRASTS between cell means, not a
-#' raw test of the cell means themselves) plus each individual pairwise
-#' timepoint contrast against that group's earliest timepoint (for
-#' interpretability). A group level with too few paired subjects still
-#' contributes its data to the fit (nothing is dropped), it just gets no
-#' reported contrast.
+#' Repeated-measures differential expression
 #'
-#' @param mat feature x sample matrix, already collapsed/filtered as
-#'   appropriate for this platform (see collapse_to_symbol()).
-#' @param sample_meta one row per sample, matched to mat's columns
-#'   internally by `sample_id_col` (any row order is fine).
-#' @param platform "array" (plain limma) or "rnaseq" (edgeR + voom).
-#' @param min_pairs see above; default 3 is deliberately low (this is a
-#'   first pass, not a well-powered study for every dataset -- see
-#'   R/de/README.md) but still rules out a "pair" of exactly one subject.
+#' `~ 0 + cell` (cell = group x time, or time alone), blocked on subject with
+#' duplicateCorrelation() (two-pass for voom). For every group with at least
+#' `min_pairs` subjects sampled at 2+ of its timepoints: an F-test across the
+#' group's timepoint contrasts (`<group>_time_omnibus`) and each timepoint
+#' against the group's earliest. Groups below `min_pairs` stay in the fit but
+#' get no contrast.
+#'
+#' @param mat Feature x sample matrix (collapsed/filtered for the platform).
+#' @param sample_meta Sample metadata, matched to `mat` by `sample_id_col`.
+#' @param sample_id_col,subject_col,time_col Column names in `sample_meta`.
+#' @param group_col Optional group column (e.g. disease arm).
+#' @param platform `"array"` (limma) or `"rnaseq"` (edgeR + voom).
+#' @param min_pairs Minimum subjects with repeated samples per reported group.
+#' @return List with the fit, contrasts, topTables and the inputs
+#'   write_de_results() needs.
 run_de_timecourse <- function(mat, sample_meta, sample_id_col, subject_col, time_col,
                                group_col = NULL, platform = c("array", "rnaseq"),
                                min_pairs = 3) {
@@ -238,11 +239,17 @@ run_de_timecourse <- function(mat, sample_meta, sample_id_col, subject_col, time
                            subject = subject, dupcor = dupcor, platform = platform))
 }
 
-#' Simple (no repeated measures) differential expression for cross-sectional
-#' datasets: expression ~ 0 + group, no blocking. `contrasts_spec` is a
-#' named character vector of makeContrasts()-style expressions (e.g.
-#' c(SepsisVsHealthy = "Sepsis - Healthy")); defaults to every pairwise
-#' comparison among `group_col`'s levels if not supplied.
+#' Cross-sectional differential expression
+#'
+#' `~ 0 + group`, no blocking.
+#'
+#' @param mat Feature x sample matrix.
+#' @param sample_meta Sample metadata.
+#' @param sample_id_col,group_col Column names in `sample_meta`.
+#' @param platform `"array"` or `"rnaseq"`.
+#' @param contrasts_spec Named makeContrasts()-style expressions (e.g.
+#'   `c(SepsisVsHealthy = "Sepsis - Healthy")`); default every pairwise comparison.
+#' @return Same shape as run_de_timecourse().
 run_de_case_control <- function(mat, sample_meta, sample_id_col, group_col,
                                  platform = c("array", "rnaseq"), contrasts_spec = NULL) {
   platform <- match.arg(platform)
@@ -291,17 +298,18 @@ run_de_case_control <- function(mat, sample_meta, sample_id_col, group_col,
        diagnostics = list(expr = expr_for_diagnostics, group = group, platform = platform))
 }
 
-#' Write every contrast's topTable to CSV, the full eBayes fit to RDS, and
-#' a handful of diagnostic PNGs (PCA colored by the main grouping factor,
-#' a p-value histogram per contrast, and -- RNA-seq only -- the voom
-#' mean-variance trend) -- diagnostics are not optional, see R/de/README.md.
+#' Write a DE result to disk
 #'
-#' `symbol_map` (optional, named character vector: names = mat's rownames
-#' i.e. the feature id the fit was run on, values = gene symbol) adds a
-#' `symbol` column to every CSV -- purely a display convenience for the
-#' RNA-seq datasets (whose feature id is Entrez/Ensembl, not already a
-#' readable symbol; the microarray datasets already collapsed to symbol
-#' via collapse_to_symbol(), so this is typically NULL for those).
+#' Every contrast's topTable as CSV, the fit as RDS, `de_bundle.rds`, and
+#' diagnostic plots (sample PCA, p-value histograms, voom mean-variance trend
+#' for RNA-seq).
+#'
+#' @param de A run_de_timecourse() or run_de_case_control() result.
+#' @param out_dir Output directory (`results/de/<DATASET>/`).
+#' @param color_by Sample factor for the PCA plot.
+#' @param symbol_map Optional feature id -> symbol map, adding a `symbol`
+#'   column (RNA-seq datasets).
+#' @return `out_dir`, invisibly.
 write_de_results <- function(de, out_dir, color_by = NULL, symbol_map = NULL) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 

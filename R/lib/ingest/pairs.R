@@ -1,256 +1,240 @@
-# Pairwise stability computation, run after a family's fits are inserted.
+# Pairwise stability between the fits of one method within a dataset (all
+# seeds and all ranks). Rather than every factor x factor cell, keeps the
+# Hungarian-matched pairs plus the context needed to judge them (docs:
+# Database, "Pair-stability tables"):
+#   fit_pairs   one row per fit pair (WGCNA: + adjusted Rand index)
+#   matches     the matched factor pairs (`match` numbers them per call)
+#   scores      per match and metric: signed value, runner-up (largest
+#               |value| among the unmatched cells in the match's row and
+#               column) and margin = |value| - runner-up
+#   null        per fit pair and metric: n/mean/sd/median/p95/max of the
+#               |unmatched cells|
+#   histograms  20-bin counts of |value| over [0, 1], matched vs unmatched,
+#               pooled per (level_a <= level_b, metric); level = rank
+#               (WGCNA: power)
+#   stability   per (fit_key, factor_index): median matched |value| over
+#               same-rank pairs, per metric (factors.stability_*)
+# Everything is keyed by fit_key; write_dataset_db() resolves keys to ids.
 #
-# Incremental by design: given the fit_ids ADDED this run, pairs are
-# computed as new x (new + existing) fits of the same method -- so adding
-# a family to a DB that already holds others of the same method still
-# yields the complete all-rank-pairs x all-seed-pairs set, without
-# recomputing pairs between fits that were both already present.
-#
-# Every "pure" function below (suffix `_from_universe`) takes a plain
-# `fits`/`universe` data.frame instead of a live DB connection, so it can
-# run during a PARALLEL, no-DB-writer compute phase (see
-# R/lib/ingest/ingest_dataset.R::compute_ingest_bundle()) -- a fit not
-# yet inserted into the DB has no real `fit_id` yet, so these functions
-# use a NEGATIVE id (`-local_id`) to mean "a fit from THIS bundle, not yet
-# merged" versus a positive id, which always means a real, already-merged
-# `fits.fit_id`. The thin wrapper below each pure function preserves the
-# original DB-querying, con-taking API for the single-dataset direct path
-# (R/ingest_results.R) and for the merge phase's use once real fit_ids
-# exist for everything.
+# Factor methods compare loadings by cosine, Pearson and Spearman
+# (similarity.R) and match on cosine -- on |cosine| for sign-ambiguous
+# methods (PCA/sPCA/ICA), whose components can flip sign between fits.
+# WGCNA compares modules by gene Jaccard.
 
-#' All-factor-combination similarity rows for every (new x all) fit pair
-#' of one method, from an in-memory universe (no DB access). `universe`
-#' must have columns `id` (positive = already-merged real fit_id,
-#' negative = this bundle's local id), `rank`, `loadings_file_abs`
-#' (already resolved to an absolute path). `new_ids` is the subset of
-#' `universe$id` to treat as new (at least one side of a pair must be
-#' new). Loading matrices are prepared (see similarity.R) once per fit
-#' and cached in memory for the duration of the call.
+N_SIM_BINS <- 20L
+
+#' A histogram accumulator
 #'
-#' `sign_ambiguous` (default FALSE): set TRUE for PCA/sPCA/ICA -- methods
-#' whose components are unique only up to SIGN (unlike NMF/CoGAPS, whose
-#' non-negativity makes a genuine sign flip essentially impossible). When
-#' TRUE, the 1-to-1 `matched` assignment is decided by
-#' `hungarian_match_abs()` (costed on |cosine|) instead of plain
-#' `hungarian_match()` (costed on signed cosine) -- otherwise a component
-#' that flips sign between two fits (expected for these methods) either
-#' gets matched to the wrong factor entirely, or gets correctly matched
-#' but its strongly-negative signed cosine makes a genuinely stable
-#' component look highly unstable downstream (see app/R/db_helpers.R's
-#' consumers of `factor_pairs.matched`/`.cosine`, which wrap the value in
-#' ABS() for exactly this reason). The raw signed `cosine`/`pearson`/
-#' `spearman` values stored for every cell (matched or not) are
-#' UNCHANGED either way -- this only changes which pairs get flagged
-#' `matched = 1`.
-compute_factor_pairs_from_universe <- function(universe, new_ids, sign_ambiguous = FALSE) {
-  if (nrow(universe) < 2 || length(new_ids) == 0) return(NULL)
+#' @return An environment collecting matched/unmatched |value| counts per
+#'   (level pair, metric); see add_to_histogram().
+new_histogram_acc <- function() new.env(parent = emptyenv())
 
-  is_new <- universe$id %in% new_ids
-  idx <- which(upper.tri(diag(nrow(universe))), arr.ind = TRUE)
-  keep <- is_new[idx[, 1]] | is_new[idx[, 2]]
-  idx <- idx[keep, , drop = FALSE]
-  if (nrow(idx) == 0) return(NULL)
+#' Add similarity values to a histogram accumulator
+#'
+#' @param acc A new_histogram_acc() environment, modified in place.
+#' @param level_a,level_b The two fits' levels (rank; power for WGCNA); stored
+#'   sorted.
+#' @param metric Similarity metric name.
+#' @param values Similarity values; binned by |value| into `N_SIM_BINS` bins
+#'   over \[0, 1\].
+#' @param matched `TRUE` for matched pairs, `FALSE` for unmatched cells.
+#' @return `NULL`, invisibly.
+add_to_histogram <- function(acc, level_a, level_b, metric, values, matched) {
+  if (length(values) == 0) return(invisible(NULL))
+  lv <- sort(c(level_a, level_b))
+  id <- paste(lv[1], lv[2], metric, sep = "|")
+  bins <- pmin(pmax(floor(abs(values) * N_SIM_BINS) + 1L, 1L), N_SIM_BINS)
+  cur <- acc[[id]] %||% list(level_a = lv[1], level_b = lv[2], metric = metric,
+                             matched = integer(N_SIM_BINS), unmatched = integer(N_SIM_BINS))
+  counts <- tabulate(bins, N_SIM_BINS)
+  if (matched) cur$matched <- cur$matched + counts else cur$unmatched <- cur$unmatched + counts
+  acc[[id]] <- cur
+  invisible(NULL)
+}
 
-  prep_cache <- new.env(parent = emptyenv())
-  get_prep <- function(i) {
-    key <- as.character(universe$id[i])
-    if (!exists(key, envir = prep_cache)) {
-      mat <- readRDS(universe$loadings_file_abs[i])
-      assign(key, prepare_loadings(mat), envir = prep_cache)
-    }
-    get(key, envir = prep_cache)
+#' Histogram accumulator to `similarity_histograms` rows
+#'
+#' @param acc A new_histogram_acc() environment.
+#' @return Data frame (level_a, level_b, metric, bin, bin_lo, bin_hi,
+#'   n_matched, n_unmatched), or `NULL` if empty.
+histogram_rows <- function(acc) {
+  ids <- ls(acc)
+  if (length(ids) == 0) return(NULL)
+  edges <- seq(0, 1, length.out = N_SIM_BINS + 1)
+  do.call(rbind, lapply(ids, function(id) {
+    h <- acc[[id]]
+    data.frame(level_a = h$level_a, level_b = h$level_b, metric = h$metric, bin = seq_len(N_SIM_BINS),
+               bin_lo = edges[-length(edges)], bin_hi = edges[-1],
+               n_matched = h$matched, n_unmatched = h$unmatched)
+  }))
+}
+
+#' Summary of unmatched similarities
+#'
+#' @param v Similarity values of the unmatched cells.
+#' @return One-row data frame (n, mean, sd, median, p95, max) of |v|.
+null_stats <- function(v) {
+  v <- abs(v)
+  if (length(v) == 0) return(data.frame(n = 0L, mean = NA_real_, sd = NA_real_, median = NA_real_,
+                                        p95 = NA_real_, max = NA_real_))
+  data.frame(n = length(v), mean = mean(v), sd = if (length(v) > 1) stats::sd(v) else NA_real_,
+             median = stats::median(v), p95 = unname(stats::quantile(v, 0.95)), max = max(v))
+}
+
+#' Matches and their context for one fit pair
+#'
+#' @param key_a,key_b The two fits' fit_keys.
+#' @param level_a,level_b The two fits' levels (rank, or power for WGCNA).
+#' @param sims Named list (by metric) of factors_a x factors_b similarity matrices.
+#' @param match_idx Two-column (a, b) matrix of matched indices.
+#' @param labels_a,labels_b factor_index values of the rows and columns.
+#' @param first_match Number to give the first match (`match` ids run across
+#'   the whole method).
+#' @param acc Histogram accumulator, updated in place.
+#' @return `list(matches, scores, null)`: the matched pairs; per match and
+#'   metric the signed value, runner-up (largest |value| among the unmatched
+#'   cells in the match's row and column) and margin; per metric the
+#'   null_stats() of the unmatched cells.
+summarize_pair <- function(key_a, key_b, level_a, level_b, sims, match_idx, labels_a, labels_b,
+                           first_match, acc) {
+  na <- nrow(sims[[1]]); nb <- ncol(sims[[1]])
+  matched <- matrix(FALSE, na, nb)
+  matched[match_idx] <- TRUE
+  n_match <- nrow(match_idx)
+  match_no <- first_match + seq_len(n_match) - 1L
+  matches <- data.frame(match = match_no, fit_a = key_a, fit_b = key_b,
+                        factor_a = labels_a[match_idx[, 1]], factor_b = labels_b[match_idx[, 2]])
+  scores <- list(); nulls <- list()
+  for (metric in names(sims)) {
+    S <- sims[[metric]]
+    A <- abs(S)
+    runner <- vapply(seq_len(n_match), function(i) {
+      a <- match_idx[i, 1]; b <- match_idx[i, 2]
+      others <- c(A[a, -b], A[-a, b])
+      if (length(others)) max(others) else NA_real_
+    }, numeric(1))
+    value <- S[match_idx]
+    scores[[metric]] <- data.frame(match = match_no, metric = metric, value = value,
+                                   runner_up = runner, margin = abs(value) - runner)
+    unmatched <- S[!matched]
+    nulls[[metric]] <- cbind(data.frame(fit_a = key_a, fit_b = key_b, metric = metric),
+                             null_stats(unmatched))
+    add_to_histogram(acc, level_a, level_b, metric, value, TRUE)
+    add_to_histogram(acc, level_a, level_b, metric, unmatched, FALSE)
   }
+  list(matches = matches, scores = do.call(rbind, scores), null = do.call(rbind, nulls))
+}
 
-  rows <- list()
-  for (p in seq_len(nrow(idx))) {
-    i <- idx[p, 1]; j <- idx[p, 2]
-    sims <- pair_similarities(get_prep(i), get_prep(j))
+#' Row-bind one component of several summarize_pair() results
+#'
+#' @param parts List of summarize_pair() outputs.
+#' @param name Component name (`"matches"`, `"scores"` or `"null"`).
+#' @return The bound data frame, or `NULL`.
+bind_parts <- function(parts, name) {
+  rows <- lapply(parts, `[[`, name)
+  rows <- rows[!vapply(rows, is.null, logical(1))]
+  if (length(rows)) do.call(rbind, rows) else NULL
+}
+
+#' Stability across every pair of a factor method's fits
+#'
+#' Compares every pair of fits (all ranks, all seeds), Hungarian-matching
+#' factors on cosine (|cosine| when `sign_ambiguous`).
+#'
+#' @param keys,ranks,loadings_files Parallel vectors, one entry per ok fit:
+#'   fit_key, rank and absolute path to its genes x factors loadings.
+#' @param sign_ambiguous Whether factors are unique only up to sign.
+#' @return `list(fit_pairs, matches, scores, null, histograms, stability)`,
+#'   keyed by fit_key (`stability` from factor_stability()), or `NULL` for
+#'   fewer than 2 fits.
+compute_factor_pairs <- function(keys, ranks, loadings_files, sign_ambiguous = FALSE) {
+  n <- length(keys)
+  if (n < 2) return(NULL)
+  prep <- lapply(loadings_files, function(p) prepare_loadings(as.matrix(readRDS(p))))
+  acc <- new_histogram_acc()
+  parts <- list(); fit_pairs <- list(); next_match <- 1L
+  for (i in seq_len(n - 1)) for (j in (i + 1):n) {
+    sims <- pair_similarities(prep[[i]], prep[[j]])
     if (is.null(sims)) next
-    match_idx <- if (sign_ambiguous) hungarian_match_abs(sims$cosine) else hungarian_match(sims$cosine)
-    matched_flag <- matrix(0L, nrow(sims$cosine), ncol(sims$cosine))
-    matched_flag[match_idx] <- 1L
-
-    grid_idx <- expand.grid(factor_a = seq_len(nrow(sims$cosine)),
-                            factor_b = seq_len(ncol(sims$cosine)))
-    rows[[length(rows) + 1]] <- data.frame(
-      fit_a    = universe$id[i],
-      fit_b    = universe$id[j],
-      factor_a = grid_idx$factor_a,
-      factor_b = grid_idx$factor_b,
-      cosine   = as.vector(sims$cosine),
-      pearson  = as.vector(sims$pearson),
-      spearman = as.vector(sims$spearman),
-      matched  = as.integer(matched_flag[cbind(grid_idx$factor_a, grid_idx$factor_b)]),
-      same_rank = as.integer(!is.na(universe$rank[i]) && !is.na(universe$rank[j]) &&
-                               universe$rank[i] == universe$rank[j])
-    )
+    idx <- if (sign_ambiguous) hungarian_match_abs(sims$cosine) else hungarian_match(sims$cosine)
+    p <- summarize_pair(keys[i], keys[j], ranks[i], ranks[j], sims, idx,
+                        seq_len(nrow(sims$cosine)), seq_len(ncol(sims$cosine)), next_match, acc)
+    next_match <- next_match + nrow(idx)
+    parts[[length(parts) + 1]] <- p
+    fit_pairs[[length(fit_pairs) + 1]] <- data.frame(
+      fit_a = keys[i], fit_b = keys[j], same_rank = as.integer(isTRUE(ranks[i] == ranks[j])),
+      n_factors_a = nrow(sims$cosine), n_factors_b = ncol(sims$cosine), ari = NA_real_)
   }
-  if (length(rows) == 0) return(NULL)
-  do.call(rbind, rows)
+  if (length(parts) == 0) return(NULL)
+  out <- list(fit_pairs = do.call(rbind, fit_pairs), matches = bind_parts(parts, "matches"),
+              scores = bind_parts(parts, "scores"), null = bind_parts(parts, "null"),
+              histograms = histogram_rows(acc))
+  out$stability <- factor_stability(out)
+  out
 }
 
-#' Methods whose components are unique only up to sign (see
-#' compute_factor_pairs_from_universe()'s `sign_ambiguous` doc) -- kept
-#' here, not in app.R's NEG_DIRECTION_METHODS, since this file is used by
-#' plain Rscript ingest entry points with no Shiny dependency.
-SIGN_AMBIGUOUS_METHODS <- c("pca", "spca", "ica")
-
-#' Thin DB-querying wrapper around compute_factor_pairs_from_universe() --
-#' unchanged public behavior for the single-dataset direct path
-#' (R/ingest_results.R) and for merge-time use once every fit (old and
-#' newly-merged) already has a real fit_id in the DB.
-compute_factor_pairs <- function(con, db_path, dataset_id, method, new_fit_ids) {
-  fits <- DBI::dbGetQuery(con,
-    "SELECT fit_id AS id, rank, loadings_file FROM fits
-     WHERE dataset_id = ? AND method = ? AND status = 'ok'
-       AND loadings_file IS NOT NULL",
-    params = list(dataset_id, method))
-  if (nrow(fits) < 2 || length(new_fit_ids) == 0) return(invisible(0L))
-  fits$loadings_file_abs <- vapply(fits$loadings_file, resolve_artifact,
-                                    character(1), db_path = db_path)
-
-  rows <- compute_factor_pairs_from_universe(
-    fits[, c("id", "rank", "loadings_file_abs")], new_fit_ids,
-    sign_ambiguous = method %in% SIGN_AMBIGUOUS_METHODS)
-  if (is.null(rows)) return(invisible(0L))
-
-  for (start in seq(1, nrow(rows), by = 200)) {
-    chunk <- rows[start:min(start + 199, nrow(rows)), , drop = FALSE]
-    DBI::dbWriteTable(con, "factor_pairs", chunk, append = TRUE)
-  }
-  invisible(nrow(rows))
+#' Per-factor stability
+#'
+#' The median matched |similarity| of each factor across its same-rank fit
+#' pairs (`factors.stability_*`).
+#'
+#' @param pairs A compute_factor_pairs() result.
+#' @return Data frame (fit_key, factor_index, cosine, pearson, spearman), or
+#'   `NULL` without same-rank pairs.
+factor_stability <- function(pairs) {
+  same <- pairs$fit_pairs[pairs$fit_pairs$same_rank == 1, c("fit_a", "fit_b")]
+  m <- merge(pairs$matches, same, by = c("fit_a", "fit_b"))
+  if (nrow(m) == 0) return(NULL)
+  s <- merge(m, pairs$scores, by = "match")
+  long <- rbind(data.frame(fit_key = s$fit_a, factor_index = s$factor_a, metric = s$metric, v = abs(s$value)),
+                data.frame(fit_key = s$fit_b, factor_index = s$factor_b, metric = s$metric, v = abs(s$value)))
+  agg <- stats::aggregate(v ~ fit_key + factor_index + metric, data = long, FUN = stats::median)
+  wide <- stats::reshape(agg, idvar = c("fit_key", "factor_index"), timevar = "metric", direction = "wide")
+  names(wide) <- sub("^v\\.", "", names(wide))
+  for (m in c("cosine", "pearson", "spearman")) if (is.null(wide[[m]])) wide[[m]] <- NA_real_
+  wide[, c("fit_key", "factor_index", "cosine", "pearson", "spearman")]
 }
 
-#' Per-factor stability summaries: median matched similarity across all
-#' SAME-RANK pairs the factor participates in, from an in-memory
-#' `factor_pairs`-shaped data.frame (no DB access) -- `pairs` may mix
-#' negative (this bundle's local id) and positive (already-merged) `fit_a`/
-#' `fit_b` values, exactly as produced by compute_factor_pairs_from_universe().
-#' Returns a data.frame(fit_id, factor_index, cosine, pearson, spearman)
-#' -- one row per (fit, factor) needing a stability update; the caller
-#' applies it (remapping negative ids to real ones first, if needed).
-update_factor_stability_from_pairs <- function(pairs) {
-  pairs <- pairs[pairs$matched == 1 & pairs$same_rank == 1, , drop = FALSE]
-  if (nrow(pairs) == 0) return(NULL)
-
-  long <- rbind(
-    data.frame(fit_id = pairs$fit_a, factor_index = pairs$factor_a,
-               cosine = pairs$cosine, pearson = pairs$pearson, spearman = pairs$spearman),
-    data.frame(fit_id = pairs$fit_b, factor_index = pairs$factor_b,
-               cosine = pairs$cosine, pearson = pairs$pearson, spearman = pairs$spearman)
-  )
-  aggregate(cbind(cosine, pearson, spearman) ~ fit_id + factor_index,
-            data = long, FUN = median)
-}
-
-#' Thin DB-querying wrapper: reads this dataset+method's factor_pairs
-#' (every fit already has a real fit_id at this point) and applies the
-#' resulting stability UPDATEs. No BEGIN/COMMIT here -- this function's
-#' callers (R/lib/ingest/ingest_dataset.R) always run it inside their own
-#' wrapping transaction; a nested BEGIN here would error ("cannot start a
-#' transaction within a transaction").
-update_factor_stability <- function(con, dataset_id, method) {
-  pairs <- DBI::dbGetQuery(con,
-    "SELECT fp.fit_a, fp.fit_b, fp.factor_a, fp.factor_b,
-            fp.cosine, fp.pearson, fp.spearman, fp.matched, fp.same_rank
-     FROM factor_pairs fp
-     JOIN fits fa ON fa.fit_id = fp.fit_a
-     WHERE fa.dataset_id = ? AND fa.method = ?",
-    params = list(dataset_id, method))
-  agg <- update_factor_stability_from_pairs(pairs)
-  if (is.null(agg)) return(invisible(NULL))
-
-  for (r in seq_len(nrow(agg))) {
-    DBI::dbExecute(con,
-      "UPDATE factors SET stability_cosine = ?, stability_pearson = ?, stability_spearman = ?
-       WHERE fit_id = ? AND factor_index = ?",
-      params = list(agg$cosine[r], agg$pearson[r], agg$spearman[r],
-                    agg$fit_id[r], agg$factor_index[r]))
+#' Stability across every pair of WGCNA fits
+#'
+#' Adjusted Rand index of the two module assignments, and modules
+#' Hungarian-matched by gene Jaccard (module 0, unassigned genes, excluded).
+#'
+#' @param mod_list List (parallel to `keys`) of data frames (gene, module).
+#' @param keys The fits' fit_keys.
+#' @param levels The fits' soft-thresholding powers (histogram levels).
+#' @return Same shape as compute_factor_pairs() with metric `"jaccard"` and
+#'   `stability = NULL`, or `NULL` for fewer than 2 fits.
+compute_wgcna_pairs <- function(mod_list, keys, levels) {
+  n <- length(keys)
+  if (n < 2) return(NULL)
+  acc <- new_histogram_acc()
+  parts <- list(); fit_pairs <- list(); next_match <- 1L
+  for (i in seq_len(n - 1)) for (j in (i + 1):n) {
+    a <- mod_list[[i]]; b <- mod_list[[j]]
+    shared <- intersect(a$gene, b$gene)
+    la <- a$module[match(shared, a$gene)]
+    lb <- b$module[match(shared, b$gene)]
+    mods_a <- setdiff(sort(unique(la)), 0L)
+    mods_b <- setdiff(sort(unique(lb)), 0L)
+    fit_pairs[[length(fit_pairs) + 1]] <- data.frame(
+      fit_a = keys[i], fit_b = keys[j], same_rank = 0L,
+      n_factors_a = length(mods_a), n_factors_b = length(mods_b),
+      ari = mclust::adjustedRandIndex(la, lb))
+    if (length(mods_a) == 0 || length(mods_b) == 0) next
+    genes_a <- lapply(mods_a, function(m) shared[la == m])
+    genes_b <- lapply(mods_b, function(m) shared[lb == m])
+    jac <- outer(seq_along(mods_a), seq_along(mods_b), Vectorize(function(x, y) {
+      inter <- length(intersect(genes_a[[x]], genes_b[[y]]))
+      uni <- length(genes_a[[x]]) + length(genes_b[[y]]) - inter
+      if (uni > 0) inter / uni else 0
+    }))
+    idx <- hungarian_match(jac)
+    parts[[length(parts) + 1]] <- summarize_pair(keys[i], keys[j], levels[i], levels[j],
+                                                 list(jaccard = jac), idx, mods_a, mods_b, next_match, acc)
+    next_match <- next_match + nrow(idx)
   }
-  invisible(NULL)
-}
-
-#' WGCNA: ARI between module assignments for every (new x all) fit pair,
-#' plus per-module Jaccard overlaps with Hungarian matching -- pure,
-#' in-memory version (no DB access). `mod_list` is a named list (keys =
-#' as.character(id), matching `ids`) of data.frames with columns
-#' `gene`/`module`, for every fit (old + new) of this dataset. `ids`
-#' holds every fit's id (positive = already-merged, negative = this
-#' bundle's local id); `new_ids` the subset to treat as new. Returns
-#' list(fit_pairs = data.frame(fit_a, fit_b, ari, n_modules_a,
-#' n_modules_b), module_pairs = data.frame(fit_a, module_a, fit_b,
-#' module_b, jaccard, matched)) or NULL if nothing to compute.
-compute_wgcna_pairs_from_universe <- function(mod_list, ids, new_ids) {
-  if (length(ids) < 2 || length(new_ids) == 0) return(NULL)
-  is_new <- ids %in% new_ids
-
-  fit_pair_rows <- list()
-  module_pair_rows <- list()
-  for (i in seq_along(ids)) {
-    for (j in seq_along(ids)) {
-      if (i >= j) next
-      if (!is_new[i] && !is_new[j]) next
-      a <- mod_list[[as.character(ids[i])]]
-      b <- mod_list[[as.character(ids[j])]]
-      shared <- intersect(a$gene, b$gene)
-      la <- a$module[match(shared, a$gene)]
-      lb <- b$module[match(shared, b$gene)]
-      ari <- mclust::adjustedRandIndex(la, lb)
-
-      fit_pair_rows[[length(fit_pair_rows) + 1]] <- data.frame(
-        fit_a = ids[i], fit_b = ids[j], ari = ari,
-        n_modules_a = length(setdiff(unique(la), 0L)),
-        n_modules_b = length(setdiff(unique(lb), 0L)))
-
-      mods_a <- setdiff(sort(unique(la)), 0L)
-      mods_b <- setdiff(sort(unique(lb)), 0L)
-      if (length(mods_a) == 0 || length(mods_b) == 0) next
-      jac <- matrix(0, length(mods_a), length(mods_b))
-      genes_a <- lapply(mods_a, function(m) shared[la == m])
-      genes_b <- lapply(mods_b, function(m) shared[lb == m])
-      for (x in seq_along(mods_a)) {
-        for (y in seq_along(mods_b)) {
-          inter <- length(intersect(genes_a[[x]], genes_b[[y]]))
-          uni   <- length(genes_a[[x]]) + length(genes_b[[y]]) - inter
-          jac[x, y] <- if (uni > 0) inter / uni else 0
-        }
-      }
-      match_idx <- hungarian_match(jac)
-      matched_flag <- matrix(0L, nrow(jac), ncol(jac))
-      matched_flag[match_idx] <- 1L
-      grid_idx <- expand.grid(x = seq_along(mods_a), y = seq_along(mods_b))
-      module_pair_rows[[length(module_pair_rows) + 1]] <- data.frame(
-        fit_a = ids[i], module_a = mods_a[grid_idx$x],
-        fit_b = ids[j], module_b = mods_b[grid_idx$y],
-        jaccard = jac[cbind(grid_idx$x, grid_idx$y)],
-        matched = as.integer(matched_flag[cbind(grid_idx$x, grid_idx$y)]))
-    }
-  }
-  if (length(fit_pair_rows) == 0) return(NULL)
-  list(fit_pairs = do.call(rbind, fit_pair_rows),
-       module_pairs = if (length(module_pair_rows) == 0) NULL else do.call(rbind, module_pair_rows))
-}
-
-#' Thin DB-querying wrapper around compute_wgcna_pairs_from_universe() --
-#' unchanged public behavior for the single-dataset direct path and for
-#' merge-time use once every fit already has a real fit_id.
-compute_wgcna_pairs <- function(con, dataset_id, new_fit_ids) {
-  fits <- DBI::dbGetQuery(con,
-    "SELECT fit_id FROM fits
-     WHERE dataset_id = ? AND method = 'wgcna' AND status = 'ok'",
-    params = list(dataset_id))
-  if (nrow(fits) < 2 || length(new_fit_ids) == 0) return(invisible(NULL))
-
-  mods <- DBI::dbGetQuery(con, sprintf(
-    "SELECT fit_id, gene, module FROM wgcna_modules WHERE fit_id IN (%s)",
-    paste(fits$fit_id, collapse = ",")))
-  mod_list <- split(mods[, c("gene", "module")], mods$fit_id)
-
-  out <- compute_wgcna_pairs_from_universe(mod_list, fits$fit_id, new_fit_ids)
-  if (is.null(out)) return(invisible(NULL))
-  DBI::dbWriteTable(con, "wgcna_fit_pairs", out$fit_pairs, append = TRUE)
-  if (!is.null(out$module_pairs)) {
-    DBI::dbWriteTable(con, "wgcna_module_pairs", out$module_pairs, append = TRUE)
-  }
-  invisible(NULL)
+  list(fit_pairs = do.call(rbind, fit_pairs), matches = bind_parts(parts, "matches"),
+       scores = bind_parts(parts, "scores"), null = bind_parts(parts, "null"),
+       histograms = histogram_rows(acc), stability = NULL)
 }

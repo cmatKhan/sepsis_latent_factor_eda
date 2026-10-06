@@ -1,69 +1,38 @@
-# Shared metadata/config loading + validation.
-#
-# `dataset_metadata.yml` describes ONE dataset x ONE matrix, resolved one of
-# three ways (see R/lib/matrices.R::load_input_matrix() for the precedence):
-#   1. `dataset.matrix_path` -- an already-built matrix, used as-is.
-#   2. `dataset.preprocessing_script` -- a script YOU write that reads the
-#      raw parquet trio, does arbitrary manipulation, and writes the result
-#      out (see R/README.md's "Preprocessing script contract"). Any
-#      sample/feature filtering belongs here, not as a post-hoc id list --
-#      if you need more than a bare long-to-wide pivot, write a script.
-#   3. neither given -- the framework reads `dataset.expression_path`
-#      (long format) and pivots it wide with no other transformation.
-#
-# There is no "bases" concept here: this framework always runs on exactly
-# one matrix per config. If you want to run, say, Day 0 and Day 2 samples
-# separately, build/point at two matrices and write two dataset_metadata.yml
-# files (one per run) -- see R/README.md.
-#
-# `methods:` and `slurm:` (SLURM resource settings, formerly a separate
-# cluster_config.yml -- merged in so different datasets can use different
-# resources) both live in the SAME file. A method is enabled purely by
-# being PRESENT under `methods:` -- there is no top-level `enabled:` flag.
-#
-# Each method's block IS its overrides, directly -- e.g. `methods.pca.rank`
-# -- layered on top of that method's own script-defined `defaults` (see
-# R/methods/<name>.R). There's no wrapper key: a method now describes
-# exactly one kind of run (a stability-design second family, and the
-# `full`/`enabled`/`params` wrapper that came with it, were explored and
-# deliberately removed; see git history if reviving either). A key only
-# takes effect if that method's `build_grid()` actually references it --
-# see each R/methods/<name>.R file for exactly which keys it wires
-# through, and its own `defaults` for what happens if you omit one.
-#
-# Because the schema is now effectively opaque per-method (this file has
-# no way to know which keys a given method's build_grid() cares about),
-# validation here is limited to the boolean-token-key footgun below, plus
-# checking that a configured method actually exists -- both eager
-# (before any slurm_apply()/slurm_call() is constructed) so a typo'd path
-# fails fast on the login node instead of surfacing as a cryptic error
-# deep in a batch array.
+# Reading and validating dataset configs (config/<dataset>_config.yml).
+# A method runs when it appears under `methods:`; each method block holds
+# overrides of that method's registry `defaults`. Validation runs when
+# _targets.R is read, so a bad config fails before any job is submitted
+# (docs: Data, "Dataset configs").
 
 library(yaml)
 
 if (!exists("%||%")) `%||%` <- function(a, b) if (is.null(a)) b else a
 
-#' Read and validate a dataset_metadata.yml file (methods + slurm sections
-#' included).
+#' Read and validate a dataset config
 #'
-#' @param manifest optional method manifest, as returned by
-#'   `discover_method_registries()` (see R/lib/method_registry.R) --
-#'   used both to check that every configured method was actually
-#'   discovered, and to generically check per-method requirements via
-#'   each registry's `requires_subject_timepoint` flag (no current method
-#'   sets it, following CP/Tucker's removal 2026-09-29 -- see
-#'   R/README.md's "CP/Tucker (removed)" section -- but it's left in place
-#'   as generic infrastructure a future method could reuse), instead of
-#'   hardcoding method names here. Defaults to NULL for callers (e.g.
-#'   R/legacy/*.R) that never source R/methods/*.R at all -- both checks
-#'   are skipped entirely when no manifest is supplied (see
-#'   validate_dataset_metadata() below).
-read_dataset_metadata <- function(path, manifest = NULL) {
-  meta <- yaml::read_yaml(path)
+#' @param path Path to `config/<dataset>_config.yml`.
+#' @param manifest Method manifest from discover_method_registries(), or
+#'   `NULL` to skip the method checks in validate_dataset_metadata().
+#' @param data_root Data root that relative data paths resolve against
+#'   (default_data_root()).
+#' @return The parsed config, data paths resolved, after validation.
+read_dataset_metadata <- function(path, manifest = NULL, data_root = default_data_root()) {
+  meta <- read_dataset_yaml(path, data_root)
   validate_dataset_metadata(meta, manifest)
   meta
 }
 
+#' Validate a parsed dataset config
+#'
+#' Checks that the matrix can be built (`matrix_path` or
+#' `preprocessing_script` exists, or `expression_path` is set), that at least
+#' one method is configured, that every configured method was discovered, and
+#' that no `methods:` key is a YAML boolean token read as `TRUE`/`FALSE`
+#' (docs: Data, "YAML keys that are booleans"). Errors on the first problem.
+#'
+#' @param meta A parsed config.
+#' @param manifest Method manifest, or `NULL` to skip the method checks.
+#' @return `meta`, invisibly.
 validate_dataset_metadata <- function(meta, manifest = NULL) {
   stopifnot(
     "dataset_metadata.yml must have a top-level `dataset` block" = !is.null(meta$dataset),
@@ -103,7 +72,7 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
   # which downstream becomes the column name "FALSE." (R's make.names()
   # escaping the reserved word) and breaks the tool call with "unused
   # argument". Quote any such key in YAML (`"n": [...]`) -- see
-  # R/README.md's config reference. Applied recursively (e.g. CoGAPS's
+  # docs/data.qmd ("YAML keys that are booleans"). Applied recursively (e.g. CoGAPS's
   # nested `params`/`distributed_params`/`run`), since there's no longer a
   # fixed wrapper depth to stop at.
   check_bool_key_typo_recursive <- function(block, label) {
@@ -120,7 +89,7 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
   }
 
   # Only checks "does this method exist" when a manifest is supplied (i.e.
-  # from R/create_slurm_bundle.R, which sources R/methods/*.R before
+  # from _targets.R, which sources R/methods/*.R before
   # calling read_dataset_metadata()) -- meaningless without it. Legacy
   # callers (manifest = NULL) skip that half; the boolean-token-key check
   # always runs regardless.
@@ -166,54 +135,5 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
     for (nm in setdiff(names(meta$methods), "network")) check_subject_timepoint(nm)
   }
 
-  validate_slurm_config(meta$slurm, names(meta$methods))
   invisible(meta)
-}
-
-#' Every method actually present in `methods:` must have a matching
-#' `slurm:` entry with the fields submit_job_family() needs.
-#'
-#' Also guards against a real R `yaml` package (2.3.12, confirmed) footgun:
-#' `<<: *anchor` merge keys DO NOT let sibling keys in the same mapping
-#' override the merged-in values -- every key after `<<:` is silently
-#' dropped instead. A config that used anchors this way had EVERY method's
-#' slurm entry silently collapse to whichever one anchor originally
-#' defined, container included. It's normal/expected for SOME methods to
-#' intentionally share a container (e.g. pca/nmf both just need
-#' tidyverse) -- but if there are 3+ methods configured and EVERY single
-#' one ends up with the identical container, that's the exact symptom of
-#' the merge-key bug, not a real intentional setup, so it's flagged.
-validate_slurm_config <- function(slurm, method_names) {
-  if (is.null(slurm)) stop("dataset_metadata.yml must have a top-level `slurm` block ",
-                            "(SLURM resource settings per method -- formerly cluster_config.yml)")
-  required <- c("mem", "cpus_per_task", "time", "container", "libPaths", "sh_template", "rscript_path")
-  check_entry <- function(entry, label) {
-    missing <- setdiff(required, names(entry))
-    if (length(missing) > 0) {
-      stop("slurm entry '", label, "' is missing required field(s): ", paste(missing, collapse = ", "))
-    }
-  }
-  containers <- list()
-  for (nm in method_names) {
-    if (nm == "network") {
-      for (backend in names(slurm$network)) {
-        check_entry(slurm$network[[backend]], paste0("network.", backend))
-        containers[[paste0("network.", backend)]] <- slurm$network[[backend]]$container
-      }
-    } else {
-      if (is.null(slurm[[nm]])) stop("slurm.", nm, " is missing (methods.", nm, " is configured)")
-      check_entry(slurm[[nm]], nm)
-      containers[[nm]] <- slurm[[nm]]$container
-    }
-  }
-  container_vals <- unlist(containers)
-  if (length(container_vals) >= 3 && length(unique(container_vals)) == 1) {
-    warning("Every configured method's slurm entry ([", paste(names(containers), collapse = ", "),
-            "]) resolves to the SAME container ('", container_vals[[1]], "') -- this is the exact ",
-            "symptom of R yaml's `<<: *anchor` merge-key bug, where sibling keys after `<<:` are ",
-            "silently dropped (see this function's comment / R/README.md's config reference). ",
-            "Write each slurm entry out in full rather than using anchors, unless every method ",
-            "genuinely does share one container.", call. = FALSE)
-  }
-  invisible(slurm)
 }

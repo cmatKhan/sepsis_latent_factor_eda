@@ -1,0 +1,135 @@
+---
+title: "Data"
+---
+
+## Data root
+
+Raw data lives in the HuggingFace sepsis collection, copied to the cluster at
+`/scratch/mblab/chasem/hf_sepsis_collection`. Dataset configs give paths relative to that
+root; `R/lib/data_paths.R::resolve_data_paths()` joins them. The root is `data_root` in
+`config/pipeline.yml`, overridden by the `SEPSIS_DATA_ROOT` environment variable. Every
+reader of a dataset config goes through `read_dataset_yaml()`, so moving the data means
+changing one setting.
+
+## Dataset configs
+
+Each `config/<dataset>_config.yml` describes **one matrix**: where its data is, how to build
+it, and each method's parameter grid. Subsets analysed separately (e.g. one timepoint) are
+separate configs, each with its own `dataset.id`; there's no "several matrices in one
+config". `config/dataset_metadata.example.yml` is a fully commented template.
+
+To add a dataset:
+
+1. Write `config/<dataset>_config.yml` (copy the example).
+2. Add its `dataset.id` to `datasets:` in `config/pipeline.yml`.
+3. Run the pipeline. Only the new dataset's targets are built.
+
+File names needn't match ids (`ANEMONES_day1_config.yml` declares `ANEMONES_DAY1`); the
+pipeline finds a config by its declared `dataset.id`.
+
+The `dataset:` block:
+
+| Key | Meaning |
+|---|---|
+| `id` | unique dataset id, used in target and DB names |
+| `description` | free text |
+| `expression_path` | long-format expression parquet (feature id, sample id, value) |
+| `sample_metadata_path`, `feature_metadata_path` | sample and feature metadata parquets |
+| `sample_id_col`, `feature_id_col`, `value_col` | column names in those files |
+| `ensembl_col` | feature-metadata column holding Ensembl gene ids -- the cross-dataset identifier (below) |
+| `symbol_col` | optional; feature-metadata column of gene symbols, for display only |
+| `subject_id_col` | optional; sample-metadata column naming each sample's subject (the app's trajectory view) |
+| `matrix_path` / `preprocessing_script` | how the matrix is built (below) |
+
+`feature_id_col` must match the column of `feature_metadata_path` whose values equal the
+matrix's row names.
+
+The `methods:` block holds each method's parameter grid; see [Methods](methods.qmd). A
+method runs for a dataset only if it appears there.
+
+### YAML keys that are booleans
+
+R's `yaml` package reads an **unquoted** key that is a YAML 1.1 boolean token -- `y`, `n`,
+`yes`, `no`, `on`, `off`, `true`, `false`, in any capitalization -- as `TRUE`/`FALSE`, not
+the string you wrote. A method argument literally named `n` silently becomes the key
+`FALSE`. `read_dataset_metadata()` errors on a `TRUE`/`FALSE` key under `methods:`; quote
+such keys (`"n": [...]`).
+
+## Building a matrix
+
+The pipeline never assumes a normalization or metadata values. `load_input_matrix()`
+(`R/lib/matrices.R`) builds the matrix one of three ways, first match wins:
+
+| # | Config | Behavior |
+|---|---|---|
+| 1 | `dataset.matrix_path` | reads that RDS matrix as-is |
+| 2 | `dataset.preprocessing_script` | runs your script against the raw parquet trio |
+| 3 | neither | pivots `expression_path` wide -- no normalization, no filtering |
+
+Every current dataset uses a preprocessing script (`R/preprocessing/<dataset>_preprocessing.R`).
+The result must be a plain matrix with row names = feature ids and column names = sample ids.
+Any sample or gene filtering belongs in the script (or the prebuilt matrix).
+
+### Preprocessing-script contract
+
+The script is `source()`d with these variables already defined:
+
+| Variable | From |
+|---|---|
+| `expression_path`, `sample_metadata_path`, `feature_metadata_path` | `dataset.*_path` |
+| `sample_id_col`, `feature_id_col`, `value_col`, `ensembl_col` | `dataset.*_col` |
+| `tmp_dir` | a directory created for this run |
+
+It must write its feature × sample matrix to `file.path(tmp_dir, "matrix.rds")`. To also run
+it by hand, guard on `tmp_dir`, which only exists when the pipeline sources the script:
+
+```r
+framework_run <- exists("tmp_dir", inherits = FALSE)
+if (!framework_run) {
+  expression_path <- "~/local/path/to/expression.parquet"   # ... etc.
+}
+# ... your logic ...
+if (framework_run) saveRDS(final_mat, file.path(tmp_dir, "matrix.rds"))
+```
+
+The one transform the pipeline applies itself is the non-negativity shift NMF and CoGAPS
+need (`shift_nonneg()`, the `mat_nn_<dataset>` target): an algorithm requirement, not a
+normalization choice.
+
+## Dataset families
+
+`config/dataset_families.yml` lists which datasets are timepoints or subsets of the same
+cohort (e.g. `ANEMONES` and `ANEMONES_DAY1`...`ANEMONES_DISCHARGE`). It decides two things:
+
+- **projectR intercept:** projections within a family leave out the intercept; projections
+  across families include it.
+- **Gene-space agreement** is computed between datasets in the same family only.
+
+Families are listed explicitly, not inferred from dataset-id naming.
+
+## Gene identifiers across datasets
+
+Each dataset's matrix keeps its platform's own feature ids (Illumina/Affymetrix probes,
+Entrez ids, versioned Ensembl ids). Anything that compares datasets or gene sets -- enrichment
+and projectR -- first remaps row names to **version-stripped Ensembl gene ids**
+(`ENSG00000001234.2` → `ENSG00000001234`) with `build_ensembl_map()`/`remap_to_ensembl()`
+(`R/lib/ingest/symbol_mapping.R`), using `dataset.ensembl_col`. Several probes mapping to one
+gene are collapsed; a `;`-separated multi-gene entry takes its first gene.
+
+Gene **symbols** (`build_symbol_map()`, `dataset.symbol_col`) are for display only, never for
+matching: symbols are ambiguous and renamed across annotation releases.
+
+A dataset with a missing or wrong `ensembl_col` keeps its native ids, so it matches almost
+nothing in other datasets. That shows up not as an error but as near-zero `n_genes_matched`
+in `projections` (projectR logs "0 row names matched").
+
+## Which datasets are built
+
+`config/pipeline.yml` lists the 30 datasets the pipeline builds. Six configs exist but are
+left out because their inputs are incomplete:
+
+| Dataset(s) | Why |
+|---|---|
+| `gains` | `R/preprocessing/gains_preprocessing.R` is an unfinished stub: it reads the four sub-cohort expression files (E-MTAB-4421/4451/5273/5274) but never builds a matrix. Whether to pool the four accessions is still undecided. |
+| `ROSE`, `ROSE_DAY0`, `ROSE_DAY2` | their data paths point at `/home/chase/...`, and there is no ROSE data in the data root |
+| `MARS`, `SHIP-TREND` | their preprocessing scripts don't exist |

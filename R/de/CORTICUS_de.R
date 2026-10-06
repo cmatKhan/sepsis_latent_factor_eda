@@ -1,5 +1,5 @@
 # Differential expression over time for CORTICUS (GSE106878), array
-# platform, 2-level timecourse (Pre / Post(24h)). See R/de/README.md.
+# platform, 2-level timecourse (Pre / Post(24h)). See docs/methods.qmd ("Differential expression").
 #
 # Real metadata (94 samples, 47 patients, all balanced Pre+Post24h pairs):
 # sample_id, patient_id, sex, age, responder, pre_treatment,
@@ -8,7 +8,7 @@
 # -- there is no healthy/other-condition comparator arm to include, unlike
 # ANEMONES/GSE13904/GSE54514, so no `group_col` is used (plain `~ 0 +
 # timepoint`, blocked on patient). `treatment` is left out of the model
-# deliberately -- see the header of R/de/README.md for why this first pass
+# deliberately -- see docs/methods.qmd ("Differential expression") for why this first pass
 # keeps every dataset's model to the minimum the data structurally
 # requires rather than chasing every available covariate.
 #
@@ -18,10 +18,11 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/CORTICUS_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/CORTICUS_config.yml"))$dataset
 
 message("[CORTICUS] loading raw expression matrix...")
 mat <- pivot_expression_long(ds_meta)

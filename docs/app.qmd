@@ -1,0 +1,50 @@
+---
+title: "Launching the app"
+---
+
+::: {.callout-warning}
+**The app has not been updated to the redesigned database schema** ([Database](database.qmd)).
+Its queries target the previous layout, so it won't work against the current pipeline DB yet.
+:::
+
+## Launching
+
+```r
+Sys.setenv(STABILITY_DB = "results/targets/stability.sqlite")   # optional
+shiny::runApp("app")
+```
+
+```sh
+STABILITY_DB=/path/to/stability.sqlite Rscript -e "shiny::runApp('app')"
+```
+
+- `STABILITY_DB` picks the database; if unset, the app uses `db_path` from
+  `config/pipeline.yml` (launched from the project root or `app/`).
+- The app only reads the DB. Datasets, methods and fits are queried live, so new results appear
+  on the next launch.
+
+## What it shows
+
+A drill-down explorer: dataset > method > rank or parameter > factor. A breadcrumb at the top
+navigates back up, and a global toggle switches the similarity metric (cosine, Pearson,
+Spearman) everywhere.
+
+| Level | Scope | Shows |
+|---|---|---|
+| 0 | dataset | each method's headline stability, fit and failure counts |
+| 1 | method | stability by rank across seeds; reconstruction error by rank (PCA, sPCA); cross-rank persistence and factor-tracking trajectories; for WGCNA, agreement between powers, module counts and the scale-free-topology fit |
+| 2 | rank or parameter | seed × seed matched similarity; per-factor stability; factor × factor heatmaps with matches outlined (WGCNA: module sizes and cross-power overlap) |
+| 3 | factor | top-loading genes; the factor's match in every other fit; enrichment results from the pipeline |
+
+PCA and sPCA are deterministic, so their Level 1 is a reconstruction-error-by-rank plot. PCA is
+one fit at the largest rank; viewing rank *n* shows its first *n* components.
+
+A separate **Compare methods** screen (top-right toggle) takes any two fits -- e.g. a PCA fit as a
+baseline against an NMF, CoGAPS or WGCNA fit -- and shows their factor or eigengene similarity
+(matched by absolute value, so a strong match to a component's negative side shows correctly)
+alongside each side's enrichment results.
+
+## Not yet in the app
+
+- Views across datasets (the DB already holds projections and gene-space agreement).
+- Fetching data directly from the HuggingFace Hub (local paths only).

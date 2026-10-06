@@ -1,24 +1,22 @@
-# NMF (NNLM::nnmf) method registry.
+# NMF (NNLM::nnmf()). `k` is the rank. `seed` has no nnmf() argument: the fit
+# calls set.seed() first. `n.threads` (OpenMP) defaults to the nmf
+# controller's `cpus_per_task` and is left out of a fit's identity. Other
+# nnmf() arguments pass through `...` once added to `defaults` and
+# build_grid(). Fits the non-negative shift `mat_nn`.
 #
-# `k` is nnmf()'s real rank argument. `seed` has no nnmf() equivalent --
-# this framework calls `set.seed(seed)` before `nnmf()` itself. The job
-# function takes `...` so any nnmf() argument not explicitly named as a
-# formal here (alpha, beta, method, loss, ...) still passes through if
-# you add it to `defaults`/`build_grid` below and wire it into the
-# `expand.grid()` call -- see R/README.md's "Adding a new method".
-#
-# `n.threads` defaults to `slurm.nmf.cpus_per_task` (via
-# `resource_defaults` below) unless set explicitly in `defaults`/config --
-# same convention as WGCNA's `nThreads` (R/methods/wgcna.R). nnmf() has
-# real OpenMP-based internal multithreading here (confirmed via
-# `args(NNLM::nnmf)`), previously never wired through -- with
-# `cpus_per_task: 1` this was a no-op, not a wasted request, but raising
-# `cpus_per_task` now actually speeds up each fit.
-#
-# Operates on the single matrix `mat_nn` (non-negative-shifted, set as a
-# global object by the orchestrator script) -- there is no basis argument.
+# The fit targets depend on this file's registry and fit function: editing
+# their code refits the method (comments don't count). Docs: Methods.
 
-run_nmf_seed_sweep_job <- function(k, seed, max.iter = 10000, verbose = 0L, n.threads = 1L, ...) {
+#' Fit NMF for one (k, seed)
+#'
+#' @param k Rank.
+#' @param seed Random seed (set.seed() before fitting).
+#' @param max.iter,verbose,n.threads,... Passed to NNLM::nnmf().
+#' @return `list(rank, seed, mse, W, H, n.iteration, target.loss,
+#'   average.epochs, nnmf, elapsed)`: W is genes x patterns, H patterns x
+#'   samples, `nnmf` the rest of nnmf()'s output (per-iteration traces,
+#'   run time); or `list(rank, seed, mse = NA, error, elapsed)` on failure.
+run_nmf_seed_sweep_job <- function(k, seed, max.iter = 10000, verbose = 0L, n.threads = 1L, ...) capture_fit(base = list(rank = k, seed = seed, mse = NA_real_), {
   library(NNLM)
   set.seed(seed)
   fit <- nnmf(mat_nn, k = k, max.iter = max.iter, verbose = verbose, n.threads = n.threads, ...)
@@ -33,8 +31,12 @@ run_nmf_seed_sweep_job <- function(k, seed, max.iter = 10000, verbose = 0L, n.th
        # convergence diagnostics -- NOT recoverable from W/H alone, needed
        # to tell whether nnmf() actually converged or just hit max.iter
        n.iteration = fit$n.iteration, target.loss = fit$target.loss,
-       average.epochs = fit$average.epochs)
-}
+       average.epochs = fit$average.epochs,
+       # the rest of nnmf()'s return value (per-iteration mse/mkl/target-loss
+       # traces, run.time, options, call) -- small, and kept so ingestion
+       # can use any of it without refitting. W/H are above.
+       nnmf = unclass(fit)[setdiff(names(fit), c("W", "H"))])
+})
 
 # 10-seed default reused by ica/cogaps below -- not shared code on
 # purpose (each method script is self-contained), just a coincidentally
@@ -51,4 +53,22 @@ nmf_registry <- list(
     p
   },
   build_grid = function(p) expand.grid(k = p$k, seed = p$seed, n.threads = p$n.threads, stringsAsFactors = FALSE)
+)
+
+# Ingest contract (R/targets/ingest.R): kept apart from nmf_registry, which
+# the fit targets depend on, so editing it never refits.
+nmf_ingest <- list(
+  family = "seed_sweep", sign_ambiguous = FALSE, has_loadings = TRUE,
+  resource_params = "n.threads",
+  extract = function(result, params) {
+    extra <- result$nnmf %||% result[c("n.iteration", "target.loss", "average.epochs")]
+    last <- function(x) if (length(x)) as.numeric(utils::tail(x, 1)) else NA_real_
+    fit_record_from(
+      rank = params$k, seed = params$seed, mse = result$mse,
+      loadings = result$W, scores = if (!is.null(result$H)) t(result$H),
+      diag = extra,
+      metrics = c(n_iteration = last(extra$n.iteration), target_loss = last(extra$target.loss),
+                  average_epochs = last(extra$average.epochs),
+                  run_seconds = if (!is.null(extra$run.time)) unname(extra$run.time[["elapsed"]]) else NA_real_))
+  }
 )

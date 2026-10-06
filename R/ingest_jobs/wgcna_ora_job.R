@@ -1,42 +1,35 @@
-# Phase-2 slurm ARRAY job: one task per WGCNA fit -- computes local fora()
-# ORA (same msigdbr collections as fgsea_grid's local ORA) for every
-# module's full gene-membership list. WGCNA modules have no continuous
-# ranking (no loadings to sort by), so there's no GSEA equivalent here --
-# ORA only.
+# Module ORA for one WGCNA fit, run as one dynamic branch of
+# wgcna_ora_<dataset> (rows built by wgcna_ora_rows(),
+# R/targets/enrichment.R): fgsea::fora() of every module's gene list
+# against each MSigDB collection. WGCNA modules have no continuous ranking,
+# so there is no GSEA equivalent -- ORA only.
 #
-# Added when the app's live-compute enrichment path was retired
-# (app/app.R's old run_wgcna_enrich_all_modules_core(), which called
-# gprofiler2::gost() and later a local fora() call on demand) -- WGCNA was
-# never part of fgsea_grid's scope (representative_fit_ids() has no
-# ranking concept to select "representative" fits by there, and modules
-# aren't loadings), so it gets its own job family here instead, following
-# the exact same "compute in isolation, write your own results_*.RDS,
-# ingest separately on the login node" pattern fgsea_grid/projectr_*_grid
-# use (see R/ingest_jobs/fgsea_job.R's header for why: this is a slurm
-# ARRAY job, and SQLite only tolerates one writer at a time -- see
-# R/ingest_jobs/ingest_core_job.R's header).
-#
-# `module_genes` (named list, module number [as character] -> native gene
-# ids, module 0 "unassigned" excluded -- see below) and `universe_genes`
-# (every gene assigned to ANY module, INCLUDING module 0 -- it's still
-# real tested network genes) are baked in as per-row jobs_df values at
-# grid-build time (R/create_ingest_slurm_bundle.R) -- no DB access from
-# compute nodes, same convention as fgsea_grid's cogaps_marker_genes.
-# `pathways_by_source` is a shared global_object, the same msigdbr
-# collections fgsea_grid uses.
-#
-# Module 0 is never itself queried as an ORA gene set: ingest_dataset.R
-# never gives it a `factors` row either (`mod_ids <- setdiff(sort(unique(
-# ext$modules$module)), 0L)`), so there'd be nowhere in enrichment_cache
-# to attach a module-0 result even if computed.
+# `module_genes`: module number (as character) -> native gene ids, module 0
+# ("unassigned") excluded -- it has no `factors` row to attach results to.
+# `universe_genes`: every gene in the network, module 0 included. Both are
+# remapped to Ensembl ids before testing.
 
-run_wgcna_ora_job <- function(dataset_id, fit_id, module_genes, universe_genes,
+#' Module ORA for one WGCNA fit
+#'
+#' fgsea::fora() of every module's genes against each MSigDB collection, over
+#' the network's genes (module 0 included in the universe, not tested).
+#' Modules have no continuous ranking, so there is no GSEA here.
+#'
+#' @param dataset_id Dataset id (for log lines).
+#' @param fit_key The fit's key.
+#' @param module_genes Named list (by module number) of native gene ids.
+#' @param universe_genes Every gene in the network.
+#' @param pathways_by_source fetch_msigdb_pathways() output.
+#' @param ensembl_map The dataset's Ensembl map.
+#' @param cpus_per_task Worker CPUs.
+#' @return `list(dataset_id, fit_key, ora)`, one ORA result per (module, collection).
+run_wgcna_ora_job <- function(dataset_id, fit_key, module_genes, universe_genes, pathways_by_source,
                                ensembl_map = NULL, cpus_per_task = 4) {
   library(fgsea); library(BiocParallel)
   bp <- MulticoreParam(cpus_per_task)
   register(bp)
   t0 <- Sys.time()
-  tag <- sprintf("[wgcna_ora_grid] %s fit=%d", dataset_id, fit_id)
+  tag <- sprintf("[wgcna_ora] %s %s", dataset_id, fit_key)
 
   remap <- function(genes) {
     if (is.null(ensembl_map)) return(genes)
@@ -71,5 +64,5 @@ run_wgcna_ora_job <- function(dataset_id, fit_id, module_genes, universe_genes,
                    tag, as.numeric(difftime(Sys.time(), t0, units = "secs")),
                    length(modules), length(pathways_by_source), n_sig_total))
 
-  list(dataset_id = dataset_id, fit_id = fit_id, ora = results)
+  list(dataset_id = dataset_id, fit_key = fit_key, ora = results)
 }

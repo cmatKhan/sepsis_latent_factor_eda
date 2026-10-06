@@ -1,9 +1,9 @@
 # Latent-factor stability explorer.
 #
-# Reads whatever the stability DB currently contains -- fully decoupled
-# from ingest (R/ingest_results.R). DB path is parameterized via the
-# STABILITY_DB environment variable, falling back to results/stability.sqlite
-# relative to the project root.
+# Reads whatever the stability DB currently contains -- the targets
+# pipeline writes it (R/targets/db_write.R). DB path is parameterized via
+# the STABILITY_DB environment variable, falling back to the pipeline's
+# `db_path` (config/pipeline.yml), relative to the project root.
 #
 # Drill-down levels (breadcrumb at top navigates back up):
 #   0 dataset overview -> 1 method -> 2 rank/parameter -> 3 factor
@@ -32,11 +32,11 @@ source(file.path("..", "R", "lib", "ingest", "symbol_mapping.R"), local = TRUE)
 
 db_path <- Sys.getenv("STABILITY_DB", unset = "")
 if (!nzchar(db_path)) {
-  # fall back to the project-level default, whether launched from app/ or repo root
-  cand <- c(file.path("..", "results", "stability.sqlite"),
-            file.path("results", "stability.sqlite"))
-  db_path <- cand[file.exists(cand)][1]
-  if (is.na(db_path)) stop("No stability DB found -- set STABILITY_DB or run R/ingest_results.R first")
+  # fall back to the pipeline's db_path, whether launched from app/ or repo root
+  root <- if (file.exists("config/pipeline.yml")) "." else ".."
+  rel <- yaml::read_yaml(file.path(root, "config", "pipeline.yml"))$db_path %||% "results/targets/stability.sqlite"
+  db_path <- file.path(root, rel)
+  if (!file.exists(db_path)) stop("No stability DB at ", db_path, " -- set STABILITY_DB or run the targets pipeline first")
 }
 con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
 options(stability.db_dir = normalizePath(dirname(db_path)))
@@ -214,6 +214,13 @@ server <- function(input, output, session) {
                          fit = NULL, factor_index = NULL,
                          wgcna_fit = NULL, mode = "explore")
 
+  # PCA is one fit per dataset at the max rank (nested components): viewing
+  # "rank n" means its first n components. Passed as `n` to
+  # load_loadings()/load_scores() wherever a view loads the current fit.
+  pca_n <- function() {
+    if (identical(nav$method, "pca") && !is.null(nav$rank)) as.integer(nav$rank) else NULL
+  }
+
   datasets <- list_datasets(con)
   updateSelectInput(session, "dataset", choices = datasets$dataset_id)
 
@@ -280,7 +287,7 @@ server <- function(input, output, session) {
         idxs <- wgcna_module_sizes(con, nav$wgcna_fit)$module
         unit <- "module"
       } else {
-        L <- load_loadings(con, nav$fit)
+        L <- load_loadings(con, nav$fit, n = pca_n())
         idxs <- if (!is.null(L)) seq_len(ncol(L)) else nav$factor_index
         unit <- "factor"
       }
@@ -1596,7 +1603,7 @@ server <- function(input, output, session) {
   }
 
   scores_table_output <- function(fit_id, sort_field) {
-    L <- load_scores(con, fit_id)
+    L <- load_scores(con, fit_id, n = pca_n())
     validate(need(!is.null(L), "No sample scores available for this fit (older WGCNA fits predate eigengene capture -- re-run and re-ingest with --overwrite)."))
     d <- as.data.frame(L)
     d <- cbind(sample_id = rownames(L), d)
@@ -1610,7 +1617,7 @@ server <- function(input, output, session) {
   }
 
   assoc_heatmap_plot <- function(fit_id, title_prefix) {
-    L <- load_scores(con, fit_id)
+    L <- load_scores(con, fit_id, n = pca_n())
     validate(need(!is.null(L), "No sample scores available for this fit."))
     m <- sample_meta_reactive()
     validate(need(!is.null(m), "No sample metadata registered for this dataset (see dataset config sample_metadata_path/sample_id_col)."))
@@ -1635,7 +1642,7 @@ server <- function(input, output, session) {
   #' sign, so those stay on the existing generic assoc_heatmap_plot()
   #' tab instead of being force-fit into a diverging scale here.
   wgcna_module_trait_plot <- function(fit_id) {
-    L <- load_scores(con, fit_id)
+    L <- load_scores(con, fit_id, n = pca_n())
     validate(need(!is.null(L), "No module eigengenes available for this fit."))
     m <- sample_meta_reactive()
     validate(need(!is.null(m), "No sample metadata registered for this dataset (see dataset config sample_metadata_path/sample_id_col)."))
@@ -1712,7 +1719,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$l2_traj_fit, {
-    L <- load_loadings(con, as.integer(input$l2_traj_fit))
+    L <- load_loadings(con, as.integer(input$l2_traj_fit), n = pca_n())
     comps <- if (is.null(L)) character(0) else colnames(L)
     updateSelectInput(session, "l2_traj_component", choices = comps, selected = comps[1])
   })
@@ -1723,7 +1730,7 @@ server <- function(input, output, session) {
 
   # ---- Biplot (PCA/sPCA only) ----
   observeEvent(input$l2_biplot_fit, {
-    L <- load_loadings(con, as.integer(input$l2_biplot_fit))
+    L <- load_loadings(con, as.integer(input$l2_biplot_fit), n = pca_n())
     comps <- if (is.null(L)) character(0) else colnames(L)
     updateSelectInput(session, "l2_biplot_x", choices = comps, selected = comps[1])
     updateSelectInput(session, "l2_biplot_y", choices = comps, selected = comps[min(2, length(comps))])
@@ -1731,7 +1738,7 @@ server <- function(input, output, session) {
   output$l2_biplot <- renderPlot({
     req(input$l2_biplot_fit, input$l2_biplot_x, input$l2_biplot_y)
     fit_id <- as.integer(input$l2_biplot_fit)
-    L <- load_loadings(con, fit_id)
+    L <- load_loadings(con, fit_id, n = pca_n())
     validate(need(!is.null(L), "No loadings available for this fit."))
     comp_x <- match(input$l2_biplot_x, colnames(L))
     comp_y <- match(input$l2_biplot_y, colnames(L))
@@ -1759,7 +1766,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$l2_biplot_meta_fit, {
-    L <- load_loadings(con, as.integer(input$l2_biplot_meta_fit))
+    L <- load_loadings(con, as.integer(input$l2_biplot_meta_fit), n = pca_n())
     comps <- if (is.null(L)) character(0) else colnames(L)
     updateSelectInput(session, "l2_biplot_meta_x", choices = comps, selected = comps[1])
     updateSelectInput(session, "l2_biplot_meta_y", choices = comps, selected = comps[min(2, length(comps))])
@@ -1767,7 +1774,7 @@ server <- function(input, output, session) {
   output$l2_biplot_meta <- renderPlot({
     req(input$l2_biplot_meta_fit, input$l2_biplot_meta_x, input$l2_biplot_meta_y)
     fit_id <- as.integer(input$l2_biplot_meta_fit)
-    S <- load_scores(con, fit_id)
+    S <- load_scores(con, fit_id, n = pca_n())
     validate(need(!is.null(S), "No sample scores available for this fit."))
     comp_x <- match(input$l2_biplot_meta_x, colnames(S))
     comp_y <- match(input$l2_biplot_meta_y, colnames(S))
@@ -1978,7 +1985,7 @@ server <- function(input, output, session) {
   #' already computed on the cluster -- all enrichment computation happens
   #' there now, never live in this app.
   enrich_overview_table <- function(fit_id, qtype, direction) {
-    L <- load_loadings(con, fit_id); req(!is.null(L))
+    L <- load_loadings(con, fit_id, n = pca_n()); req(!is.null(L))
     rows <- lapply(seq_len(ncol(L)), function(fi) {
       factor_id <- get_factor_id(con, fit_id, fi)
       cc <- enrichment_cached(con, factor_id, qtype, direction)
@@ -2107,7 +2114,7 @@ server <- function(input, output, session) {
 
   l3_loadings <- reactive({
     req(nav$fit, nav$factor_index)
-    L <- load_loadings(con, nav$fit); req(!is.null(L))
+    L <- load_loadings(con, nav$fit, n = pca_n()); req(!is.null(L))
     L[, nav$factor_index]
   })
 

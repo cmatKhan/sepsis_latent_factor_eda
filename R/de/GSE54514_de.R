@@ -1,5 +1,5 @@
 # Differential expression over time for GSE54514, array platform, up to
-# 5-level timecourse (day 1-5). See R/de/README.md.
+# 5-level timecourse (day 1-5). See docs/methods.qmd ("Differential expression").
 #
 # Real metadata (163 samples, 54 subjects, subject col `group_id` not
 # `patient_id`): sample_id, accession, disease_status, group_day, group_id,
@@ -19,10 +19,11 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/GSE54514_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/GSE54514_config.yml"))$dataset
 
 message("[GSE54514] loading raw expression matrix...")
 mat <- pivot_expression_long(ds_meta)

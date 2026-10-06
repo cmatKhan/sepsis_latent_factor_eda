@@ -97,13 +97,18 @@ seed_sweep_mse_by_rank <- function(con, dataset_id, method) {
   out[order(out$rank), ]
 }
 
-#' Scree-plot data for PCA/sPCA (SCREE_RANK_METHODS): each is deterministic
-#' given its rank (+ sPCA's para), one `fits` row per rank already carrying
-#' an in-sample reconstruction `mse` -- no separate masking-CV family
-#' needed (that one was never actually wired up -- see app.R's
-#' SCREE_RANK_METHODS comment). `alpha` is sPCA's `para` sparsity penalty,
-#' crossed with rank; always NA for PCA.
+#' Scree-plot data for PCA/sPCA (SCREE_RANK_METHODS): in-sample
+#' reconstruction `mse` per rank. PCA has one fit per dataset at the max
+#' rank, so its curve is that fit's mse_by_rank (pca_rank_curve()); sPCA
+#' has one `fits` row per (rank, para), with para in `alpha`.
 scree_mse_by_rank <- function(con, dataset_id, method) {
+  if (method == "pca") {
+    # One PCA fit per dataset at the max rank (components are nested): the
+    # per-rank curve is its stored mse_by_rank (see pca_rank_curve()).
+    curve <- pca_rank_curve(con, dataset_id)
+    return(if (is.null(curve)) data.frame(rank = integer(0), alpha = numeric(0), mse = numeric(0))
+           else data.frame(rank = curve$rank, alpha = NA_real_, mse = curve$mse))
+  }
   DBI::dbGetQuery(con,
     "SELECT rank, alpha, mse FROM fits
      WHERE dataset_id = ? AND method = ? AND status = 'ok' AND mse IS NOT NULL
@@ -161,6 +166,10 @@ seedpair_matrix <- function(con, dataset_id, method, rank) {
 #' zero length", so the mismatch only surfaces here, not as an empty
 #' dropdown).
 distinct_ranks <- function(con, dataset_id, method) {
+  if (method == "pca") {
+    f <- pca_fit_row(con, dataset_id)
+    return(if (nrow(f) == 0) integer(0) else seq_len(f$rank))
+  }
   DBI::dbGetQuery(con,
     "SELECT DISTINCT rank FROM fits
      WHERE dataset_id = ? AND method = ? AND status = 'ok'
@@ -181,6 +190,19 @@ distinct_ranks <- function(con, dataset_id, method) {
 #' into ICASSO's clustering instead (R/lib/ingest/icasso.R), not
 #' individually selectable here.
 fits_at_rank <- function(con, dataset_id, method, rank) {
+  if (method == "pca") {
+    # The single PCA fit, viewed at `rank` components -- callers load it
+    # with load_loadings()/load_scores(n = rank).
+    f <- pca_fit_row(con, dataset_id)
+    f <- f[!is.na(f$rank) & f$rank >= rank, c("fit_id", "seed", "alpha", "mse", "n_factors", "loadings_file"),
+           drop = FALSE]
+    if (nrow(f) == 1) {
+      curve <- pca_rank_curve(con, dataset_id)
+      f$n_factors <- rank
+      if (!is.null(curve)) f$mse <- curve$mse[match(rank, curve$rank)]
+    }
+    return(f)
+  }
   DBI::dbGetQuery(con,
     "SELECT fit_id, seed, alpha, mse, n_factors, loadings_file FROM fits
      WHERE dataset_id = ? AND method = ? AND rank = ? AND status = 'ok'
@@ -387,12 +409,52 @@ resolve_artifact <- function(path) {
   file.path(db_dir, path)
 }
 
-load_loadings <- function(con, fit_id) {
+#' A fit's loadings (genes x factors). `n` keeps only the first n factors --
+#' how the app views PCA's single max-rank fit at a smaller rank (its
+#' components are nested); NULL keeps all.
+load_loadings <- function(con, fit_id, n = NULL) {
   f <- get_fit(con, fit_id)
   if (nrow(f) == 0 || is.na(f$loadings_file)) return(NULL)
   path <- resolve_artifact(f$loadings_file)
   if (!file.exists(path)) return(NULL)
+  first_n(readRDS(path), n)
+}
+
+first_n <- function(m, n) {
+  if (is.null(n) || is.null(m) || is.na(n)) return(m)
+  m[, seq_len(min(n, ncol(m))), drop = FALSE]
+}
+
+#' The dataset's single PCA fit (fits row), or a 0-row frame.
+pca_fit_row <- function(con, dataset_id) {
+  DBI::dbGetQuery(con,
+    "SELECT * FROM fits WHERE dataset_id = ? AND method = 'pca' AND status = 'ok'
+     ORDER BY rank DESC LIMIT 1",
+    params = list(dataset_id))
+}
+
+#' PCA's diagnostics bundle -- list(sdev, center, mse_by_rank), see
+#' R/lib/ingest/extract.R's pca branch.
+load_pca_diag <- function(con, fit_id) {
+  f <- get_fit(con, fit_id)
+  if (nrow(f) == 0 || is.na(f$pca_diag_file)) return(NULL)
+  path <- resolve_artifact(f$pca_diag_file)
+  if (!file.exists(path)) return(NULL)
   readRDS(path)
+}
+
+#' Per-rank view of the single PCA fit: data.frame(rank, mse, pev) for
+#' rank = 1..max -- reconstruction MSE of the first `rank` components
+#' (mse_by_rank) and the cumulative proportion of variance they explain
+#' (from the full sdev spectrum). NULL if the dataset has no PCA fit.
+pca_rank_curve <- function(con, dataset_id) {
+  f <- pca_fit_row(con, dataset_id)
+  if (nrow(f) == 0) return(NULL)
+  d <- load_pca_diag(con, f$fit_id)
+  if (is.null(d) || is.null(d$mse_by_rank)) return(NULL)
+  k <- seq_along(d$mse_by_rank)
+  data.frame(rank = k, mse = d$mse_by_rank, pev = (cumsum(d$sdev^2) / sum(d$sdev^2))[k],
+             fit_id = f$fit_id)
 }
 
 #' sPCA's diagnostics bundle -- list(pev, var_all, n_nonzero), see
@@ -1028,18 +1090,27 @@ method_rank_curve <- function(con, dataset_id, method) {
                              params = list(dataset_id))$val_sd
   val_sd <- if (length(val_sd) == 1 && !is.na(val_sd)) val_sd else NA_real_
 
-  if (method %in% c("pca", "spca")) {
+  if (method == "pca") {
+    # One nested fit: rank n = its first n components. Cross-rank
+    # persistence is 1 by construction (the rank-n components ARE the
+    # first n of every larger rank), so stability is reported as 1.
+    curve <- pca_rank_curve(con, dataset_id)
+    if (is.null(curve)) return(empty)
+    data.frame(rank_label = paste("rank", curve$rank), rank_key = curve$rank, fit_id = curve$fit_id,
+               in_sample_r2 = 1 - curve$mse / val_sd^2, stability = 1)
+
+  } else if (method == "spca") {
     fits <- DBI::dbGetQuery(con,
       "SELECT fit_id, rank, alpha, mse FROM fits
        WHERE dataset_id = ? AND method = ? AND status = 'ok' AND mse IS NOT NULL",
       params = list(dataset_id, method))
     if (nrow(fits) == 0) return(empty)
-    # sPCA has multiple alpha per rank -- keep the lowest-mse (highest
+    # Multiple para (alpha) per rank -- keep the lowest-mse (highest
     # quality) alpha as that rank's representative.
     agg <- do.call(rbind, lapply(split(fits, fits$rank), function(g) g[which.min(g$mse), ]))
     stab <- symmetric_rank_stability(crossrank_matrix(con, dataset_id, method))
     agg$stability <- stab$cosine[match(agg$rank, stab$rank)]
-    agg$in_sample_r2 <- if (method == "pca") 1 - agg$mse / val_sd^2 else 1 - agg$mse
+    agg$in_sample_r2 <- 1 - agg$mse
     data.frame(rank_label = paste("rank", agg$rank), rank_key = agg$rank, fit_id = agg$fit_id,
                in_sample_r2 = agg$in_sample_r2, stability = agg$stability)
 
