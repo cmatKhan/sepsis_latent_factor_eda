@@ -1,5 +1,5 @@
 .Rproj.user
-results/
+results*/
 slurm_bundles/
 logs/
 data/
