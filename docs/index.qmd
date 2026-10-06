@@ -1,0 +1,55 @@
+---
+title: "Overview"
+---
+
+This project measures how stable the latent factors found in sepsis gene-expression
+datasets are, and compares them across datasets. Six methods are fit to every dataset --
+PCA, NMF, CoGAPS, sparse PCA (sPCA), ICA and WGCNA -- across random seeds and across their
+rank or sparsity parameters. Stability, enrichment, projections and diagnostics are then
+written to one SQLite database, which a Shiny app browses.
+
+One [targets](https://books.ropensci.org/targets/) pipeline (`_targets.R`) does all of it,
+with the heavy steps running as SLURM jobs through
+[crew.cluster](https://wlandau.github.io/crew.cluster/):
+
+1. **Matrices.** Each dataset's config says how to build its genes × samples matrix from
+   the raw data ([Data](data.qmd)).
+2. **Fits.** Each method's parameter grid is fit, one fit per grid row ([Methods](methods.qmd)).
+3. **Ingestion.** Fits are compared with each other (stability), enriched, projected onto
+   the other datasets and summarized, then written to the database ([Database](database.qmd)).
+4. **App.** A Shiny app browses the database ([Launching the app](app.qmd)).
+
+targets re-runs only what a change invalidates: editing one dataset's config rebuilds that
+dataset only, editing one method rebuilds that method only ([Running the workflow](workflow.qmd)).
+
+## Pages
+
+| Page | What it covers |
+|---|---|
+| [Setup](setup.qmd) | R, packages and the cluster environment; building these docs |
+| [Data](data.qmd) | data root, dataset configs, building a matrix, gene identifiers, which datasets are included |
+| [Methods](methods.qmd) | the six methods and their parameters, how sPCA's sparsity is chosen, adding a method, the differential-expression analysis |
+| [Database](database.qmd) | what the database holds, how it's written, every table |
+| [Running the workflow](workflow.qmd) | running the pipeline, what reruns what, SLURM resources |
+| [Launching the app](app.qmd) | the Shiny explorer |
+| [Function reference](reference.qmd) | every function, generated from the code's roxygen comments |
+
+## Layout
+
+| Path | What |
+|---|---|
+| `_targets.R` | the pipeline: sources the code, builds the targets for every dataset in `config/pipeline.yml` |
+| `config/pipeline.yml` | datasets to build, data root, DB path, SLURM resources per method |
+| `config/<dataset>_config.yml` | one dataset: data paths and each method's parameter grid |
+| `config/dataset_families.yml` | which datasets are timepoints of the same cohort |
+| `R/methods/` | one file per method: fit function, `<name>_registry` (fitting) and `<name>_ingest` (ingestion) |
+| `R/lib/` | config reading, data paths, matrix loading, method discovery |
+| `R/lib/ingest/` | the computations behind the DB: similarity, factor/module pairs, redundancy, ICASSO, pattern drivers, gene-id mapping |
+| `R/targets/` | target factories, SLURM controllers, ingestion, enrichment, projections, diagnostics, DB writers |
+| `R/ingest_jobs/` | the enrichment and projectR job functions |
+| `R/db/` | the DB schema (`schema.sql`, `views.sql`) and `open_stability_db()` |
+| `R/preprocessing/` | one matrix-building script per dataset |
+| `R/de/` | the differential-expression analysis (outside the pipeline) |
+| `app/` | the Shiny app |
+| `run_pipeline.sbatch` | runs `tar_make()` as a SLURM job |
+| `docs/` | this site |

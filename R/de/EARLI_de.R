@@ -1,7 +1,7 @@
 # Differential expression for EARLI -- CROSS-SECTIONAL (confirmed
 # directly: 189 samples, 189 distinct sample_id, no repeat/subject column
 # at all), so this is a simple case/control comparison, not a time-course
-# model. See R/de/README.md.
+# model. See docs/methods.qmd ("Differential expression").
 #
 # Real metadata: sample_id, geo_accession, age, sex, lca_label,
 # imputed_age, age_scaled. `lca_label` (Hypo/Hyper) is a latent-class
@@ -15,11 +15,12 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/lib/ingest/symbol_mapping.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/EARLI_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/EARLI_config.yml"))$dataset
 
 message("[EARLI] loading raw count matrix...")
 mat <- pivot_expression_long(ds_meta)

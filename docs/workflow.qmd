@@ -1,0 +1,130 @@
+---
+title: "Running the workflow"
+---
+
+## Running the pipeline
+
+The main process -- `tar_make()` -- coordinates: it submits SLURM worker jobs through
+crew.cluster and must stay alive until they finish, because workers connect back to it.
+
+**As a batch job** (anything long, e.g. a full build):
+
+```sh
+sbatch run_pipeline.sbatch                                     # everything outdated
+sbatch run_pipeline.sbatch 'tidyselect::starts_with("fit_")'   # fits only (no ingestion)
+sbatch run_pipeline.sbatch 'tidyselect::starts_with("db_")'    # rebuild DB rows from stored results
+tail -f logs/targets_main_<jobid>.out
+```
+
+The argument is passed to `tar_make(names = ...)`. targets builds the named targets plus
+whatever they depend on.
+
+**From RStudio Server on the cluster**, open the project and use the console:
+
+```r
+library(targets)
+tar_visnetwork()                            # the graph, outdated targets highlighted
+tar_outdated()                              # what tar_make() would rebuild
+tar_make()                                  # build everything outdated
+tar_make(names = starts_with("fit_pca_"))   # a subset
+tar_make(as_job = TRUE)                     # as an RStudio background job
+tar_progress_summary()                      # progress while a run is going
+```
+
+An interactive session ends with its SLURM job (16 h at most on `interactive`), so long runs
+belong in `run_pipeline.sbatch`.
+
+**Reading results:** `tar_read(fit_pca_EARLI)` returns a target's value.
+`read_method_fits("EARLI", "spca")` (`R/targets/run_method_fit.R`, available after
+`targets::tar_load_globals()`) returns a method's fits as one `list(params, result)` per grid
+row, both sPCA stages included.
+
+## Targets per dataset
+
+`R/targets/factories.R` builds these targets for each dataset `<key>` (the dataset id, made safe
+for a name):
+
+| Stage | Targets |
+|---|---|
+| inputs | `inputs_<key>` (file target over the config, preprocessing script and raw data), `meta_<key>`, `mat_<key>`, `mat_nn_<key>` |
+| fits, per method `<m>` | `grid_<m>_<key>`, `fit_<m>_<key>` (one branch per batch of grid rows); sPCA adds `grid_spca_refine_<key>`, `fit_spca_refine_<key>`, `selection_spca_<key>` |
+| ingestion, per method | `ingest_<m>_<key>`, `pairs_<m>_<key>`, `representatives_<m>_<key>`, `redundancy_<m>_<key>`, `fgsea_jobs_<m>_<key>`/`fgsea_<m>_<key>`, `icasso_ica_<key>` |
+| WGCNA | `wgcna_ora_jobs_`/`wgcna_ora_<key>`, `wgcna_fit_jobs_`/`wgcna_fit_diag_<key>`, `wgcna_dataset_diag_<key>` |
+| per dataset | `sample_meta_<key>`, `metadata_files_<key>`, `matrix_file_<key>`, `matrix_diagnostics_<key>`, `ensembl_map_<key>`, `enrichment_<key>`, `drivers_<key>`, `db_<key>` |
+| across datasets | `projectr_jobs_<key>`/`projectr_<key>`, `gene_space_<key>`, `db_cross_dataset`, plus `msigdb_pathways`, `db_schema`, `ensembl_maps`, `matrix_files`, `dataset_families` |
+
+## What reruns when
+
+targets reruns a target when its command, its inputs or a function it calls changes (comments
+and whitespace don't count).
+
+| Change | Reruns |
+|---|---|
+| a dataset's config, preprocessing script or raw files | that dataset only |
+| a method's grid in one config (e.g. adding a rank) | only the new grid rows' fits, then that dataset's ingestion |
+| a method's fit function or `<name>_registry` | every fit of that method (sPCA: about a day) |
+| `run_method_fits()`, the grid helpers, `capture_fit()` | every fit of every method that uses them |
+| a controller's `batch_size` or `cpus_per_task` | that method's fits (they change the grid) |
+| a controller's memory, time or worker settings | nothing |
+| a method's `<name>_ingest` or the ingestion code in `R/targets/` | ingestion and the DB writes only |
+| `R/db/schema.sql` or `views.sql` | the DB writes (after deleting the DB, see [Database](database.qmd)) |
+
+Stopping a run keeps every finished branch. Removing a dataset from `config/pipeline.yml` leaves
+its results in the store (`targets::tar_prune()` deletes them).
+
+## SLURM resources
+
+Each method has a crew controller under `controllers:` in `config/pipeline.yml`: memory, CPUs,
+wall time, idle timeout, `batch_size`, `tasks_max`. Ingestion, enrichment (`fgsea`), projections
+(`projectr`) and matrix building (`prep`) have their own. Each controller grows its pool of
+worker jobs with the backlog and shrinks it when work runs out; a worker is one SLURM job that
+runs tasks until it's idle or reaches its time limits.
+
+- **No worker caps by default.** SLURM's scheduler and per-user limits (200 running jobs per
+  user on HTCF) decide what runs when; a controller without `workers:` is effectively uncapped.
+  PCA, NMF and ICA keep small caps for efficiency: their tasks take seconds, much less than a
+  worker's ~30 s R start-up, so one worker per task would mostly be start-up.
+- **Batches.** Each branch costs the main process about a second of bookkeeping, so fast
+  methods group grid rows into branches (`batch_size`), and projections run one branch per
+  (source, target) dataset pair.
+- **Backups for out-of-memory.** A controller's `backup:` block (crew backup controllers)
+  retries a task whose worker crashed `crashes_max` times -- typically killed for exceeding
+  memory on the largest datasets -- on `<name>_backup` with more memory.
+- **One fit per worker for long fits.** sPCA uses `tasks_max: 1`, so no long fit starts late in
+  a worker's life.
+
+### Tuning
+
+Aim for about 75% average memory and CPU use, never below 50%, and err on the high side. Size
+memory for the largest dataset (about 8,000 genes × 518 samples), not EARLI.
+
+1. Run the method, e.g. `tar_make(names = starts_with("fit_nmf_"))`.
+2. Find the worker array ids: `sacct -X -S <start> --format=JobID,JobName | grep crew-worker`.
+3. Check usage with `seff <jobid>`, or for an array
+   `python /scratch/mblab/chasem/seff-array/seff-array.py <array id>`. seff-array needs a
+   terminal; from a non-interactive shell wrap it:
+   `script -qc "stty cols 100; python .../seff-array.py <id>" /dev/null`.
+
+The current values and the measurements behind them are in `config/pipeline.yml`'s comments.
+
+## Logs and monitoring
+
+| What | Where |
+|---|---|
+| main process | `logs/targets_main_<jobid>.out` |
+| workers | `logs/crew/<controller>_<jobid>.out` |
+| per-target errors and warnings | `tar_meta(fields = c(error, warnings))` |
+| progress | `tar_progress_summary()`, `tar_poll()` |
+
+A failed fit doesn't fail its branch: it's recorded with `status = 'failed'` and its error in
+the DB. A target that does error is skipped along with what depends on it, and the rest of the
+run continues (`error = "continue"`).
+
+## Rebuilding the database
+
+```r
+targets::tar_invalidate(starts_with("db_")); targets::tar_make()
+```
+
+After a schema change, delete the DB and its `stability_artifacts/` first (the schema is
+versioned and an old DB is refused). Nothing upstream reruns.

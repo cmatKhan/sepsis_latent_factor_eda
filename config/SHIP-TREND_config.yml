@@ -1,9 +1,9 @@
 # See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/slurm/methods) and
-# R/README.md for the config reference.
+# explanation of every section below (dataset/methods) and
+# docs/data.qmd for the config reference.
 #
 # TODO (blocking): no sample_metadata.parquet exists at all for this
-# dataset in /home/chase/projects/hf_sepsis_collection/SHIP-TREND/ (only
+# dataset in SHIP-TREND/ (only
 # expression.parquet and feature_metadata.parquet).
 # dataset.sample_metadata_path is left UNSET below as a result -- the
 # pipeline still runs without it (factor discovery doesn't require
@@ -30,8 +30,8 @@ dataset:
     metadata available at all.
   hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
 
-  expression_path: /home/chase/projects/hf_sepsis_collection/SHIP-TREND/expression.parquet
-  feature_metadata_path: /home/chase/projects/hf_sepsis_collection/SHIP-TREND/feature_metadata.parquet
+  expression_path: SHIP-TREND/expression.parquet
+  feature_metadata_path: SHIP-TREND/feature_metadata.parquet
   sample_id_col: sample_id
   feature_id_col: IlluminaID   # matches both expression.parquet and feature_metadata.parquet directly
   value_col: value
@@ -42,54 +42,6 @@ dataset:
   # NOTE: no sample_metadata_path (see blocking TODO above) -> no
   # sample-level metadata-association views in the app.
 
-slurm:
-  # IMPORTANT: every entry is written out IN FULL -- no YAML anchors/merge
-  # keys (`&name`/`<<: *name`). R's `yaml` package (2.3.12) does NOT apply
-  # override keys that follow a `<<:` merge key in the same mapping -- an
-  # earlier version of this file used anchors here and every method
-  # silently got PCA's settings, container included. Verify with
-  # `yaml::read_yaml()` directly if you're ever unsure a value is real.
-  pca:
-    mem: 4G
-    cpus_per_task: 1
-    time: "00:30:00"
-    container: "/ref/mblab/containers/chasem/tidyverse_latest.sif"
-    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
-    sh_template: "config/rslurm_templates/submit_sh.txt"
-    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
-    rscript_path: "Rscript"
-  # nmf/cogaps: NOT added -- array platform (log-intensity data, not
-  # count-like), which NMF/CoGAPS's non-negativity assumptions aren't
-  # appropriate for.
-  spca:
-    mem: 4G
-    cpus_per_task: 1
-    time: "02:00:00"
-    container: "/ref/mblab/containers/chasem/r-elasticnet_1.3--81dc98c2fe6e7ac6.sif"
-    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
-    sh_template: "config/rslurm_templates/submit_sh.txt"
-    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
-    rscript_path: "/opt/conda/bin/Rscript"
-  ica:
-    mem: 4G
-    cpus_per_task: 1
-    time: "02:00:00"
-    container: "/ref/mblab/containers/chasem/r-fastica_1.2_8--5dbdb92af2e4386b.sif"
-    libPaths: "/ref/mblab/software/chasem/R/4.6.0"
-    sh_template: "config/rslurm_templates/submit_sh.txt"
-    sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
-    rscript_path: "/opt/conda/bin/Rscript"
-  network:
-    wgcna:
-      mem: 19G
-      cpus_per_task: 8   # also passed through as blockwiseModules()'s nThreads
-      time: "04:00:00"
-      container: "/ref/mblab/containers/chasem/r-wgcna_1.74--aa9d6f2e8e081486.sif"
-      libPaths: "/ref/mblab/software/chasem/R/4.6.0"
-      sh_template: "config/rslurm_templates/submit_sh.txt"
-      sh_template_single: "config/rslurm_templates/submit_single_sh.txt"
-      rscript_path: "/opt/conda/bin/Rscript"
-
 # See config/dataset_metadata.example.yml for the full field-by-field
 # explanation of the config schema.
 methods:
@@ -97,10 +49,8 @@ methods:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
 
   spca:
-    K: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
-    para: [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]   # fraction of genes to keep nonzero per component -- sparse="varnum" converts this to an absolute nonzero-loadings target at run time using this dataset's own real gene count (R/methods/spca.R's run_spca_job()). Revised 2026-09-29: the old sparse="penalty" grid's absolute para values were confirmed on real data to have an effective sparsity that scales strongly with gene count (same para value: 0% sparse at p=300 genes, ~50% sparse at p=1000) -- impossible to calibrate consistently across this project's differently-sized datasets with one fixed grid. sparse="varnum" sidesteps that by specifying the target directly and portably.
+    K: [2,3,4,5,6,7,8,9,10,11,12]
     sparse: varnum
-    lambda: [0.000001, 0.1, 1.0]   # elastic net's ridge/quadratic penalty -- now swept, not held at the package default: real-data testing (2026-09-29) showed it materially changes the sparsity/quality tradeoff at the SAME para value (lambda=1 vs 1e-6 flipped a ~90%-sparse solution to fully dense) -- exactly the p>>n regime elastic net's ridge term exists to help with (Zou & Hastie 2006).
 
   ica:
     n.comp: [5, 7, 10, 15, 20]

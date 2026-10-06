@@ -10,10 +10,12 @@ suppressMessages({
   library(fgsea)
 })
 
-#' Same 6 msigdbr collections as R/create_ingest_slurm_bundle.R's
-#' `pathways_by_source` (species = "Homo sapiens", ensembl_gene-keyed) --
-#' fetched ONCE per driver run, not per dataset/contrast (msigdbr's own
-#' query is the slow part here).
+#' The MSigDB collections for DE enrichment
+#'
+#' The same six collections as the pipeline (fetch_msigdb_pathways()), Ensembl
+#' keyed, fetched once per driver run.
+#'
+#' @return Named list by collection of gene sets.
 fetch_de_pathways <- function() {
   if (!requireNamespace("msigdbr", quietly = TRUE)) stop("Package 'msigdbr' is required")
   fetch_msig <- function(collection, subcollection = NULL) {
@@ -32,25 +34,16 @@ fetch_de_pathways <- function() {
   )
 }
 
-#' Build a (gene id -> Ensembl gene id) map for one DE dataset's topTable
-#' gene identifiers -- dispatches on platform, since R/de/*.R's gene
-#' column convention differs by platform (see R/de/README.md):
-#'   - RNA-seq datasets never collapse (R/de/de_helpers.R's
-#'     collapse_to_symbol() is array-only) -- their `gene` column already
-#'     equals that dataset's `feature_id_col`, so the existing
-#'     R/lib/ingest/symbol_mapping.R::build_ensembl_map() (feature_id ->
-#'     Ensembl, via `ensembl_col`) applies directly.
-#'   - Array datasets collapsed to gene SYMBOL before fitting -- there is
-#'     no existing symbol -> Ensembl map (build_ensembl_map() is
-#'     feature_id/probe -keyed), so this builds one directly from
-#'     feature_meta: for each symbol, the first non-missing `ensembl_col`
-#'     value among the probes sharing that symbol. Deliberately simple --
-#'     doesn't try to reconstruct which exact probe
-#'     collapse_to_symbol() itself picked (picking a DIFFERENT probe's
-#'     Ensembl annotation for the same symbol essentially never matters
-#'     in practice; genuinely conflicting Ensembl annotations across
-#'     probes for one symbol would indicate a feature_metadata quality
-#'     issue this first pass isn't trying to solve).
+#' Gene id -> Ensembl map for a DE dataset's results
+#'
+#' RNA-seq results keep native feature ids, so build_ensembl_map() applies;
+#' array results were collapsed to symbols, so this maps each symbol to the
+#' first non-missing Ensembl id among its probes.
+#'
+#' @param ds_meta The dataset's `dataset:` block.
+#' @param feature_meta Feature-metadata data frame.
+#' @param platform `"array"` or `"rnaseq"`.
+#' @return Named character vector, or `NULL`.
 build_de_ensembl_map <- function(ds_meta, feature_meta, platform = c("array", "rnaseq")) {
   platform <- match.arg(platform)
   if (platform == "rnaseq") {
@@ -70,13 +63,14 @@ build_de_ensembl_map <- function(ds_meta, feature_meta, platform = c("array", "r
   setNames(fm$.ens, as.character(fm[[sym_col]]))
 }
 
-#' Remap a NAMED numeric vector's names (platform-native gene ids) to
-#' Ensembl via a prebuilt map -- the named-vector analogue of
-#' R/lib/ingest/symbol_mapping.R's `.remap_ids()` (which operates on a
-#' matrix's rownames instead). Same collapse rule for a many-to-one
-#' remap: keep the max-|value| entry per Ensembl id. Returns a vector
-#' sorted decreasing (fgsea()'s expected input shape), or the vector
-#' unchanged (just re-sorted) if `ens_map` is NULL/empty.
+#' Remap a named numeric vector to Ensembl ids
+#'
+#' Keeps the max-|value| entry per Ensembl id (the vector analogue of
+#' .remap_ids()).
+#'
+#' @param v Named numeric vector.
+#' @param ens_map Id -> Ensembl map, or `NULL` to leave names as they are.
+#' @return The remapped vector, sorted decreasing.
 remap_named_vector_to_ensembl <- function(v, ens_map) {
   if (is.null(ens_map) || length(ens_map) == 0) return(sort(v, decreasing = TRUE))
   ids <- ens_map[names(v)]
@@ -86,10 +80,13 @@ remap_named_vector_to_ensembl <- function(v, ens_map) {
   sort(v, decreasing = TRUE)
 }
 
-#' fgsea::fgsea() with the same parameters as the factor pipeline
-#' (minSize=10, maxSize=500) -- one call, one pathway source. `rank_vector`
-#' must already be Ensembl-keyed and sorted decreasing (ties handled by
-#' fgsea() itself, same as R/ingest_jobs/fgsea_job.R -- no pre-jittering).
+#' fgsea of one contrast against one collection
+#'
+#' Same parameters as the pipeline (minSize 10, maxSize 500).
+#'
+#' @param rank_vector Ensembl-keyed signed statistics, sorted decreasing.
+#' @param pathways One collection's gene sets.
+#' @return fgsea() result table.
 run_de_fgsea <- function(rank_vector, pathways) {
   tryCatch(
     fgsea::fgsea(pathways = pathways, stats = rank_vector, minSize = 10, maxSize = 500),

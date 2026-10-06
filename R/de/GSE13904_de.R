@@ -1,5 +1,5 @@
 # Differential expression over time for GSE13904, array platform, 2-level
-# timecourse (day1/day3). See R/de/README.md.
+# timecourse (day1/day3). See docs/methods.qmd ("Differential expression").
 #
 # Real metadata (227 samples, 186 patients): sample_id, patient_id,
 # timepoint, clinical_status (Control 18 / SIRS 27 / SIRS resolved 24 /
@@ -19,10 +19,11 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/GSE13904_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/GSE13904_config.yml"))$dataset
 
 message("[GSE13904] loading raw expression matrix...")
 mat <- pivot_expression_long(ds_meta)

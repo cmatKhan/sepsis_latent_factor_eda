@@ -2,7 +2,7 @@
 # check specifically whether there's clustering by TIME. Two analyses per
 # (dataset, group) -- "group" being the disease/condition label baked
 # into that dataset's cell-means design where one exists (see
-# R/de/README.md), or the whole dataset when there isn't one:
+# docs/methods.qmd ("Differential expression")), or the whole dataset when there isn't one:
 #
 #   1. Gene clustering by temporal SHAPE: significant genes (from that
 #      group's `*_time_omnibus` contrast) pulled directly from the

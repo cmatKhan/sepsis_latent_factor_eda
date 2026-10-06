@@ -1,6 +1,6 @@
 # Correlate each dataset's DE results with its factor-analysis latent
 # factors (PCA/NMF/CoGAPS/sPCA/ICA), two ways -- see R/de/de_factor_helpers.R
-# and R/de/README.md for the full rationale:
+# and docs/methods.qmd ("Differential expression") for the full rationale:
 #   (a) overlap_test(): Fisher's exact test between a factor's gene set
 #       and a DE contrast's significant genes -- run for EVERY contrast
 #       (including the time-course datasets' `*_time_omnibus` ones, which
@@ -19,7 +19,8 @@ library(yaml)
 library(arrow)
 library(DBI)
 library(RSQLite)
-source(here("R/lib/ingest/db.R"))              # open_stability_db(), two-arg resolve_artifact()
+source(here("R/lib/data_paths.R"))
+source(here("R/db/connect.R"))                 # open_stability_db(), resolve_artifact()
 source(here("R/lib/ingest/symbol_mapping.R"))  # build_symbol_map(), remap_to_symbol()
 source(here("R/lib/ingest/redundancy.R"))      # representative_fit_ids()
 source(here("R/de/de_helpers.R"))
@@ -30,8 +31,8 @@ FACTOR_METHODS <- c("pca", "nmf", "cogaps", "spca", "ica")
 SIG_THRESHOLD <- 0.05
 TARGET_RANK <- 10
 
-db_path <- here("results/stability.sqlite")
-con <- open_stability_db(db_path)
+db_path <- here(yaml::read_yaml(here("config/pipeline.yml"))$db_path %||% "results/targets/stability.sqlite")
+con <- open_stability_db(db_path, schema_dir = here("R/db"))
 on.exit(DBI::dbDisconnect(con), add = TRUE)
 
 for (dataset_id in names(DE_DATASETS)) {
@@ -52,7 +53,7 @@ for (dataset_id in names(DE_DATASETS)) {
     next
   }
 
-  ds_meta <- yaml::read_yaml(here(spec$config))$dataset
+  ds_meta <- read_dataset_yaml(here(spec$config))$dataset
   feature_meta <- arrow::read_parquet(ds_meta$feature_metadata_path)
 
   overlap_rows <- list()

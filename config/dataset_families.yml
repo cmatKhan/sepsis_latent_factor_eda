@@ -1,7 +1,7 @@
-# Explicit dataset-family membership, used ONLY by
-# R/lib/ingest/projectr_pairs.R to decide include_intercept for a
-# projectr pair (within-family = FALSE, cross-family = TRUE). NOT inferred
-# from naming convention on purpose -- see build_projectr_pairs().
+# Explicit dataset-family membership (R/targets/projections.R): decides
+# include_intercept for a projectR projection (within-family = FALSE,
+# cross-family = TRUE) and which datasets get gene-space agreement (within
+# family only). Not inferred from dataset-id naming on purpose.
 ANEMONES:  [ANEMONES, ANEMONES_DAY1, ANEMONES_DAY2, ANEMONES_DAY5, ANEMONES_DISCHARGE]
 CORTICUS:  [CORTICUS, CORTICUS_PRE, CORTICUS_POST24H]
 GSE13904:  [GSE13904, GSE13904_DAY1, GSE13904_DAY3]

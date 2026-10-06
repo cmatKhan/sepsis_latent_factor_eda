@@ -1,0 +1,274 @@
+---
+title: "Methods"
+---
+
+Six latent-factor methods are fit to every dataset. Each lives in one file,
+`R/methods/<name>.R`, discovered automatically by `discover_method_registries()`
+(`R/lib/method_registry.R`).
+
+## The methods and their parameters
+
+A method runs for a dataset when it appears under the config's `methods:` block (WGCNA nests
+under `methods.network`). Each key is the underlying tool's own argument name. A **scalar** is
+a fixed setting; a **list** is a swept grid dimension, crossed with the others in the method's
+`build_grid()`. A key only takes effect if that `build_grid()` uses it; see each method file
+for its keys and `defaults`.
+
+| Method | Tool | Config keys | Stability design |
+|---|---|---|---|
+| `pca` | `prcomp()` | `rank` (only its maximum is used) | deterministic |
+| `nmf` | `NNLM::nnmf()` | `k` (swept), `seed` (swept; applied with `set.seed()`) | across seeds |
+| `cogaps` | `CoGAPS::CoGAPS()` | `params` (`nPatterns`, `seed`, `nIterations`, `distributed`), `distributed_params`, `run` | across seeds |
+| `spca` | `elasticnet::spca()` | `K` (swept), `para_coarse`, `sparse`, `lambda` (one value), `max.iter`, `eps.conv`, `max_hours` | parameter grid |
+| `ica` | `fastICA::fastICA()` | `n.comp` (swept), `seed` (swept), `bootstrap` (swept), `alpha` (one value) | across seeds and resamples |
+| `network.wgcna` | `WGCNA::blockwiseModules()` | `power` (swept), `minModuleSize`, `mergeCutHeight`, `networkType`, `maxBlockSize` | parameter grid |
+
+**Stability designs.** For NMF, CoGAPS and ICA the question is whether factors recur across
+random seeds (and, for ICA, bootstrap resamples). PCA, sPCA and WGCNA are deterministic given
+their parameters, so for them the question is how structure changes as the swept parameter
+grows. Every method is also compared across ranks.
+
+**CoGAPS's three sub-blocks** mirror its three call sites: `params` goes to `CogapsParams()`,
+`distributed_params` to `setDistributedParams()`, `run` to `CoGAPS()` itself. Some argument
+names exist on more than one of them, so put each under the function it belongs to. `nSets`
+and `nThreads` default to the cogaps controller's `cpus_per_task`.
+
+**Threads and identity.** Parameters that only set parallelism (NMF `n.threads`, CoGAPS
+`nSets`/`nThreads`, WGCNA `nThreads`) are listed in the method's `resource_params` and left
+out of a fit's identity (`fit_key`).
+
+### PCA: one fit per dataset
+
+PCA components are nested -- the first *k* components of a rank-20 fit are the rank-*k*
+solution -- so PCA is fit once per dataset, at the largest configured rank. The fit also
+records `mse_by_rank`, every truncation's reconstruction error. Choosing the first *n*
+components is left to ingestion and the app.
+
+### sPCA: choosing the sparsity
+
+sPCA runs with `sparse = "varnum"`, under which `para` is the fraction of genes allowed a
+non-zero loading in each component, converted to a count from the dataset's gene number.
+Fit time grows steeply with `para` and K: for EARLI (7465 genes × 189 samples) the median
+fit took 1.1 min at para 0.1 and K 2–5, but 158 min at para 0.5 and K 16–20.
+
+**How the sparsity is chosen.** We follow Guerra-Urzola, Van Deun, Vera & Sijtsma (2021),
+"A Guide for Sparse PCA: Model Comparison and Applications", *Psychometrika* 86(4):893–919
+([PMC8636462](https://pmc.ncbi.nlm.nih.gov/articles/PMC8636462/)): fix K, then choose the
+sparsity that maximizes the **Index of Sparseness**
+
+    IS = PEV_sparse × PEV_pca × PS
+
+- PEV_sparse: variance explained by the sparse components.
+- PEV_pca: variance explained by the first K ordinary principal components (from the
+  dataset's PCA fit).
+- PS: the proportion of zero loadings; under `varnum`, PS = 1 − para.
+
+The authors report that IS beat cross-validation and BIC at recovering the true sparsity,
+with a single interior peak in their applications (97% sparsity for gene expression).
+
+The search runs in two stages per dataset:
+
+1. **Coarse:** every K (2–12) at `para_coarse` = 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5.
+2. **Refine** (`spca_refine_grid()`): for each K, the midpoints either side of the coarse IS
+   peak, plus one step past it if the peak is at the grid's edge.
+
+That's about 99 fits per dataset (77 coarse + 22 refinement). `selection_spca_<dataset>`
+tabulates IS for every fit and marks the best para per K; those fits are sPCA's
+representative fits.
+
+- **Why the grid stops at 0.5:** on EARLI's original full grid (para up to 1.0, K up to 20),
+  IS peaked at para 0.4 for K 2–19 and 0.3 at K = 20. para ≥ 0.6 was never optimal but took
+  most of the runtime. Refinement goes past 0.5 if a dataset's peak is at the edge.
+- **`lambda` is not swept.** We tested λ ∈ {1e-6, 0.1, 1} under `varnum` on EARLI: across
+  113 (K, para) pairs fit at both 1e-6 and 1, total PEV differed by a median of 1.5e-4 and
+  at most 5.7e-4. Under `varnum`, `para` fixes the number of non-zero loadings, leaving λ
+  almost nothing to change (the paper makes the same point about LARS-EN). `lambda` is one
+  value, default 1e-6, and `spca_build_grid()` rejects a list.
+- **The 8-hour stop.** At high sparsity and high K, `spca()`'s alternating algorithm appears
+  not to converge and runs all `max.iter` iterations; elasticnet doesn't report its
+  iteration count. A fit still running after `max_hours` (default 8) stops itself and is
+  recorded as failed, with error `killed_not_converged`. Two ANEMONES fits (para 0.05,
+  K 10 and 11) end this way.
+- **Scores** are computed on the centered matrix, matching how `spca()` fits the model.
+
+### ICA, ICASSO and kurtosis
+
+ICA (`fastICA`, after a PCA prewhitening step) is fit across seeds and, with
+`bootstrap = TRUE`, on samples resampled with replacement. A bootstrap fit has no per-sample
+scores, since resampled columns repeat sample ids.
+
+**ICASSO** (Himberg, Hyvärinen & Esposito 2004, *NeuroImage* 22(3):1214–1222) pools every
+component of every fit at one rank -- seeds and bootstrap resamples together -- clusters them
+by |cosine| (average linkage, cut to the rank), and scores each cluster with
+Iq = mean within-cluster similarity − mean similarity to everything outside it. Iq ≥ 0.7 is
+the usual "trustworthy" threshold.
+
+**Per-component kurtosis** (Lee & Batzoglou 2003) is the non-Gaussianity fastICA maximizes;
+a clearly positive excess kurtosis is the expected signature of a real biological source.
+
+### WGCNA: one network over all genes
+
+For each soft-thresholding power, WGCNA correlates every pair of genes across samples and
+raises the correlations to that power, suppressing weak ones. It then computes the
+topological overlap (TOM) -- how many strong partners two genes share -- builds a gene tree
+from 1 − TOM, and cuts it into modules of at least `minModuleSize` genes. Modules whose
+eigengenes (first principal components) correlate above 1 − `mergeCutHeight` are merged.
+
+These genes × genes matrices grow with the square of the gene count, so `blockwiseModules()`
+by default caps a network at 5,000 genes and splits larger data into blocks, building
+separate networks within each. Genes in different blocks are then never compared, and the
+block count depends on the gene count. We set `maxBlockSize = 50000`, so each fit is one
+network over all genes (about 7,500), as the WGCNA authors recommend whenever memory allows.
+Its gene tree is then the one the modules were cut from, and ingestion stores it directly.
+Workers request 6 GB for this.
+
+### Error handling and timings
+
+Every fit function except sPCA's runs inside `capture_fit()` (`R/lib/method_registry.R`): a
+failing fit returns its error message instead of stopping its batch, and every result
+records its wall time. sPCA reports its own time and its 8-hour stop.
+
+## Representative fits
+
+Downstream analyses (enrichment, projections, redundancy, pattern drivers) use each method's
+**representative fits** (`fits.representative` in the DB):
+
+| Method | Representative fits |
+|---|---|
+| PCA | its single fit |
+| NMF, CoGAPS, ICA | the lowest-reconstruction-error seed at each rank (bootstrap resamples excluded) |
+| sPCA | the Index-of-Sparseness-selected para at each K |
+| WGCNA | every fit |
+
+## Adding a method
+
+Write one `R/methods/<name>.R` and add a controller named `<name>` to
+`config/pipeline.yml`. The file defines three things.
+
+**1. A fit function** that reads its matrix from the free variable `mat` (or `mat_nn`, the
+non-negative shift); `run_method_fits()` binds it for each call. Its arguments are the columns
+your `build_grid()` produces. Wrap the body in `capture_fit()` so a failure is recorded
+rather than stopping the batch, and return as much of the model as is cheap to store:
+ingestion can then change without refitting.
+
+**2. `<name>_registry`**, the fitting contract (the variable name must match the file name):
+
+| Field | Meaning |
+|---|---|
+| `global_object` | `"mat"` or `"mat_nn"` |
+| `jobname` | a label, e.g. `"pca_grid"` |
+| `fn` | the fit function |
+| `build_grid` | `function(params)` returning one row per fit, usually `expand.grid()` over the fit function's arguments; `params` is `defaults` merged with the dataset config (`merge_named_list()`) |
+| `defaults` | optional default parameters |
+| `pkgs` | optional packages to load on the worker |
+| `resource_defaults` | optional `function(params, resources)` for defaults from the worker's resources (`cpus_per_task`) |
+| `needs_nonneg` | `TRUE` to fit on the non-negative shift |
+| `network` | `TRUE` if the config nests under `methods.network` |
+| `refine_grid` + `select_fits` | optional data-driven second stage (as sPCA's search) |
+
+**3. `<name>_ingest`**, the ingestion contract (`validate_method_ingest()`):
+
+| Field | Meaning |
+|---|---|
+| `family` | `"seed_sweep"` or `"param_grid"` |
+| `sign_ambiguous` | `TRUE` if factors are unique only up to sign (matching uses \|similarity\|; enrichment tests both ends) |
+| `has_loadings` | `FALSE` for a method without a genes × factors matrix (WGCNA) |
+| `resource_params` | flattened parameter names that only set parallelism |
+| `extract(result, params)` | one fit's result → `fit_record_from()`: rank, seed, mse, loadings, scores, diagnostics, the raw object, scalar metrics |
+
+**Why two contracts.** The fit targets depend on the registry and everything it calls, so
+editing them refits the method -- for sPCA, about a day of compute. The ingestion contract
+is referenced only by ingestion targets, so changing what's extracted never refits.
+
+`R/methods/pca.R` is the simplest example; `cogaps.R` shows sub-blocks, `wgcna.R` a
+`network` method without loadings, `spca.R` a refine stage.
+
+## Methods considered and dropped
+
+- **CP and Tucker tensor decompositions** (genes × subjects × timepoints) were implemented
+  and removed on 2026-09-29. The planned data has only 2 timepoints per subject, too few to
+  fit a time mode or choose its rank; tensor rank selection is NP-hard and CP/Tucker results
+  are very sensitive to hyperparameters
+  ([summary](https://rpubs.com/ivanricardo/tensorfactormodels)).
+- **ICAclust** (Nascimento et al., PLoS One 2017) clusters genes by temporal shape with ICA
+  over timepoints; with 2 timepoints its rotation has a single free angle, so the method is
+  degenerate. Never adopted.
+- **Masking cross-validation and subsample projection** stability designs were explored and
+  removed; see git history to revive them.
+
+## Differential expression (outside the pipeline)
+
+`R/de/` holds a separate limma/voom differential-expression analysis, run by hand (each
+dataset is small enough for a laptop). It isn't part of the targets pipeline or the app. It
+targets genes that change **over time** within patients (a repeated-measures question) for
+the 8 base datasets with repeated measures, and a case/control comparison for the others.
+
+### Why not the pipeline's matrices
+
+Every preprocessing script applies something wrong for DE: RNA-seq scripts apply DESeq2's VST
+(voom needs raw counts), and every script keeps only the most variable genes (circular for a
+DE test). The DE scripts call `pivot_expression_long()` (`R/lib/matrices.R`) directly for the
+raw matrix, and `filter_low_variance()` drops only the bottom quartile by total variance.
+
+### Platform and design
+
+- **RNA-seq** (EARLI, GSE110487, GSE273700, ROSE, hfgp-500fg): raw integer counts,
+  `edgeR::DGEList()` + `filterByExpr()` + `calcNormFactors()` + `limma::voom()`.
+- **Microarray** (everything else): already log-scale, plain `lmFit()`/`eBayes()`.
+- **Time-course design** (`run_de_timecourse()`, `R/de/de_helpers.R`): `~ 0 + cell`, with
+  `cell = interaction(group, time)` (or `time` when there's no group). Subjects are blocked
+  with `duplicateCorrelation()` (two-pass for voom). Reported per group with at least 3
+  subjects sampled at 2+ timepoints: an F-test across that group's timepoint contrasts
+  (`<group>_time_omnibus`) and each timepoint against the group's earliest.
+- **Case/control design** (`run_de_case_control()`): `~ 0 + group`, no blocking.
+- **Two deliberate choices:** a healthy-control or other-condition arm is modelled as
+  `group_col` rather than subset out, and no other covariates (age, sex, treatment, severity)
+  are included in this first pass.
+
+| Dataset | Platform | Design | Subject column | Time / group |
+|---|---|---|---|---|
+| ANEMONES | array | time-course | patient_id | timepoint × disease (Sepsis/SIRS/Control) |
+| CORTICUS | array | time-course | patient_id | timepoint (Pre/Post24h) |
+| GSE110487 | rnaseq | time-course | patient_id | timepoint (T1/T2) |
+| GSE13904 | array | time-course | patient_id | timepoint × clinical_status |
+| GSE273700 | rnaseq | time-course | patient_id | timepoint (Day1/Day8) |
+| GSE54514 | array | time-course | group_id | day × disease_status |
+| GSE95233 | array | time-course | patient_id | timepoint (22 controls without a timepoint dropped) |
+| ROSE | rnaseq | time-course | subject_number | timepoint × class (Hypo/Hyper) |
+| EARLI | rnaseq | case/control | -- | lca_label (Hypo/Hyper) |
+| MARS | array | case/control | -- | Sepsis vs Healthy |
+| gains | array | case/control | -- | srs_group (SRS1/SRS2) |
+| dilgom | array | case/control | -- | age band (illustrative only) |
+| hfgp-500fg | rnaseq | case/control | -- | sex (illustrative; top hits are Y-chromosome genes, a positive control) |
+| SHIP-TREND | -- | none | -- | no sample metadata; the script documents this and doesn't run |
+
+### Outputs and follow-on analyses
+
+Each dataset writes `results/de/<DATASET>/`: `topTable_<contrast>.csv` per contrast, the
+fitted `fit.rds`, `de_bundle.rds` (cell-means fit, expression matrix and sample factors) and
+diagnostic plots (sample PCA, p-value histograms, voom mean–variance trend).
+
+Three drivers build on those outputs:
+
+1. **fgsea** (`run_de_fgsea.R`): the pipeline's six MSigDB collections and settings, on each
+   pairwise contrast's `t` statistic (F-tests have no sign), after remapping to Ensembl.
+2. **Clustering** (`run_de_clustering.R`): genes significant in each time-omnibus test,
+   clustered by temporal shape; and a check of whether those genes' raw expression recovers
+   the timepoints. It mostly doesn't (near-zero ARI): `duplicateCorrelation()` isolates the
+   within-subject time effect, which raw clustering can't separate from between-subject
+   differences.
+3. **DE-vs-factor correlation** (`run_de_factor_correlation.R`): for each method's
+   representative fit nearest rank 10, Fisher overlap between a factor's genes (non-zero for
+   sPCA, top 100 by |weight| otherwise) and each contrast's significant genes, and fgsea of
+   each factor's genes against each contrast's ranking. It reads loadings from the stability
+   DB (`fit_artifacts`).
+
+```sh
+Rscript R/de/ANEMONES_de.R               # one dataset (one script per dataset)
+Rscript R/de/run_de_fgsea.R
+Rscript R/de/run_de_clustering.R
+Rscript R/de/run_de_factor_correlation.R
+```
+
+`duplicateCorrelation()` on the largest array datasets (ANEMONES, GSE13904, ROSE) takes
+10–30 minutes; everything else runs in under a minute.

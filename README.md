@@ -1,80 +1,80 @@
-# Sepsis timecourse latent-factor stability
+# Sepsis latent-factor stability
 
-Pipeline for quantifying the stability of latent factors (PCA, NMF, CoGAPS,
-sPCA, CP, Tucker, and WGCNA) found in the sepsis timecourse expression
-data, across random seeds and across rank/parameter choices.
+Fits six latent-factor methods (PCA, NMF, CoGAPS, sPCA, ICA, WGCNA) to sepsis gene-expression
+datasets across seeds and rank/sparsity choices, measures how stable the factors are, enriches
+and projects them across datasets, and writes it all to a SQLite database that a Shiny app
+browses. One [targets](https://books.ropensci.org/targets/) pipeline runs everything, with the
+heavy steps as SLURM jobs.
 
-Three stages:
+**Full documentation:** the Quarto site in [`docs/`](docs/) -- `quarto preview docs` to browse it.
 
-1. **rslurm grid setup + submission** (cluster) -- see [R/README.md](R/README.md)
-   for preparing an input matrix, writing a `dataset_metadata.yml`, and
-   staging/submitting the batch jobs. Produces `results_<i>.RDS` files per
-   job family under `slurm_bundles/<dataset_id>/`, then copied back locally
-   into a results directory (e.g. `GSE110487_results/`).
-2. **Ingest** -- loads a results directory into a SQLite DB, computing all
-   pairwise stability metrics (see below).
-3. **Shiny app** -- browses the DB with a drill-down explorer (dataset >
-   method > rank/parameter > factor).
+## Prerequisites
 
-Ingest and the app are fully decoupled: the app only ever reads whatever the
-DB currently contains, and both take the DB path as a parameter.
+- A SLURM cluster (HTCF here). The main process submits worker jobs and must stay running.
+- R 4.6 with system libraries: on HTCF, the spack environment
+  `/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1` (the one RStudio Server runs from).
+  Elsewhere, see [docs/setup.qmd](docs/setup.qmd).
+- The raw data (HuggingFace sepsis collection). On HTCF:
+  `/scratch/mblab/chasem/hf_sepsis_collection`.
 
-## Ingest
+## Set up (once)
 
-```r
-Rscript R/ingest_results.R <dataset_config.yml> <results_dir> <db_path> [--overwrite [jobname,...]]
+```sh
+git clone <this repo> && cd sepsis_latent_factor_eda
+# R from the spack environment (RStudio Server on HTCF already has it):
+SPACK_ENV=/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1
+eval "$(spack env activate --sh "$SPACK_ENV")"
+export LD_LIBRARY_PATH="$SPACK_ENV/view/lib:$SPACK_ENV/view/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+unset R_LIBS R_LIBS_USER R_LIBS_SITE
+Rscript -e 'options(renv.install.timeout = 6 * 3600); renv::restore()'   # hours: builds from source
 ```
 
-Example (the dataset currently in this repo):
+CoGAPS needs a patched build for OpenMP, and projectR comes from a fork; both are covered in
+[docs/setup.qmd](docs/setup.qmd). Point `data_root` in `config/pipeline.yml` (or the
+`SEPSIS_DATA_ROOT` environment variable) at the data.
 
-```r
-Rscript R/ingest_results.R config/GSE110487_config.yml GSE110487_results results/stability.sqlite
+## Add a dataset
+
+1. Write `config/<dataset>_config.yml` (copy `config/dataset_metadata.example.yml`): data paths,
+   how to build the matrix, each method's parameter grid. See [docs/data.qmd](docs/data.qmd).
+2. Add its `dataset.id` to `datasets:` in `config/pipeline.yml`.
+
+## Run
+
+```sh
+sbatch run_pipeline.sbatch                                     # build everything outdated
+sbatch run_pipeline.sbatch 'tidyselect::starts_with("fit_")'   # fits only, no ingestion
+tail -f logs/targets_main_<jobid>.out
 ```
 
-- Discovers job families as the subdirectories of `<results_dir>`
-  containing `results_*.RDS` files.
-- **Additive**: re-running the same command only adds families not yet in
-  the DB for that dataset (e.g. drop a `cp_grid/` directory in later and
-  re-run -- only `cp_grid` gets ingested; everything else is reported as
-  skipped).
-- **Overwrite**: `--overwrite` (bare) replaces every family found in
-  `<results_dir>`; `--overwrite jobname1,jobname2` replaces just those
-  families. Overwrite always deletes and re-writes a family's rows and
-  artifacts, never updates in place.
-- A new dataset (different `dataset.id` in the config) is ingested
-  alongside any existing datasets in the same DB file -- point multiple
-  configs at the same `<db_path>` to build up a multi-dataset DB.
-- Large artifacts (loading matrices, sample/module scores, CP/Tucker
-  time-mode loadings) are written under `<db_dir>/stability_artifacts/<dataset_id>/` and
-  referenced by path from the DB; everything the app filters/aggregates on
-  lives in the SQLite tables themselves.
-- The dataset config's `sample_metadata_path`/`sample_id_col` and
-  `feature_metadata_path`/`feature_id_col` are registered in the DB as
-  **pointers** (path + id column), not copied in -- refreshed on every
-  ingest run regardless of which job families changed. The app always
-  re-reads the pointed-to file live, so editing the metadata file itself
-  (e.g. adding a clinical variable) needs no re-ingest. Get `feature_id_col`
-  right: it must match the column in `feature_metadata_path` whose values
-  equal the fitted matrix's row names (verify with a quick join-coverage
-  check by hand -- ingest doesn't validate this for you).
+Or from an RStudio Server session on the cluster: `targets::tar_make()` (and
+`targets::tar_visnetwork()` to see what's outdated). Only what a change invalidates is rebuilt.
+See [docs/workflow.qmd](docs/workflow.qmd).
 
-Run interactively instead of via `Rscript` by setting `ingest_config_path`,
-`ingest_results_dir`, `ingest_db_path` (and optionally `ingest_overwrite`)
-before sourcing `R/ingest_results.R`.
+## Results
 
-## App
+The database is at `db_path` in `config/pipeline.yml` (default
+`results/targets/stability.sqlite`), with large artifacts under
+`results/targets/stability_artifacts/`. Every table is described in
+[docs/database.qmd](docs/database.qmd).
+
+## Browse
 
 ```r
-Sys.setenv(STABILITY_DB = "results/stability.sqlite")  # optional; see below
 shiny::runApp("app")
 ```
 
-- `STABILITY_DB` picks the DB to browse; if unset, the app falls back to
-  `results/stability.sqlite` (resolved relative to either the repo root or
-  `app/`, whichever the app was launched from).
-- The dataset list, methods, and job families shown are all queried live
-  from the DB, so re-ingesting (e.g. adding `cp_grid`) makes new data
-  appear on the next app launch with no app changes needed. **Caveat**:
-  this applies to what's *listed*; sPCA/CP/Tucker don't have Level 1/2/3
-  views wired up in the app yet (stage 1 setup and stage 2 ingest fully
-  support them; the app doesn't) -- see R/README.md's "Deferred" section.
+The app has not been updated to the current database schema yet; see
+[docs/app.qmd](docs/app.qmd).
+
+## Documentation
+
+```sh
+quarto render docs     # builds docs/_site/ (Quarto ships with RStudio Server)
+quarto preview docs    # live preview
+```
+
+Pages: [setup](docs/setup.qmd), [data](docs/data.qmd), [methods](docs/methods.qmd),
+[database](docs/database.qmd), [running the workflow](docs/workflow.qmd),
+[launching the app](docs/app.qmd), and a function reference generated from the code's roxygen
+comments.

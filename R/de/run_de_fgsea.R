@@ -1,7 +1,7 @@
 # fgsea enrichment for every DE contrast, mirroring R/ingest_jobs/
 # fgsea_job.R's conventions (same 6 msigdbr collections, same fgsea()
 # parameters, same canonical Ensembl identifier space) -- see
-# R/de/README.md and R/de/de_fgsea_helpers.R for the full rationale.
+# docs/methods.qmd ("Differential expression") and R/de/de_fgsea_helpers.R for the full rationale.
 #
 # Only PAIRWISE contrasts get fgsea (files with "omnibus" in the name are
 # skipped) -- GSEA needs a signed ranking statistic (up in A, down in B),
@@ -16,6 +16,7 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/ingest/symbol_mapping.R"))
 source(here("R/de/de_helpers.R"))
 source(here("R/de/de_fgsea_helpers.R"))
@@ -37,7 +38,7 @@ for (dataset_id in names(DATASETS)) {
     next
   }
 
-  ds_meta <- yaml::read_yaml(here(spec$config))$dataset
+  ds_meta <- read_dataset_yaml(here(spec$config))$dataset
   feature_meta <- arrow::read_parquet(ds_meta$feature_metadata_path)
   ens_map <- build_de_ensembl_map(ds_meta, feature_meta, platform = spec$platform)
   if (is.null(ens_map)) {

@@ -1,16 +1,13 @@
-# Factor-similarity machinery: cosine / Pearson / Spearman between the
-# columns of two loading matrices (genes x factors), plus 1-to-1 Hungarian
-# matching. All three metrics are computed and stored side by side (user
-# decision -- space is not a concern yet).
-#
-# Efficiency note: each metric reduces to a crossprod of appropriately
-# transformed column-unit-norm matrices, so `prepare_loadings()` transforms
-# each fit's loadings ONCE (cosine: L2-normalized columns; Pearson:
-# column-centered then normalized; Spearman: column-ranked, centered,
-# normalized) and every pair comparison is then just three t(A) %*% B.
+# Factor similarity: cosine, Pearson and Spearman between the columns of two
+# loading matrices (genes x factors), and 1-to-1 Hungarian matching. Each
+# metric is a crossprod of column-normalized matrices, so prepare_loadings()
+# transforms each fit once and every pair comparison is three t(A) %*% B.
 
-#' Transform one loading matrix into the three normalized variants.
-#' Rows must be named by gene.
+#' Normalize a loading matrix for similarity
+#'
+#' @param mat Genes x factors matrix with gene row names.
+#' @return `list(cosine, pearson, spearman)`: the matrix with unit-norm
+#'   columns, centered then unit-norm, and ranked, centered then unit-norm.
 prepare_loadings <- function(mat) {
   stopifnot(!is.null(rownames(mat)))
   unit_cols <- function(m) {
@@ -29,11 +26,15 @@ prepare_loadings <- function(mat) {
   )
 }
 
-#' Similarity matrices (factors_a x factors_b) between two prepared fits,
-#' computed on the intersection of their gene sets. Note: normalization
-#' happened on the FULL gene set at prepare time; when the two fits share
-#' all genes (the usual case here -- same dataset, same input matrix) this
-#' is exact. Fits with disjoint genes return NULL.
+#' Similarity between the factors of two fits
+#'
+#' Computed on the genes both fits share. Normalization happened on each fit's
+#' full gene set, which is exact when both share all genes (the usual case: same
+#' dataset, same matrix); otherwise the shared subset is renormalized.
+#'
+#' @param prep_a,prep_b prepare_loadings() outputs.
+#' @return `list(cosine, pearson, spearman)` of factors_a x factors_b
+#'   matrices, or `NULL` when fewer than 2 genes are shared.
 pair_similarities <- function(prep_a, prep_b) {
   shared <- intersect(rownames(prep_a$cosine), rownames(prep_b$cosine))
   if (length(shared) < 2) return(NULL)
@@ -61,11 +62,13 @@ pair_similarities <- function(prep_a, prep_b) {
   }
 }
 
-#' Optimal 1-to-1 assignment maximizing total similarity, via
-#' clue::solve_LSAP (which minimizes cost and requires a non-negative
-#' matrix with nrow <= ncol -- handled by shifting and transposing).
-#' Returns a two-column matrix (a = row factor index, b = col factor
-#' index) with min(nrow, ncol) rows.
+#' Optimal 1-to-1 factor matching
+#'
+#' Maximizes total (signed) similarity with `clue::solve_LSAP()`.
+#'
+#' @param sim Factors_a x factors_b similarity matrix.
+#' @return Two-column integer matrix (`a`, `b`) of matched row and column
+#'   indices, `min(nrow, ncol)` rows.
 hungarian_match <- function(sim) {
   transposed <- FALSE
   if (nrow(sim) > ncol(sim)) {
@@ -80,20 +83,15 @@ hungarian_match <- function(sim) {
   out
 }
 
-#' Like hungarian_match() but costed on |similarity| rather than raw
-#' similarity -- needed whenever a strongly NEGATIVE similarity is just as
-#' informative a match as a strongly positive one. Plain hungarian_match()
-#' would systematically avoid such matches, since it maximizes raw
-#' (signed) similarity, and would either assign a sign-flipped pair to the
-#' wrong factor entirely or record a stable-but-flipped component as
-#' strongly dissimilar. Needed for any sign-ambiguous method (PCA/sPCA/ICA
-#' -- see R/lib/ingest/pairs.R's `sign_ambiguous` argument) as well as for
-#' cross-method comparisons (e.g. a non-negative CoGAPS/NMF factor aligning
-#' with the negative tail of a signed PCA component). Also used on Jaccard
-#' matrices (always non-negative, so this degenerates to ordinary Hungarian
-#' matching there). Promoted here from app/R/comparison_helpers.R
-#' 2026-09-29 so both the live app comparison screens and the offline
-#' ingest-time stability pipeline share one implementation.
+#' Optimal 1-to-1 factor matching on |similarity|
+#'
+#' For sign-ambiguous methods (PCA, sPCA, ICA), where a component can flip sign
+#' between fits: a strongly negative similarity is as good a match as a
+#' strongly positive one. Also used across methods (e.g. an NMF factor matching
+#' the negative tail of a PCA component) and on Jaccard matrices.
+#'
+#' @param sim Factors_a x factors_b similarity matrix.
+#' @return Two-column integer matrix (`a`, `b`) of matched indices.
 hungarian_match_abs <- function(sim) {
   transposed <- FALSE
   if (nrow(sim) > ncol(sim)) { sim <- t(sim); transposed <- TRUE }

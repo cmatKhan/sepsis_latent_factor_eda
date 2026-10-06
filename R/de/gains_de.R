@@ -1,5 +1,5 @@
 # Differential expression for "gains" -- CROSS-SECTIONAL per its current
-# usable metadata (no timepoint/subject column). See R/de/README.md for
+# usable metadata (no timepoint/subject column). See docs/methods.qmd ("Differential expression") for
 # why this is treated as cross-sectional-with-caveats rather than a true
 # repeated-measures dataset: raw sample ids hint at undocumented repeated
 # sampling (e.g. "CAP0173.B.5") that isn't safely reconstructable from the
@@ -34,9 +34,10 @@ library(yaml)
 library(arrow)
 library(dplyr)
 library(tidyr)
+source(here("R/lib/data_paths.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/gains_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/gains_config.yml"))$dataset
 
 message("[gains] loading raw expression matrix (4 partitioned files)...")
 expr_long <- arrow::open_dataset(ds_meta$expression_path) |> dplyr::collect()

@@ -1,40 +1,46 @@
-# Phase-2 slurm ARRAY job (cheap relative to fgsea -- plain array
-# parallelism, 1 cpu/task): one task per (source fit, target dataset)
-# pair from build_projectr_pairs(). `include_intercept` flows straight
-# through from the jobs_df row -- fixed at grid-build time by which of
-# projectr_within_grid/projectr_cross_grid the row belongs to, never
-# decided here.
+# projectR projection of one representative fit's loadings onto another
+# dataset's matrix, run as one dynamic branch of projectr_<dataset>
+# (row built by projection_row(), R/targets/projections.R).
+# `include_intercept` is decided by the caller: off within a dataset family
+# (config/dataset_families.yml), on across families.
 #
-# Remapping to Ensembl (not gene symbol) is the canonical cross-dataset
-# identifier space here -- see R/lib/ingest/symbol_mapping.R's header for
-# why (symbol is display-only).
-#
-# `ensembl_maps` is read as a FREE VARIABLE, NOT a function parameter --
-# this is an ARRAY job (slurm_apply(), jobs_df = one row per source-fit x
-# target-dataset pair), and `ensembl_maps` is baked in via
-# `global_objects` only, never as a jobs_df column (there's exactly ONE
-# shared copy for the whole grid, not a per-row value). An EARLIER version
-# of this function declared it as a formal parameter instead (named
-# `symbol_maps`, with a `= list()` default) -- since jobs_df never
-# supplies a column of that name, `do.call(f, params_row)` never
-# overrides that default, so the function ALWAYS silently received an
-# empty list (confirmed directly), never the real baked-in map. Every
-# projectr_job task was therefore comparing raw, un-remapped native
-# platform ids the whole time -- almost certainly the actual cause of
-# "0 row names matched between data and loadings" on cross-dataset
-# pairs using different platforms, not (only) a symbol-column-detection
-# issue. Compare `pathways` in run_fgsea_job() (R/ingest_jobs/
-# fgsea_job.R), which was already done correctly this way.
-run_projectr_job <- function(source_fit_id, source_method, source_dataset_id, loadings_file,
+# Both sides are remapped to Ensembl gene ids first -- the canonical
+# cross-dataset id space (R/lib/ingest/symbol_mapping.R). For PCA, the fit
+# is rebuilt as a `prcomp` object (rotation, the source matrix's gene means
+# as `center`, per-component score SDs as `sdev`) and projected with the
+# projectR fork's `center_by_loadings = TRUE`.
+
+#' Project one fit's loadings onto another dataset's matrix
+#'
+#' Both sides are remapped to Ensembl ids first. A PCA fit is rebuilt as a
+#' `prcomp` object (rotation, the source matrix's gene means as `center`,
+#' score SDs as `sdev`) and projected with the projectR fork's
+#' `center_by_loadings = TRUE`; other methods use plain loadings.
+#'
+#' @param source_fit_key The source fit's key.
+#' @param source_method Its method.
+#' @param source_dataset_id Its dataset.
+#' @param loadings_file Absolute path to its loadings.
+#' @param target_dataset_id The dataset projected onto.
+#' @param target_matrix_file Absolute path to that dataset's matrix.
+#' @param projection_type `"within_dataset"` or `"cross_dataset"`.
+#' @param include_intercept Whether projectR fits an intercept (cross-family only).
+#' @param source_ensembl_map,target_ensembl_map The two datasets' Ensembl maps.
+#' @param source_mat_file,source_scores_file The source's matrix and scores
+#'   (PCA only).
+#' @return List with the job's identifiers, `n_genes_matched` and `result`
+#'   (projectR's output, or `NULL` on failure).
+run_projectr_job <- function(source_fit_key, source_method, source_dataset_id, loadings_file,
                               target_dataset_id, target_matrix_file,
                               projection_type, include_intercept,
+                              source_ensembl_map, target_ensembl_map,
                               source_mat_file = NULL, source_scores_file = NULL) {
   library(projectR)
   loadings <- as.matrix(readRDS(loadings_file))
   target_mat <- as.matrix(readRDS(target_matrix_file))
 
-  loadings_ens <- remap_to_ensembl(loadings, ensembl_maps[[source_dataset_id]])
-  target_ens   <- remap_to_ensembl(target_mat, ensembl_maps[[target_dataset_id]])
+  loadings_ens <- remap_to_ensembl(loadings, source_ensembl_map)
+  target_ens   <- remap_to_ensembl(target_mat, target_ensembl_map)
 
   if (source_method == "pca" && !is.null(source_mat_file) && !is.null(source_scores_file)) {
     # Reconstruct the native prcomp object projectR's dispatch needs for
@@ -53,7 +59,7 @@ run_projectr_job <- function(source_fit_id, source_method, source_dataset_id, lo
     # matrices) via a 1-column matrix rather than duplicating its
     # probe-collapse logic.
     center_raw <- matrix(rowMeans(source_mat), ncol = 1, dimnames = list(rownames(source_mat), "center"))
-    center_ens <- remap_to_ensembl(center_raw, ensembl_maps[[source_dataset_id]])[, 1]
+    center_ens <- remap_to_ensembl(center_raw, source_ensembl_map)[, 1]
     pcfit <- structure(list(rotation = loadings_ens, center = center_ens[rownames(loadings_ens)],
                              sdev = apply(scores, 2, sd)), class = "prcomp")
     out <- tryCatch(projectR(data = target_ens, loadings = pcfit, full = TRUE, center_by_loadings = TRUE),
@@ -71,7 +77,7 @@ run_projectr_job <- function(source_fit_id, source_method, source_dataset_id, lo
   # nrow(loadings_ens) whenever the target has fewer/different genes).
   n_genes_matched <- length(intersect(rownames(loadings_ens), rownames(target_ens)))
 
-  list(source_fit_id = source_fit_id, source_dataset_id = source_dataset_id,
+  list(source_fit_key = source_fit_key, source_dataset_id = source_dataset_id,
        target_dataset_id = target_dataset_id, method = source_method,
        projection_type = projection_type, include_intercept = include_intercept,
        n_genes_matched = n_genes_matched, result = out)

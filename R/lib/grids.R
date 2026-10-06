@@ -1,23 +1,25 @@
-# Small shared helper used by R/create_slurm_bundle.R to resolve a
-# method's config overrides against its script-defined `defaults`. See
-# R/README.md's "Adding a new method" for the registry schema
-# (`defaults` + `build_grid`).
+# Merging a method's config overrides onto its registry `defaults`
+# (docs: Methods, "Adding a method").
 
+#' Null default
+#'
+#' `a` unless it is `NULL`, then `b` (base R's `%||%`, defined here for older R).
+#'
+#' @param a A value, possibly `NULL`.
+#' @param b The fallback.
+#' @return `a`, or `b` when `a` is `NULL`.
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
-#' Layer `override`'s keys on top of `base` by NAME (unlike plain `c()`,
-#' which just concatenates and would leave duplicate-named entries with
-#' the base's value found first) -- used to merge a method's `defaults`
-#' with the dataset config's overrides.
+#' Merge config overrides onto a method's defaults
 #'
-#' Recurses one level into any key whose value is itself a NAMED list in
-#' both `base` and `override` (e.g. CoGAPS's `params` sub-block) --
-#' otherwise, overriding just one nested key (say `params.nPatterns`)
-#' would wipe out every other default nested under that same key (e.g.
-#' `params.seed`/`params.nIterations`) instead of layering on top of them.
-#' Every other method here has no nested list values in `defaults` at
-#' all, so this recursion is a no-op for them -- plain top-level
-#' replacement, same as before.
+#' Layers `override`'s entries onto `base` by name (plain `c()` would keep both
+#' copies of a duplicated name). Recurses one level into entries that are named
+#' lists in both, such as CoGAPS's `params` sub-block, so overriding one nested
+#' key (`params.nPatterns`) keeps the other nested defaults.
+#'
+#' @param base Named list of defaults (a registry's `defaults`), or `NULL`.
+#' @param override Named list of overrides (the dataset config's method block), or `NULL`.
+#' @return The merged named list.
 merge_named_list <- function(base, override) {
   base <- base %||% list()
   override <- override %||% list()

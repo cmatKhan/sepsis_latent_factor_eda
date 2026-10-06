@@ -1,5 +1,5 @@
 # Differential expression over time for GSE110487, RNA-seq, 2-level
-# timecourse (T1/T2). See R/de/README.md.
+# timecourse (T1/T2). See docs/methods.qmd ("Differential expression").
 #
 # Real metadata (62 samples, 31 patients, balanced): sample_id,
 # patient_id, response_to_treatment, timepoint. No healthy/other-condition
@@ -7,7 +7,7 @@
 # population), so no `group_col` is used -- plain `~ 0 + timepoint`,
 # blocked on patient. `response_to_treatment` is left out of the model
 # deliberately, same reasoning as CORTICUS's `treatment` -- see
-# R/de/README.md.
+# docs/methods.qmd ("Differential expression").
 #
 # Platform: RNA-seq -- R/preprocessing/gse110487_preprocessing.R confirms
 # `as.integer(value)` -> DESeqDataSetFromMatrix(countData=...), and the
@@ -19,11 +19,12 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/lib/ingest/symbol_mapping.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/GSE110487_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/GSE110487_config.yml"))$dataset
 
 message("[GSE110487] loading raw count matrix...")
 mat <- pivot_expression_long(ds_meta)

@@ -1,11 +1,11 @@
 # Differential expression over time for GSE273700, RNA-seq, 2-level
-# timecourse (Day1/Day8). See R/de/README.md.
+# timecourse (Day1/Day8). See docs/methods.qmd ("Differential expression").
 #
 # Real metadata (104 samples, 52 patients, balanced): sample_id,
 # author_id, patient_id, thrombocytopenia, timepoint. No healthy/other-
 # condition comparator arm -- no `group_col` used (plain `~ 0 + timepoint`,
 # blocked on patient). `thrombocytopenia` left out of the model
-# deliberately, same reasoning as CORTICUS/GSE110487 -- see R/de/README.md.
+# deliberately, same reasoning as CORTICUS/GSE110487 -- see docs/methods.qmd ("Differential expression").
 #
 # Platform: RNA-seq -- R/preprocessing/gse273700_preprocessing.R confirms
 # `as.integer(value)` -> DESeqDataSetFromMatrix, raw expression.parquet's
@@ -14,11 +14,12 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/lib/ingest/symbol_mapping.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/GSE273700_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/GSE273700_config.yml"))$dataset
 
 message("[GSE273700] loading raw count matrix...")
 mat <- pivot_expression_long(ds_meta)

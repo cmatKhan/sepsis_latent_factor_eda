@@ -15,7 +15,7 @@
 # topTable's convention against that SAME dataset's factor loadings'
 # convention (see reconcile_loadings_to_de_ids()'s header).
 #
-# Needs R/lib/ingest/db.R (open_stability_db()/resolve_artifact(), the
+# Needs R/db/connect.R (open_stability_db()/resolve_artifact(), the
 # TWO-ARG version -- not app/R/db_helpers.R's single-arg app-only shadow)
 # and R/lib/ingest/symbol_mapping.R (remap_to_symbol()) sourced first.
 
@@ -23,18 +23,21 @@ suppressMessages({
   library(fgsea)
 })
 
-#' The one fit used for a (dataset, method) pair in this analysis: a
-#' FIXED default rank (10 for pca/nmf/cogaps/ica, K=10 for spca),
-#' deliberately sidestepping model-selection entirely for this first pass
-#' (see R/de/README.md) -- falls back to the closest available rank if 10
-#' isn't in that dataset's grid. Uses representative_fit_ids() (R/lib/
-#' ingest/redundancy.R) to collapse the seed/para sweep first, so this is
-#' never picking an arbitrary single seed.
+#' The fit used for a (dataset, method) pair
+#'
+#' The representative fit whose rank is nearest `target_rank` -- a fixed rank
+#' rather than model selection, for this first pass.
+#'
+#' @param con Stability DB connection.
+#' @param dataset_id Dataset id.
+#' @param method Method name.
+#' @param target_rank Rank (K for sPCA) to aim for.
+#' @return One-row data frame (fit_id, rank, loadings_file), or `NULL`.
 pick_fit_at_rank <- function(con, dataset_id, method, target_rank = 10) {
   fits <- DBI::dbGetQuery(con,
-    "SELECT fit_id, rank, loadings_file FROM fits
-     WHERE dataset_id = ? AND method = ? AND status = 'ok' AND loadings_file IS NOT NULL
-       AND (bootstrap IS NULL OR bootstrap = 0)",
+    "SELECT f.fit_id, f.rank, a.path AS loadings_file FROM fits f
+     JOIN fit_artifacts a ON a.fit_id = f.fit_id AND a.kind = 'loadings'
+     WHERE f.dataset_id = ? AND f.method = ? AND f.status = 'ok' AND f.bootstrap = 0",
     params = list(dataset_id, method))
   if (nrow(fits) == 0) return(NULL)
   rep_ids <- representative_fit_ids(con, dataset_id, method)
@@ -43,10 +46,14 @@ pick_fit_at_rank <- function(con, dataset_id, method, target_rank = 10) {
   fits[which.min(abs(fits$rank - target_rank)), ]
 }
 
-#' A factor's gene set: non-zero-weight genes for sPCA (genuinely sparse),
-#' top-`n` by |weight| for every other (dense) method -- the two rules the
-#' user specified directly. `loadings_col` is one column of a loadings
-#' matrix (named numeric vector, names = genes).
+#' A factor's gene set
+#'
+#' Non-zero genes for sPCA; the top `n` by |weight| for dense methods.
+#'
+#' @param loadings_col One loadings column (named numeric, names = genes).
+#' @param method Method name.
+#' @param n Genes to keep for dense methods.
+#' @return Character vector of genes.
 factor_gene_set <- function(loadings_col, method, n = 100) {
   if (identical(method, "spca")) {
     names(loadings_col)[loadings_col != 0]
@@ -55,17 +62,17 @@ factor_gene_set <- function(loadings_col, method, n = 100) {
   }
 }
 
-#' Reconcile a loadings matrix's rownames to the SAME gene-id convention
-#' R/de/<DATASET>_de.R's topTable uses for that dataset (see
-#' R/de/README.md's per-dataset table):
-#'   - RNA-seq datasets: DE never collapses (R/de/de_helpers.R's
-#'     collapse_to_symbol() is array-only) -- loadings are already fit on
-#'     the same native feature_id DE uses, no remap needed.
-#'   - Array datasets: DE collapsed to gene SYMBOL, but loadings are still
-#'     probe-keyed -- remapped via R/lib/ingest/symbol_mapping.R's
-#'     remap_to_symbol() (built for app display, reused here for a real
-#'     computational join; same many-probes-to-one-symbol collapse rule
-#'     as remap_to_ensembl(), see that file's .remap_ids()).
+#' Put loadings in the DE results' gene ids
+#'
+#' RNA-seq DE uses the native feature ids, so loadings already match; array DE
+#' collapsed to gene symbols, so probe-keyed loadings are remapped with
+#' remap_to_symbol().
+#'
+#' @param loadings Genes x factors matrix.
+#' @param ds_meta The dataset's `dataset:` block.
+#' @param feature_meta Feature-metadata data frame.
+#' @param platform `"array"` or `"rnaseq"`.
+#' @return The loadings with DE-compatible row names.
 reconcile_loadings_to_de_ids <- function(loadings, ds_meta, feature_meta, platform = c("array", "rnaseq")) {
   platform <- match.arg(platform)
   if (platform == "rnaseq") return(loadings)
@@ -73,10 +80,14 @@ reconcile_loadings_to_de_ids <- function(loadings, ds_meta, feature_meta, platfo
   remap_to_symbol(loadings, symbol_map)
 }
 
-#' Fisher's exact test on the 2x2 table (in factor & DE-sig, in factor &
-#' not, not-in-factor & DE-sig, not-in-factor & not) over `universe` (the
-#' genes actually tested by BOTH sides -- required for a valid test, not
-#' "every gene in the genome"). Returns a one-row data.frame.
+#' Fisher's exact test of a factor's genes against DE genes
+#'
+#' Over `universe`, the genes both sides tested.
+#'
+#' @param factor_genes The factor's gene set.
+#' @param de_sig_genes A contrast's significant genes.
+#' @param universe Genes tested by both.
+#' @return One-row data frame (counts, odds ratio, p-value).
 overlap_test <- function(factor_genes, de_sig_genes, universe) {
   factor_genes <- intersect(factor_genes, universe)
   de_sig_genes <- intersect(de_sig_genes, universe)
@@ -89,15 +100,16 @@ overlap_test <- function(factor_genes, de_sig_genes, universe) {
              odds_ratio = unname(ft$estimate), p_value = ft$p.value)
 }
 
-#' GSEA-style test: is a factor's gene set enriched at either end of a DE
-#' contrast's ranking? `rank_vector` = one contrast's signed `t` stat
-#' (named by gene, sorted decreasing); `factor_gene_sets` = named list,
-#' one entry per factor (see factor_gene_set()). minSize is lower than
-#' R/de/de_fgsea_helpers.R's MSigDB-collection default (5 vs 10) since
-#' factor gene sets are far smaller/user-defined; no maxSize cap -- unlike
-#' testing against MSigDB collections, here a large gene set (e.g. a
-#' loosely-sparse sPCA factor) is exactly what's being asked about, not
-#' something to exclude for being "too big a pathway."
+#' Are factors' gene sets enriched at either end of a DE ranking?
+#'
+#' fgsea() with each factor's gene set as a pathway; `minSize` 5 and no
+#' `maxSize`, since a large set (e.g. a loosely sparse sPCA factor) is the
+#' question here, not something to exclude.
+#'
+#' @param rank_vector One contrast's signed `t` statistics (named by gene,
+#'   sorted decreasing).
+#' @param factor_gene_sets Named list, one gene set per factor.
+#' @return fgsea() result table.
 factor_gsea_test <- function(rank_vector, factor_gene_sets) {
   tryCatch(
     fgsea::fgsea(pathways = factor_gene_sets, stats = rank_vector, minSize = 5, maxSize = Inf),

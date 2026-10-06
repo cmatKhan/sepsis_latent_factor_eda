@@ -186,12 +186,14 @@ dataset_metadata <- function(con, dataset_id, kind = c("sample", "feature")) {
 
 #' scores_file paths use the same relative-to-DB-dir convention as
 #' loadings_file (see resolve_artifact() in app/R/db_helpers.R).
-load_scores <- function(con, fit_id) {
+#' A fit's sample scores (samples x factors); `n` keeps the first n factors
+#' (see load_loadings()).
+load_scores <- function(con, fit_id, n = NULL) {
   f <- get_fit(con, fit_id)
   if (nrow(f) == 0 || is.na(f$scores_file)) return(NULL)
   path <- resolve_artifact(f$scores_file)
   if (!file.exists(path)) return(NULL)
-  readRDS(path)
+  first_n(readRDS(path), n)
 }
 
 #' Generic per-column association scan: for every column of `meta_df`

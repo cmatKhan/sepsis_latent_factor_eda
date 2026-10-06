@@ -12,7 +12,7 @@ library(DESeq2)
 #     `sample_id` (verified directly against both parquet files -- no
 #     column literally named `sample_id` exists here at all), so this
 #     script uses the framework-provided `sample_id_col` variable
-#     (contract: R/README.md's "Preprocessing script contract") rather
+#     (contract: docs/data.qmd, "Preprocessing-script contract") rather
 #     than hardcoding a column name that doesn't exist for this dataset.
 #   - only hemoglobin genes are removed, not ribosomal RNA loci --
 #     GSE110487's rRNA-depletion-carryover dispersion issue was diagnosed

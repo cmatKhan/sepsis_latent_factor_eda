@@ -1,5 +1,5 @@
 # Differential expression over time for GSE95233, array platform, 3-level
-# timecourse (D01/D02/D03). See R/de/README.md.
+# timecourse (D01/D02/D03). See docs/methods.qmd ("Differential expression").
 #
 # Real metadata (124 samples, 71 patients): sample_id, patient_id, age,
 # sex, survival, timepoint. 22 samples are the study's healthy-control arm
@@ -23,10 +23,11 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/GSE95233_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/GSE95233_config.yml"))$dataset
 
 message("[GSE95233] loading raw expression matrix...")
 mat <- pivot_expression_long(ds_meta)

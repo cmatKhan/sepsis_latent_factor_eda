@@ -1,25 +1,25 @@
-# WGCNA method registry -- generalizes R/legacy/wgcna_rslurm.R's per-basis
-# network + module detection family.
+# WGCNA (blockwiseModules()). `power` is swept rather than auto-picked with
+# pickSoftThreshold(), so module sets can be compared across powers.
+# `maxBlockSize = 50000` keeps each network in one block over all genes:
+# the default (5000) would split ~7,500 genes into separately built blocks
+# whose genes are never compared. `nThreads` defaults to the wgcna
+# controller's `cpus_per_task` (WGCNA needs at least 2) and is left out of a
+# fit's identity. `network = TRUE`: the config nests under
+# `methods.network.wgcna`. Fits the matrix `mat`.
 #
-# `power` plays the "structural" parameter role here (higher power -> a
-# sparser, more stringent adjacency -- WGCNA's analogue of increasing
-# rank/neighborhood size). Unlike the tutorial convention of auto-picking a
-# single power via pickSoftThreshold, this sweeps `power` directly so the
-# resulting module sets can be compared across powers.
-#
-# `nThreads` defaults to `slurm.network.wgcna.cpus_per_task` (via
-# `resource_defaults` below) unless set explicitly in `defaults`/config.
-#
-# Operates on the single matrix `mat` (set as a global object by the
-# orchestrator script) -- there is no basis argument.
-#
-# `network = TRUE` below tells R/lib/method_registry.R's discovery (and
-# R/create_slurm_bundle.R) that this method's config/slurm entries nest
-# under methods$network$wgcna / slurm$network$wgcna instead of the flat
-# methods$wgcna / slurm$wgcna every other method uses.
+# The fit targets depend on this file's registry and fit function: editing
+# their code refits the method (comments don't count). Docs: Methods.
 
+#' Build one WGCNA network
+#'
+#' @param power Soft-thresholding power.
+#' @param minModuleSize,mergeCutHeight,networkType,maxBlockSize,nThreads,...
+#'   Passed to WGCNA::blockwiseModules().
+#' @return `list(power, net, genes, samples, elapsed)`: `net` is
+#'   blockwiseModules()'s output (module colors, eigengenes, gene trees),
+#'   after the goodSamplesGenes() filter.
 run_wgcna_param_job <- function(power, minModuleSize, mergeCutHeight, networkType,
-                                 nThreads = 1, ...) {
+                                 maxBlockSize = 50000, nThreads = 1, ...) capture_fit(base = list(power = power), {
   library(WGCNA)
   enableWGCNAThreads(nThreads = nThreads)
   options(stringsAsFactors = FALSE)
@@ -34,11 +34,11 @@ run_wgcna_param_job <- function(power, minModuleSize, mergeCutHeight, networkTyp
     power = power, networkType = networkType, TOMType = networkType,
     minModuleSize = minModuleSize, mergeCutHeight = mergeCutHeight,
     numericLabels = TRUE, pamRespectsDendro = FALSE, saveTOMs = FALSE,
-    nThreads = nThreads, verbose = 0, ...
+    maxBlockSize = maxBlockSize, nThreads = nThreads, verbose = 0, ...
   )
 
   list(power = power, net = net, genes = colnames(datExpr), samples = rownames(datExpr))
-}
+})
 
 wgcna_registry <- list(
   needs_nonneg = FALSE,
@@ -48,7 +48,8 @@ wgcna_registry <- list(
   fn = run_wgcna_param_job,
   pkgs = "WGCNA",
   defaults = list(power = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20),
-                   minModuleSize = 30, mergeCutHeight = 0.25, networkType = "signed"),
+                   minModuleSize = 30, mergeCutHeight = 0.25, networkType = "signed",
+                   maxBlockSize = 50000),
   resource_defaults = function(p, slurm_cfg) {
     if (is.null(p[["nThreads"]])) p$nThreads <- slurm_cfg$cpus_per_task
     p
@@ -56,6 +57,46 @@ wgcna_registry <- list(
   build_grid = function(p) {
     expand.grid(power = p$power, minModuleSize = p$minModuleSize,
                 mergeCutHeight = p$mergeCutHeight, networkType = p$networkType,
-                nThreads = p$nThreads, stringsAsFactors = FALSE)
+                maxBlockSize = p$maxBlockSize, nThreads = p$nThreads, stringsAsFactors = FALSE)
+  }
+)
+
+# Ingest contract (R/targets/ingest.R): kept apart from wgcna_registry,
+# which the fit targets depend on, so editing it never refits. Modules are
+# WGCNA's factors (module 0 = unassigned genes, not a factor). With one
+# block (maxBlockSize above the gene count) net$dendrograms[[1]] is the gene
+# tree the modules were cut from.
+wgcna_ingest <- list(
+  family = "param_grid", sign_ambiguous = FALSE, has_loadings = FALSE,
+  resource_params = "nThreads",
+  extract = function(result, params) {
+    net <- result$net
+    if (is.null(net) || is.null(net$colors)) {
+      return(fit_failed("blockwiseModules returned no module colors", power = params$power))
+    }
+    cols <- net$colors
+    genes <- if (!is.null(names(cols))) names(cols) else result$genes
+    modules <- data.frame(gene = as.character(genes), module = as.integer(cols))
+    ids <- sort(setdiff(unique(modules$module), 0L))
+    scores <- NULL
+    if (!is.null(net$MEs) && !is.null(result$samples)) {
+      scores <- as.matrix(net$MEs)
+      rownames(scores) <- result$samples
+    }
+    dendro <- NULL
+    if (length(net$dendrograms) == 1) {
+      hc <- net$dendrograms[[1]]
+      dendro <- list(merge = hc$merge, height = hc$height, order = hc$order,
+                     labels = as.character(genes[net$blockGenes[[1]]]))
+    }
+    rec <- fit_record_from(scores = scores, diag = list(n_blocks = length(net$dendrograms)),
+                           raw = net, dendrogram = dendro, modules = modules,
+                           metrics = c(n_blocks = length(net$dendrograms),
+                                       n_unassigned = sum(modules$module == 0L)))
+    rec$n_factors <- length(ids)
+    rec$factors <- data.frame(factor_index = ids, label = paste0("ME", ids),
+                              n_genes = as.integer(table(modules$module)[as.character(ids)]),
+                              kurtosis = NA_real_, excess_kurtosis = NA_real_)
+    rec
   }
 )

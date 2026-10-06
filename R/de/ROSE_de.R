@@ -1,5 +1,5 @@
 # Differential expression over time for ROSE, RNA-seq, 2-level timecourse
-# (Day 0/Day 2). See R/de/README.md.
+# (Day 0/Day 2). See docs/methods.qmd ("Differential expression").
 #
 # Real metadata (221 samples, 128 subjects, subject col `subject_number`):
 # a large block of columns beyond the usual clinical ones, including
@@ -13,7 +13,7 @@
 # arguably part of the biology being asked about here, not solely a
 # confound to adjust away, and adding them would be exactly the kind of
 # "as many covariates as possible" completeness the user said not to
-# chase for this first pass. See R/de/README.md.
+# chase for this first pass. See docs/methods.qmd ("Differential expression").
 #
 # Platform: RNA-seq -- R/preprocessing/rose_preprocessing.R confirms
 # `as.integer(value)` -> DESeq2 (explicit estimateSizeFactors/
@@ -23,11 +23,12 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/lib/ingest/symbol_mapping.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/ROSE_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/ROSE_config.yml"))$dataset
 
 message("[ROSE] loading raw count matrix...")
 mat <- pivot_expression_long(ds_meta)

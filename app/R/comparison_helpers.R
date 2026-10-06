@@ -37,24 +37,18 @@ scree_best_rank <- function(con, dataset_id, method) {
 #'     does too, for the same underlying reason.
 #'   PS = 1 - sum(n_nonzero) / (n_genes * K)  -- proportion of sparsity
 #'     (fraction of zero loadings across the whole K-component solution).
-#'   PEV_pca = 1 - (mse_pca(K) * n_genes * n_samples) / var_all  -- the
-#'     UNCONSTRAINED PCA reference at the same K, derived from this
-#'     dataset's own PCA fit (`fits.mse`, a raw per-element MSE -- PCA's
-#'     mse has no analogous bug, only sPCA's does) and any sPCA fit's
-#'     `var_all` (mathematically the same total sum-of-squares
-#'     `elasticnet::spca()` and `prcomp()` both compute from the
-#'     identically-centered matrix -- verified numerically against real
-#'     data, 2026-09-22: monotonically increasing, sane 0-1 values).
-#'     Constant across the para sweep for this K -- no PCA re-fit needed.
+#'   PEV_pca -- variance explained by the first K ordinary principal
+#'     components, from the dataset's single PCA fit's sdev spectrum
+#'     (pca_rank_curve()). Constant across the para sweep for this K.
 #'   IS = PEV_sparse * PEV_pca * PS -- peaks at the paper's recommended
 #'     "not too sparse, not too dense" sweet spot; a sparse solution can
 #'     never explain more variance than unconstrained PCA at the same K,
 #'     so PEV_sparse <= PEV_pca always holds by construction.
 #'
 #' Returns data.frame(fit_id, alpha, PS, PEV_sparse, IS) sorted by alpha
-#' (IS is NA, not the whole row dropped, when no PCA fit exists at this
-#' exact rank for this dataset -- callers should still plot PEV_sparse
-#' vs PS in that case and just skip/note the IS series).
+#' (IS is NA, not the whole row dropped, when the dataset has no PCA fit
+#' covering rank K -- callers should still plot PEV_sparse vs PS in that
+#' case and just skip/note the IS series).
 spca_sparsity_curve <- function(con, dataset_id, rank) {
   empty <- data.frame(fit_id = integer(0), alpha = numeric(0), PS = numeric(0),
                        PEV_sparse = numeric(0), IS = numeric(0))
@@ -66,16 +60,12 @@ spca_sparsity_curve <- function(con, dataset_id, rank) {
     params = list(dataset_id, rank))
   if (nrow(fits) == 0) return(empty)
 
-  pca_fit <- DBI::dbGetQuery(con,
-    "SELECT fit_id, mse FROM fits
-     WHERE dataset_id = ? AND method = 'pca' AND rank = ? AND status = 'ok' LIMIT 1",
-    params = list(dataset_id, rank))
-  have_pca_ref <- nrow(pca_fit) == 1 && !is.na(pca_fit$mse)
-  pca_n_samples <- if (have_pca_ref) {
-    s <- load_scores(con, pca_fit$fit_id[1])
-    if (!is.null(s)) nrow(s) else NA_integer_
-  } else NA_integer_
-  have_pca_ref <- have_pca_ref && !is.na(pca_n_samples)
+  # PEV of the first K ordinary principal components, from the dataset's
+  # single PCA fit (cumulative sdev^2 share) -- the same PEV_pca the
+  # pipeline's IS search uses (R/methods/spca.R::spca_select_fits()).
+  pca_curve <- pca_rank_curve(con, dataset_id)
+  pev_pca <- if (!is.null(pca_curve)) pca_curve$pev[match(rank, pca_curve$rank)] else NA_real_
+  have_pca_ref <- !is.na(pev_pca)
 
   rows <- lapply(seq_len(nrow(fits)), function(i) {
     fit_id <- fits$fit_id[i]
@@ -91,10 +81,7 @@ spca_sparsity_curve <- function(con, dataset_id, rank) {
     ps <- 1 - sum(diag$n_nonzero) / (n_genes * rank)
 
     is_val <- NA_real_
-    if (have_pca_ref) {
-      pev_pca <- 1 - (pca_fit$mse[1] * n_genes * pca_n_samples) / diag$var_all
-      is_val <- pev_sparse * pev_pca * ps
-    }
+    if (have_pca_ref) is_val <- pev_sparse * pev_pca * ps
     data.frame(fit_id = fit_id, alpha = fits$alpha[i], PS = ps, PEV_sparse = pev_sparse, IS = is_val)
   })
   rows <- Filter(Negate(is.null), rows)

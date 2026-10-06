@@ -1,12 +1,12 @@
 # Differential expression for hfgp-500fg (GSE134080) -- CROSS-SECTIONAL
 # (confirmed: 100 samples, 100 distinct geo_accession, no repeat/subject
-# column). See R/de/README.md.
+# column). See docs/methods.qmd ("Differential expression").
 #
 # ** This cohort has NO sepsis or disease-relevant covariate ** -- same
 # situation as dilgom: a healthy population functional-genomics reference
 # cohort (real metadata: geo_accession, age, sex, accession -- nothing
 # else). `sex` is used below purely for pipeline completeness, NOT as a
-# sepsis-relevant result -- see R/de/README.md and dilgom_de.R's matching
+# sepsis-relevant result -- see docs/methods.qmd ("Differential expression") and dilgom_de.R's matching
 # caveat.
 #
 # Platform: RNA-seq -- R/preprocessing/hfgp-500fg_preprocessing.R confirms
@@ -16,11 +16,12 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))
 source(here("R/lib/ingest/symbol_mapping.R"))
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/hfgp-500fg_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/hfgp-500fg_config.yml"))$dataset
 
 message("[hfgp-500fg] loading raw count matrix...")
 mat <- pivot_expression_long(ds_meta)

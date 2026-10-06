@@ -1,5 +1,5 @@
 # Differential expression over time for ANEMONES (GSE236713), array
-# platform, 4-level timecourse (Day 1/2/5/Discharge). See R/de/README.md
+# platform, 4-level timecourse (Day 1/2/5/Discharge). See docs/methods.qmd ("Differential expression")
 # for the shared design rationale.
 #
 # Real metadata (verified directly against sample_metadata.parquet, 447
@@ -20,10 +20,11 @@
 library(here)
 library(yaml)
 library(arrow)
+source(here("R/lib/data_paths.R"))
 source(here("R/lib/matrices.R"))       # pivot_expression_long()
 source(here("R/de/de_helpers.R"))
 
-ds_meta <- yaml::read_yaml(here("config/ANEMONES_config.yml"))$dataset
+ds_meta <- read_dataset_yaml(here("config/ANEMONES_config.yml"))$dataset
 
 message("[ANEMONES] loading raw expression matrix...")
 mat <- pivot_expression_long(ds_meta)
