@@ -2,15 +2,15 @@
 title: "Launching the app"
 ---
 
-::: {.callout-warning}
-**The app has not been updated to the redesigned database schema** ([Database](database.qmd)).
-Its queries target the previous layout, so it won't work against the current pipeline DB yet.
+::: {.callout-note}
+The app is built on the redesigned database schema ([Database](database.qmd)). The earlier app's
+analyses are all ported except on-demand pattern-driver runs (see the end of this page).
 :::
 
 ## Launching
 
 ```r
-Sys.setenv(STABILITY_DB = "results/targets/stability.sqlite")   # optional
+Sys.setenv(STABILITY_DB = "results/stability.sqlite")   # optional
 shiny::runApp("app")
 ```
 
@@ -20,31 +20,131 @@ STABILITY_DB=/path/to/stability.sqlite Rscript -e "shiny::runApp('app')"
 
 - `STABILITY_DB` picks the database; if unset, the app uses `db_path` from
   `config/pipeline.yml` (launched from the project root or `app/`).
-- The app only reads the DB. Datasets, methods and fits are queried live, so new results appear
-  on the next launch.
+- The app opens the DB read-only. Datasets, methods and fits are queried live.
 
-## What it shows
+## Layout
 
-A drill-down explorer: dataset > method > rank or parameter > factor. A breadcrumb at the top
-navigates back up, and a global toggle switches the similarity metric (cosine, Pearson,
-Spearman) everywhere.
+The sidebar holds the choices every page shares: **dataset**, **method** and **rank** (WGCNA: power;
+the rank defaults to the method's optimal fit), and the **similarity metric**
+(cosine, Pearson, Spearman: which per-factor stability is read). A page has its own selector only
+when it needs a second dataset or fit (Projection comparison's target and Fit B, the WGCNA overlap's
+other power) or a choice inside the fit (factor, module, field). The **Compare settings** panel
+holds what only the Compare page uses: the methods to set side by side and the optimal fit rule.
 
-| Level | Scope | Shows |
+The Compare page has one tab per question.
+
+| Tab | Question | Source |
 |---|---|---|
-| 0 | dataset | each method's headline stability, fit and failure counts |
-| 1 | method | stability by rank across seeds; reconstruction error by rank (PCA, sPCA); cross-rank persistence and factor-tracking trajectories; for WGCNA, agreement between powers, module counts and the scale-free-topology fit |
-| 2 | rank or parameter | seed × seed matched similarity; per-factor stability; factor × factor heatmaps with matches outlined (WGCNA: module sizes and cross-power overlap) |
-| 3 | factor | top-loading genes; the factor's match in every other fit; enrichment results from the pipeline |
+| 1. Optimal hyperparameter | which rank (WGCNA: power) is best for each method on this dataset | representative fits (`v_fits`), `factors.stability_*`, `fit_metrics`, `fit_pairs.ari` |
+| 2. Best method | which method is best and most stable on this dataset | the optimal fits, plus median projectR R² from `projections` |
+| 3. Across methods | how similar are the optimal factors of different methods | computed live from each optimal fit's loadings (WGCNA: module membership) and scores |
+| 4. Across datasets | how similar are a method's factors across datasets | `projections` (sample space) and `gene_space_agreement` (gene space) |
 
-PCA and sPCA are deterministic, so their Level 1 is a reconstruction-error-by-rank plot. PCA is
-one fit at the largest rank; viewing rank *n* shows its first *n* components.
+## Time structure
 
-A separate **Compare methods** screen (top-right toggle) takes any two fits -- e.g. a PCA fit as a
-baseline against an NMF, CoGAPS or WGCNA fit -- and shows their factor or eigengene similarity
-(matched by absolute value, so a strong match to a component's negative side shows correctly)
-alongside each side's enrichment results.
+The first page (before Compare) shows how much of each time-course dataset's variance is
+**between subjects**, an **average time effect** (the change every subject shares between
+timepoints), or **other within-subject** variation (change that differs between subjects, plus
+measurement noise; the two cannot be separated without technical replicates). It decides how much
+of what a factor can find is about change over time.
+
+- *All time-course datasets:* the split for each pooled dataset (ANEMONES, CORTICUS, GSE13904,
+  GSE54514, GSE95233, GSE110487, GSE273700), with subjects, samples, subjects measured more than
+  once and timepoints. The whisker is a 95% interval from resampling subjects (the time part is
+  shown without an interval because its interval is unreliable near zero).
+- *Across genes:* the distribution of each gene's between-subject share for the selected
+  dataset's family, once with every gene counted equally and once weighted by gene variance
+  (which is what the pooled value reflects).
+- *Factors of the selected fit* (choose a pooled dataset in the sidebar): the same split of each
+  factor's sample scores, which separates factors that describe stable differences between people
+  from factors with a within-subject component.
+
+**Method.** A sample's timepoint is the sibling dataset whose matrix contains it
+(`config/dataset_families.yml`); subjects come from each dataset's `subject_id_col`. For each gene
+(or factor) the sums of squares are split sequentially into subject, then timepoint within subject,
+then the rest, and converted to variance components with the degrees of freedom each part uses:
+within = (SS_time + SS_resid)/(N - S); between = (SS_between/(S - 1) - within)/n0, where n0 is the
+average number of samples per subject; time = max(SS_time - (T - 1) x resid, 0)/N;
+resid = SS_resid/(N - S - (T - 1)). Raw sums-of-squares shares would overstate the between-subject
+part (with two samples per subject even pure noise puts about half of the sum of squares there).
+Pooled values are ratios of sums over genes, so high-variance genes count more. On simulated data
+with known components the estimates recover them (0.573 against a true 0.58), and with no subject
+effect the between-subject estimate is 0.004. The split is computed when the page is opened (about
+25 s the first time) and cached for the session; it is not stored in the database.
+
+## Explore fits
+
+A second page (top navigation) shows the sidebar's method on the selected dataset, across its
+hyperparameter (*One rank in detail* uses the sidebar rank). Tabs depend on the method:
+
+| Method | Tabs |
+|---|---|
+| PCA | variance by rank (reconstruction error, cumulative variance explained) |
+| sPCA | stability vs rank; Index of Sparseness vs penalty with the chosen penalty per rank; one rank in detail |
+| NMF, CoGAPS | stability vs rank; reconstruction error across seeds; one rank in detail |
+| ICA | as NMF, plus ICASSO cluster quality (Iq) by rank |
+| WGCNA | module agreement (ARI) between powers; modules, unassigned genes and scale-free fit by power; for the sidebar power: module sizes and kME of members vs non-members vs the permutation null, the gene dendrogram with module colours, and module overlap with another power |
+
+*Stability vs rank* boxplots each factor's best match in another same-rank fit, with the chance
+level (95th percentile of unmatched pairs) marked; ICA separates seed pairs from pairs that
+involve a bootstrap resample. *One rank in detail* shows per-factor stability of the
+representative fit and the seed × seed matrix of mean matched similarity. Cross-rank factor
+tracking from the old app is not yet ported.
+
+### The optimal fit
+
+The DB stores one *representative* fit per rank but no chosen rank, so the app picks it:
+
+- **Highest quality that is still stable** (default): among ranks whose stability is at least the
+  threshold (default 0.9), the one with the highest in-sample quality. If none qualifies, the most
+  stable rank. Quality rises with rank, so this is the largest rank whose factors still
+  reproduce across seeds.
+- **Highest in-sample quality**: ignores stability, so it usually picks the largest rank.
+
+In-sample quality is `1 - mse / val_sd²` for PCA, NMF, CoGAPS and ICA; sPCA stores no `mse`, so
+its sparse proportion of variance explained is used; WGCNA has no reconstruction, so its mean
+member kME is used. Quality is comparable within a method, not across methods. Stability is
+the mean over factors of the median matched similarity across same-rank fit pairs; PCA's nested
+components are stable by construction (1), and WGCNA uses the mean ARI against the other powers.
+
+Cross-method agreement matches factors one-to-one (Hungarian, on |Jaccard| of the top 50 genes
+per factor) and averages the matched overlaps, or clusters samples by each fit's scores
+(k = 4) and compares partitions by ARI. Cross-dataset views are ordered by hierarchical
+clustering with the two directions of each pair averaged.
+
+## Inspecting one fit
+
+The sidebar's method and rank drive the *Inspect fit* pages, Trajectory across time, Explore fits and
+Projection comparison (Fit A). For WGCNA the rank is the soft-threshold power and a factor is a module:
+Factor detail adds *Module quality* (kME of members, non-members and the permutation null) and *Module
+genes* (with gene significance against kME) tabs, and Metadata shows module-trait relationships.
+Views with no WGCNA data (cross-dataset similarity, trajectory, projection, pattern drivers, gene
+biplot) say so instead of hiding the page.
+PCA at rank *n* is its single max-rank fit's first *n* components.
+
+| Page | Shows | Source |
+|---|---|---|
+| Factor detail | pick a factor: top genes on each side (WGCNA: top kME); its best match in every other fit of the method, by rank; enrichment; its sample scores against any metadata field | loadings, `v_factor_matches`, `enrichment_*`, scores and sample-metadata artifacts |
+| Enrichment | per-factor counts of significant terms and the strongest terms across the fit, by analysis (fgsea, GSEA, over-representation, CoGAPS marker ORA); a one-factor view with dot plot and table | `enrichment_queries`, `enrichment_results` (only BH-adjusted p < 0.05 is stored, and only for representative fits) |
+| Metadata | factor × metadata-field association grid (Spearman for numeric fields, Kruskal-Wallis otherwise, BH over the grid; click a cell for the scatter or box plot) | scores and sample metadata, computed live |
+| Biplots | samples at their scores on two chosen factors, with arrows for the top-loading genes, or with every metadata field (numeric: a correlation vector; categorical: a centroid per level) | loadings, scores, sample metadata |
+| Pattern drivers | genes that differ between two sample groups and carry weight on a factor (projectR `projectionDriveR`): confidence-interval or Welch-test view, table of shared significant genes | `pattern_drivers` and its result files; only combinations the pipeline computed |
+
+Gene labels use the dataset's symbol column, read from the feature-metadata artifact (the app loads
+`arrow` to read it: those artifacts were saved with arrow-backed columns). Sample and feature
+metadata artifacts are local files under `stability_artifacts/<dataset_id>/`.
+
+## Across datasets
+
+| Page | Shows | Source |
+|---|---|---|
+| Trajectory across time | the focus fit's basis projected onto each per-timepoint sibling dataset of its family; one line per subject across the time course, optionally coloured by a subject-level metadata field. Timepoints are ordered as listed in `config/dataset_families.yml` | within-family `projections`; subject ids from each target's metadata |
+| Projection comparison | for a target dataset: R² by method of every projection; sample-space alignment of two fits' projected weights; gene-space alignment (Fit A's loadings projected by least squares onto Fit B's basis, as projectR does) | `projections` and their artifacts, loadings |
+
+Dataset-by-dataset similarity for one method is on the Compare page, tab 4.
 
 ## Not yet in the app
 
-- Views across datasets (the DB already holds projections and gene-space agreement).
+- On-demand pattern-driver runs: the app is read-only, so only combinations stored by the pipeline
+  are shown.
 - Fetching data directly from the HuggingFace Hub (local paths only).

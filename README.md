@@ -54,8 +54,8 @@ See [docs/workflow.qmd](docs/workflow.qmd).
 ## Results
 
 The database is at `db_path` in `config/pipeline.yml` (default
-`results/targets/stability.sqlite`), with large artifacts under
-`results/targets/stability_artifacts/`. Every table is described in
+`results/stability.sqlite`), with large artifacts under
+`results/stability_artifacts/`. Every table is described in
 [docs/database.qmd](docs/database.qmd).
 
 ## Browse

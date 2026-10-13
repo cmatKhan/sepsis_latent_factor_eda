@@ -5,7 +5,7 @@ title: "Database"
 ## Overview
 
 The pipeline writes a SQLite database at `db_path` in `config/pipeline.yml` (default
-`results/targets/stability.sqlite`). Bulky results -- loadings, scores, diagnostics, raw model
+`results/stability.sqlite`). Bulky results -- loadings, scores, diagnostics, raw model
 objects, projections -- are files under `stability_artifacts/<dataset_id>/` next to it, referenced
 by paths relative to the DB's directory, so the two move together.
 

@@ -58,7 +58,7 @@ data_root: /scratch/mblab/chasem/hf_sepsis_collection
 # The stability DB the pipeline writes (R/targets/db_write.R), relative to
 # the project root; artifacts go in stability_artifacts/ next to it. The
 # app reads it via STABILITY_DB.
-db_path: results/targets/stability.sqlite
+db_path: results/stability.sqlite
 
 cluster:
   # Spack environment workers activate before starting R -- the same one

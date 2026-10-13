@@ -122,8 +122,8 @@ Rules:
 
 See `TODOS.md` for deferred changes and their rerun costs. In short:
 
-- **App:** update `app/` to the new DB schema (its queries target the old layout; its comments
-  still reference removed files).
+- **App:** ported to the new schema (Compare, Explore fits, Inspect fit pages,
+  Across datasets; WGCNA views live inside Explore fits and Factor detail). Not ported: on-demand pattern-driver runs (the app is read-only). See `docs/app.qmd`.
 - **gains:** its preprocessing script is a stub; pooling the four accessions
   (E-MTAB-4421/4451/5273/5274) needs the user's decision.
 - **ROSE ×3:** data isn't on the cluster. **MARS, SHIP-TREND:** preprocessing scripts don't

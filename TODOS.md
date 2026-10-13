@@ -77,3 +77,11 @@ values change.
 - **`config/pipeline.yml` header** still mentions the deleted rslurm driver and per-dataset
   `slurm:` blocks (the file is read when `_targets.R` loads, not tracked as a target).
 - **Commit** the targets rewrite, DB redesign and docs (suggested as separate commits).
+
+## Metadata artifacts saved with arrow-backed columns
+
+`dataset_artifacts` `feature_metadata.rds` (and possibly `sample_metadata.rds`) are saved with
+`arrow::array_string_vector` columns, so `readRDS()` returns empty columns unless `arrow` is
+loaded. The app works around it by loading `arrow`. Converting the columns to base vectors before
+`saveRDS()` in the ingestion step would remove that dependency; it reruns the dataset artifact writes
+(and, depending on where the file is written, the DB write), so it is deferred.

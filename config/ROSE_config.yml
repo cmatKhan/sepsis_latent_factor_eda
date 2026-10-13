@@ -8,9 +8,9 @@ dataset:
     All samples and features from ROSE. NOTE: note on huggingface as this is private
   hf_collection: "dbGAP"       # documentation only
 
-  expression_path: /home/chase/projects/sepsis_timecourse_factors_eda/data/rose_counts.parquet
-  sample_metadata_path: /home/chase/projects/sepsis_timecourse_factors_eda/data/rose_sample_meta.parquet
-  feature_metadata_path: /home/chase/projects/sepsis_timecourse_factors_eda/data/rose_feature_meta.parquet
+  expression_path: ROSE/rose_counts.parquet
+  sample_metadata_path: ROSE/rose_sample_meta.parquet
+  feature_metadata_path: ROSE/rose_feature_meta.parquet
   sample_id_col: sample_id
   # CORRECTED 2026-09-18: this comment previously claimed the key column
   # was "GeneID" (Entrez) and that "feature_id" doesn't exist at all --
