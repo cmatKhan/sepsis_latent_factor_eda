@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.10.19">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Running the workflow – Sepsis latent-factor stability</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<script src="site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="./index.html">
+    <span class="navbar-title">Sepsis latent-factor stability</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="./index.html"> 
+<span class="menu-text">Overview</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./setup.html"> 
+<span class="menu-text">Setup</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./data.html"> 
+<span class="menu-text">Data</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./methods.html"> 
+<span class="menu-text">Methods</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="./workflow.html" aria-current="page"> 
+<span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./app.html"> 
+<span class="menu-text">Launching the app</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./reference.html"> 
+<span class="menu-text">Function reference</span></a>
+  </li>  
+</ul>
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/cmatKhan/sepsis_latent_factor_eda"> <i class="bi bi-github" role="img" aria-label="GitHub">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#running-the-pipeline" id="toc-running-the-pipeline" class="nav-link active" data-scroll-target="#running-the-pipeline">Running the pipeline</a></li>
+  <li><a href="#targets-per-dataset" id="toc-targets-per-dataset" class="nav-link" data-scroll-target="#targets-per-dataset">Targets per dataset</a></li>
+  <li><a href="#what-reruns-when" id="toc-what-reruns-when" class="nav-link" data-scroll-target="#what-reruns-when">What reruns when</a></li>
+  <li><a href="#slurm-resources" id="toc-slurm-resources" class="nav-link" data-scroll-target="#slurm-resources">SLURM resources</a>
+  <ul class="collapse">
+  <li><a href="#main-process-memory" id="toc-main-process-memory" class="nav-link" data-scroll-target="#main-process-memory">Main-process memory</a></li>
+  <li><a href="#tuning" id="toc-tuning" class="nav-link" data-scroll-target="#tuning">Tuning</a></li>
+  </ul></li>
+  <li><a href="#logs-and-monitoring" id="toc-logs-and-monitoring" class="nav-link" data-scroll-target="#logs-and-monitoring">Logs and monitoring</a></li>
+  <li><a href="#rebuilding-the-database" id="toc-rebuilding-the-database" class="nav-link" data-scroll-target="#rebuilding-the-database">Rebuilding the database</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Running the workflow</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="running-the-pipeline" class="level2">
+<h2 class="anchored" data-anchor-id="running-the-pipeline">Running the pipeline</h2>
+<p>The main process – <code>tar_make()</code> – coordinates: it submits SLURM worker jobs through crew.cluster and must stay alive until they finish, because workers connect back to it.</p>
+<p><strong>As a batch job</strong> (anything long, e.g.&nbsp;a full build):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">sbatch</span> run_pipeline.sbatch                                     <span class="co"># everything outdated</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">sbatch</span> run_pipeline.sbatch <span class="st">'tidyselect::starts_with("fit_")'</span>   <span class="co"># fits only (no ingestion)</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">sbatch</span> run_pipeline.sbatch <span class="st">'tidyselect::starts_with("db_")'</span>    <span class="co"># rebuild DB rows from stored results</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">tail</span> <span class="at">-f</span> logs/targets_main_<span class="op">&lt;</span>jobid<span class="op">&gt;</span>.out</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The argument is passed to <code>tar_make(names = ...)</code>. targets builds the named targets plus whatever they depend on, and nothing else, so a part of the pipeline can run without the long fits. For example, the repeated-measures analysis alone for every dataset:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">sbatch</span> run_pipeline.sbatch <span class="st">'c(starts_with("design_"), starts_with("expr_"), starts_with("norm_"),</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="st">  starts_with("vp_"), starts_with("dream_"), starts_with("de_tables_"), starts_with("dupcor_"),</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="st">  starts_with("composition_"), starts_with("controls_"), starts_with("control_factor_"),</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="st">  any_of("variance_explore"))'</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Check <code>tar_outdated(names = ...)</code> with the same selection first: it lists exactly what would build.</p>
+<p><strong>From RStudio Server on the cluster</strong>, open the project and use the console:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(targets)</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">tar_visnetwork</span>()                            <span class="co"># the graph, outdated targets highlighted</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="fu">tar_outdated</span>()                              <span class="co"># what tar_make() would rebuild</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="fu">tar_make</span>()                                  <span class="co"># build everything outdated</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="fu">tar_make</span>(<span class="at">names =</span> <span class="fu">starts_with</span>(<span class="st">"fit_pca_"</span>))   <span class="co"># a subset</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="fu">tar_make</span>(<span class="at">as_job =</span> <span class="cn">TRUE</span>)                     <span class="co"># as an RStudio background job</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="fu">tar_progress_summary</span>()                      <span class="co"># progress while a run is going</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>An interactive session ends with its SLURM job (16 h at most on <code>interactive</code>), so long runs belong in <code>run_pipeline.sbatch</code>.</p>
+<p><strong>Reading results:</strong> <code>tar_read(fit_pca_EARLI)</code> returns a target’s value. <code>read_method_fits("EARLI", "spca")</code> (<code>R/targets/run_method_fit.R</code>, available after <code>targets::tar_load_globals()</code>) returns a method’s fits as one <code>list(params, result)</code> per grid row, both sPCA stages included.</p>
+</section>
+<section id="targets-per-dataset" class="level2">
+<h2 class="anchored" data-anchor-id="targets-per-dataset">Targets per dataset</h2>
+<p><code>R/targets/factories.R</code> builds these targets for each dataset <code>&lt;key&gt;</code> (the dataset id, made safe for a name):</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Stage</th>
+<th>Targets</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>inputs</td>
+<td><code>inputs_&lt;key&gt;</code> (file target over the config, preprocessing script and raw data), <code>meta_&lt;key&gt;</code>, <code>mat_&lt;key&gt;</code>, <code>mat_nn_&lt;key&gt;</code>, <code>sample_meta_&lt;key&gt;</code>, <code>subjects_&lt;key&gt;</code> (each matrix column’s subject, <code>fit_subjects()</code>)</td>
+</tr>
+<tr class="even">
+<td>fits, per method <code>&lt;m&gt;</code></td>
+<td><code>grid_&lt;m&gt;_&lt;key&gt;</code>, <code>fit_&lt;m&gt;_&lt;key&gt;</code> (one branch per batch of grid rows); sPCA adds <code>grid_spca_refine_&lt;key&gt;</code>, <code>fit_spca_refine_&lt;key&gt;</code>, <code>selection_spca_&lt;key&gt;</code></td>
+</tr>
+<tr class="odd">
+<td>ingestion, per method</td>
+<td><code>ingest_&lt;m&gt;_&lt;key&gt;</code>, <code>pairs_&lt;m&gt;_&lt;key&gt;</code>, <code>representatives_&lt;m&gt;_&lt;key&gt;</code>, <code>redundancy_&lt;m&gt;_&lt;key&gt;</code>, <code>fgsea_jobs_&lt;m&gt;_&lt;key&gt;</code>/<code>fgsea_&lt;m&gt;_&lt;key&gt;</code>, <code>icasso_ica_&lt;key&gt;</code>, <code>factor_vp_&lt;m&gt;_&lt;key&gt;</code> (score-level variance partition, when the dataset or its parent has a design)</td>
+</tr>
+<tr class="even">
+<td>repeated measures (datasets with a <code>design:</code> block; <code>R/targets/variance.R</code>)</td>
+<td><code>design_&lt;key&gt;</code>, <code>expr_&lt;key&gt;</code>, <code>norm_&lt;key&gt;</code>, <code>vp_&lt;key&gt;</code>, <code>dream_&lt;key&gt;</code>, <code>de_tables_&lt;key&gt;</code> (every contrast’s table; the only reader of the dream fit), <code>dupcor_&lt;key&gt;</code> (time courses), <code>controls_&lt;key&gt;</code> (arrays with <code>control_probes</code>), <code>control_factor_&lt;key&gt;</code> (with <code>control_probes: {covariate: true}</code>), <code>composition_&lt;key&gt;</code>, <code>vp_explore_&lt;key&gt;</code>, <code>vp_summary_&lt;key&gt;</code>, <code>vp_qc_&lt;key&gt;</code> (plots and tables in <code>results/variance/&lt;dataset&gt;/</code>), <code>variance_files_&lt;key&gt;</code></td>
+</tr>
+<tr class="odd">
+<td>WGCNA</td>
+<td><code>wgcna_ora_jobs_</code>/<code>wgcna_ora_&lt;key&gt;</code>, <code>wgcna_fit_jobs_</code>/<code>wgcna_fit_diag_&lt;key&gt;</code>, <code>wgcna_dataset_diag_&lt;key&gt;</code></td>
+</tr>
+<tr class="even">
+<td>per dataset</td>
+<td><code>metadata_files_&lt;key&gt;</code>, <code>matrix_file_&lt;key&gt;</code>, <code>matrix_diagnostics_&lt;key&gt;</code>, <code>ensembl_map_&lt;key&gt;</code>, <code>enrichment_&lt;key&gt;</code>, <code>factor_gene_files_&lt;key&gt;</code>, <code>drivers_&lt;key&gt;</code>, <code>db_&lt;key&gt;</code></td>
+</tr>
+<tr class="odd">
+<td>across datasets</td>
+<td><code>projectr_jobs_&lt;key&gt;</code>/<code>projectr_&lt;key&gt;</code>, <code>gene_space_&lt;key&gt;</code>, <code>db_cross_dataset</code>, <code>variance_explore</code>, plus <code>msigdb_pathways</code>, <code>db_schema</code>, <code>ensembl_maps</code>, <code>matrix_files</code>, <code>dataset_families</code>, <code>composition_markers</code></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="what-reruns-when" class="level2">
+<h2 class="anchored" data-anchor-id="what-reruns-when">What reruns when</h2>
+<p>targets reruns a target when its command, its inputs or a function it calls changes (comments and whitespace don’t count).</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Change</th>
+<th>Reruns</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>a dataset’s config, preprocessing script or raw files</td>
+<td>that dataset only</td>
+</tr>
+<tr class="even">
+<td>a method’s grid in one config (e.g.&nbsp;adding a rank)</td>
+<td>only the new grid rows’ fits, then that dataset’s ingestion</td>
+</tr>
+<tr class="odd">
+<td>a method’s fit function or <code>&lt;name&gt;_registry</code></td>
+<td>every fit of that method (sPCA: about a day)</td>
+</tr>
+<tr class="even">
+<td><code>run_method_fits()</code>, <code>fit_subjects()</code>, the grid helpers, <code>capture_fit()</code></td>
+<td>every fit of every method that uses them</td>
+</tr>
+<tr class="odd">
+<td>a dataset’s <code>design:</code> block, <code>R/lib/design.R</code> or <code>R/targets/variance*.R</code></td>
+<td>that dataset’s repeated-measures targets and score-level partitions, then its DB write – never a fit</td>
+</tr>
+<tr class="even">
+<td>a controller’s <code>batch_size</code> or <code>cpus_per_task</code></td>
+<td>that method’s fits (they change the grid)</td>
+</tr>
+<tr class="odd">
+<td>a controller’s memory, time or worker settings</td>
+<td>nothing</td>
+</tr>
+<tr class="even">
+<td>a method’s <code>&lt;name&gt;_ingest</code> or the ingestion code in <code>R/targets/</code></td>
+<td>ingestion and the DB writes only</td>
+</tr>
+<tr class="odd">
+<td><code>R/db/schema.sql</code> or <code>views.sql</code></td>
+<td>the DB writes (after deleting the DB, see <a href="./database.html">Database</a>)</td>
+</tr>
+</tbody>
+</table>
+<p>Stopping a run keeps every finished branch. Removing a dataset from <code>config/pipeline.yml</code> leaves its results in the store (<code>targets::tar_prune()</code> deletes them).</p>
+</section>
+<section id="slurm-resources" class="level2">
+<h2 class="anchored" data-anchor-id="slurm-resources">SLURM resources</h2>
+<p>Each method has a crew controller under <code>controllers:</code> in <code>config/pipeline.yml</code>: memory, CPUs, wall time, idle timeout, <code>batch_size</code>, <code>tasks_max</code>. Ingestion, enrichment (<code>fgsea</code>), projections (<code>projectr</code>) and matrix building (<code>prep</code>) have their own. Each controller grows its pool of worker jobs with the backlog and shrinks it when work runs out; a worker is one SLURM job that runs tasks until it’s idle or reaches its time limits.</p>
+<ul>
+<li><strong>No worker caps by default.</strong> SLURM’s scheduler and per-user limits (200 running jobs per user on HTCF) decide what runs when; a controller without <code>workers:</code> is effectively uncapped. PCA, NMF and ICA keep small caps for efficiency: their tasks take seconds, much less than a worker’s ~30 s R start-up, so one worker per task would mostly be start-up.</li>
+<li><strong>Batches.</strong> Each branch costs the main process about a second of bookkeeping, so fast methods group grid rows into branches (<code>batch_size</code>), and projections run one branch per (source, target) dataset pair.</li>
+<li><strong>Backups for out-of-memory.</strong> A controller’s <code>backup:</code> block (crew backup controllers) retries a task whose worker crashed <code>crashes_max</code> times – typically killed for exceeding memory on the largest datasets – on <code>&lt;name&gt;_backup</code> with more memory.</li>
+<li><strong>One fit per worker for long fits.</strong> sPCA and the <code>vp</code> controller (variancePartition and dream, BiocParallel <code>MulticoreParam</code> over <code>cpus_per_task</code>) use <code>tasks_max: 1</code>, so no long task starts late in a worker’s life.</li>
+</ul>
+<section id="main-process-memory" class="level3">
+<h3 class="anchored" data-anchor-id="main-process-memory">Main-process memory</h3>
+<p>The main process’s memory scales with the number of tasks it has handed to crew and not yet collected, not with the data:</p>
+<ul>
+<li><strong>Every ready task is pushed at once.</strong> targets pushes a ready target to its controller unless the controller is <em>saturated</em> (crew’s <code>saturated()</code>: tasks pushed ≥ <code>workers</code>); a saturated controller’s targets wait in targets’ own backlog as names. Without a <code>workers:</code> cap a controller never saturates, so every ready task is pushed immediately, including the ones waiting in SLURM’s queue behind the 200-running-jobs limit.</li>
+<li><strong>Each pushed task carries the globals.</strong> The payload is the target plus every object and function that <code>_targets.R</code> and <code>R/</code> define: about 5.3 MB serialized (2026-10-14), mostly source references. <code>tar_source()</code> parses with <code>keep.source = TRUE</code>; without them it’s 0.44 MB.</li>
+<li><strong>It’s held in the main process.</strong> mirai’s dispatcher is a thread in the main R process (mirai ≥ 2.7), so each outstanding task costs about twice its payload, ~10.6 MB.</li>
+</ul>
+<p>The full run’s opening burst (2026-10-14: about 1,400 tasks, mostly CoGAPS, WGCNA and sPCA, as every dataset’s grids became ready together) took the main process to 14.75 GB within two minutes, and 16.8 GB after twenty. That burst crashed a run with <code>--mem=16G</code>; <code>run_pipeline.sbatch</code> requests more, and up to about 20 GB is acceptable on HTCF. The script also writes <code>logs/targets_main_&lt;jobid&gt;_mem.tsv</code> (the job’s memory, each process’s RSS and the number of worker jobs, every 30 s).</p>
+<p>If it becomes a problem, shrink the payload rather than cap workers (a cap below the cluster’s running limit leaves capacity unused when one controller has the remaining work). The targets manual recommends putting a large project’s functions in an R package: each task then ships only the package name, and workers load it. Sourcing <code>R/</code> without source references would also cut the payload about twelvefold; targets hashes functions without them, so neither change reruns anything.</p>
+</section>
+<section id="tuning" class="level3">
+<h3 class="anchored" data-anchor-id="tuning">Tuning</h3>
+<p>Aim for about 75% average memory and CPU use, never below 50%, and err on the high side. Size memory for the largest dataset (SHIP-TREND: 8,000 genes × 991 samples), not EARLI.</p>
+<ol type="1">
+<li>Run the method, e.g.&nbsp;<code>tar_make(names = starts_with("fit_nmf_"))</code>.</li>
+<li>Find the worker array ids: <code>sacct -X -S &lt;start&gt; --format=JobID,JobName | grep crew-worker</code>.</li>
+<li>Check usage with <code>seff &lt;jobid&gt;</code>, or for an array <code>python /scratch/mblab/chasem/seff-array/seff-array.py &lt;array id&gt;</code>. seff-array needs a terminal; from a non-interactive shell wrap it: <code>script -qc "stty cols 100; python .../seff-array.py &lt;id&gt;" /dev/null</code>.</li>
+</ol>
+<p><strong>The <code>vp</code> controller also records its own use:</strong> <code>norm_</code>, <code>vp_</code> and <code>dream_</code> store their job’s cgroup peak memory and CPU seconds in their result (<code>$resources</code>, <code>job_resources()</code> in <code>R/targets/variance.R</code>), and <code>vp_summary_&lt;key&gt;</code> reports them. That was needed when these tasks used socket (<code>SnowParam</code>) workers, which left the job’s process tree so <code>seff</code> missed them; since 2026-10-14 they use forked (<code>MulticoreParam</code>) workers, which use no ports and which <code>seff</code> should count. Compare the two on the next run.</p>
+<p>The current values and the measurements behind them are in <code>config/pipeline.yml</code>’s comments.</p>
+</section>
+</section>
+<section id="logs-and-monitoring" class="level2">
+<h2 class="anchored" data-anchor-id="logs-and-monitoring">Logs and monitoring</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>What</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>main process</td>
+<td><code>logs/targets_main_&lt;jobid&gt;.out</code></td>
+</tr>
+<tr class="even">
+<td>main-process memory</td>
+<td><code>logs/targets_main_&lt;jobid&gt;_mem.tsv</code> (every 30 s)</td>
+</tr>
+<tr class="odd">
+<td>workers</td>
+<td><code>logs/crew/&lt;controller&gt;_&lt;jobid&gt;.out</code></td>
+</tr>
+<tr class="even">
+<td>per-target errors and warnings</td>
+<td><code>tar_meta(fields = c(error, warnings))</code></td>
+</tr>
+<tr class="odd">
+<td>progress</td>
+<td><code>tar_progress_summary()</code>, <code>tar_poll()</code></td>
+</tr>
+</tbody>
+</table>
+<p>A failed fit doesn’t fail its branch: it’s recorded with <code>status = 'failed'</code> and its error in the DB. A target that does error is skipped along with what depends on it, and the rest of the run continues (<code>error = "continue"</code>).</p>
+</section>
+<section id="rebuilding-the-database" class="level2">
+<h2 class="anchored" data-anchor-id="rebuilding-the-database">Rebuilding the database</h2>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>targets<span class="sc">::</span><span class="fu">tar_invalidate</span>(<span class="fu">starts_with</span>(<span class="st">"db_"</span>)); targets<span class="sc">::</span><span class="fu">tar_make</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>After a schema change, delete the DB and its <code>stability_artifacts/</code> first (the schema is versioned and an old DB is refused). Nothing upstream reruns.</p>
+
+
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/cmatkhan\.github\.io\/sepsis_latent_factor_eda\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

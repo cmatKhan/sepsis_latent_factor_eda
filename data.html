@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.10.19">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Data – Sepsis latent-factor stability</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<script src="site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="./index.html">
+    <span class="navbar-title">Sepsis latent-factor stability</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="./index.html"> 
+<span class="menu-text">Overview</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./setup.html"> 
+<span class="menu-text">Setup</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="./data.html" aria-current="page"> 
+<span class="menu-text">Data</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./methods.html"> 
+<span class="menu-text">Methods</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./workflow.html"> 
+<span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./app.html"> 
+<span class="menu-text">Launching the app</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./reference.html"> 
+<span class="menu-text">Function reference</span></a>
+  </li>  
+</ul>
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/cmatKhan/sepsis_latent_factor_eda"> <i class="bi bi-github" role="img" aria-label="GitHub">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#data-root" id="toc-data-root" class="nav-link active" data-scroll-target="#data-root">Data root</a></li>
+  <li><a href="#dataset-configs" id="toc-dataset-configs" class="nav-link" data-scroll-target="#dataset-configs">Dataset configs</a>
+  <ul class="collapse">
+  <li><a href="#the-design-block" id="toc-the-design-block" class="nav-link" data-scroll-target="#the-design-block">The <code>design:</code> block</a></li>
+  <li><a href="#yaml-keys-that-are-booleans" id="toc-yaml-keys-that-are-booleans" class="nav-link" data-scroll-target="#yaml-keys-that-are-booleans">YAML keys that are booleans</a></li>
+  </ul></li>
+  <li><a href="#building-a-matrix" id="toc-building-a-matrix" class="nav-link" data-scroll-target="#building-a-matrix">Building a matrix</a>
+  <ul class="collapse">
+  <li><a href="#preprocessing-script-contract" id="toc-preprocessing-script-contract" class="nav-link" data-scroll-target="#preprocessing-script-contract">Preprocessing-script contract</a></li>
+  </ul></li>
+  <li><a href="#dataset-families" id="toc-dataset-families" class="nav-link" data-scroll-target="#dataset-families">Dataset families</a></li>
+  <li><a href="#gene-identifiers-across-datasets" id="toc-gene-identifiers-across-datasets" class="nav-link" data-scroll-target="#gene-identifiers-across-datasets">Gene identifiers across datasets</a></li>
+  <li><a href="#which-datasets-are-built" id="toc-which-datasets-are-built" class="nav-link" data-scroll-target="#which-datasets-are-built">Which datasets are built</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Data</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="data-root" class="level2">
+<h2 class="anchored" data-anchor-id="data-root">Data root</h2>
+<p>Raw data lives in the HuggingFace sepsis collection (ROSE comes from dbGaP), copied to the cluster at <code>/scratch/mblab/chasem/hf_sepsis_collection</code>. Dataset configs give paths relative to that root; <code>R/lib/data_paths.R::resolve_data_paths()</code> joins them. The root is <code>data_root</code> in <code>config/pipeline.yml</code>, overridden by the <code>SEPSIS_DATA_ROOT</code> environment variable. Every reader of a dataset config goes through <code>read_dataset_yaml()</code>, so moving the data means changing one setting.</p>
+</section>
+<section id="dataset-configs" class="level2">
+<h2 class="anchored" data-anchor-id="dataset-configs">Dataset configs</h2>
+<p>Each <code>config/&lt;dataset&gt;_config.yml</code> describes <strong>one matrix</strong>: where its data is, how to build it, and each method’s parameter grid. Subsets analysed separately (e.g.&nbsp;one timepoint) are separate configs, each with its own <code>dataset.id</code>; there’s no “several matrices in one config”. <code>config/dataset_metadata.example.yml</code> is a fully commented template. Configs are read and validated by <code>read_dataset_metadata()</code> / <code>validate_dataset_metadata()</code> (<code>R/lib/metadata.R</code>).</p>
+<p>To add a dataset:</p>
+<ol type="1">
+<li>Write <code>config/&lt;dataset&gt;_config.yml</code> (copy the example).</li>
+<li>Add its <code>dataset.id</code> to <code>datasets:</code> in <code>config/pipeline.yml</code>.</li>
+<li>Run the pipeline. Only the new dataset’s targets are built.</li>
+</ol>
+<p>File names needn’t match ids (<code>ANEMONES_day1_config.yml</code> declares <code>ANEMONES_DAY1</code>); the pipeline finds a config by its declared <code>dataset.id</code>.</p>
+<p>The <code>dataset:</code> block:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>id</code></td>
+<td>unique dataset id, used in target and DB names</td>
+</tr>
+<tr class="even">
+<td><code>description</code></td>
+<td>free text</td>
+</tr>
+<tr class="odd">
+<td><code>expression_path</code></td>
+<td>long-format expression parquet (feature id, sample id, value)</td>
+</tr>
+<tr class="even">
+<td><code>sample_metadata_path</code>, <code>feature_metadata_path</code></td>
+<td>sample and feature metadata parquets</td>
+</tr>
+<tr class="odd">
+<td><code>sample_id_col</code>, <code>feature_id_col</code>, <code>value_col</code></td>
+<td>column names in those files</td>
+</tr>
+<tr class="even">
+<td><code>ensembl_col</code></td>
+<td>feature-metadata column holding Ensembl gene ids – the cross-dataset identifier (below)</td>
+</tr>
+<tr class="odd">
+<td><code>symbol_col</code></td>
+<td>optional; feature-metadata column of gene symbols, for display only</td>
+</tr>
+<tr class="even">
+<td><code>subject_id_col</code></td>
+<td>optional; sample-metadata column naming each sample’s subject (person). Links a person’s samples across a family’s datasets and keeps them together when fits resample (<code>fit_subjects()</code>, <code>R/targets/run_method_fit.R</code>); a <code>design:</code> block’s <code>subject</code> takes precedence</td>
+</tr>
+<tr class="odd">
+<td><code>matrix_path</code> / <code>preprocessing_script</code></td>
+<td>how the matrix is built (below)</td>
+</tr>
+</tbody>
+</table>
+<p><code>feature_id_col</code> must match the column of <code>feature_metadata_path</code> whose values equal the matrix’s row names.</p>
+<p>The <code>methods:</code> block holds each method’s parameter grid; see <a href="./methods.html">Methods</a>. A method runs for a dataset only if it appears there.</p>
+<section id="the-design-block" class="level3">
+<h3 class="anchored" data-anchor-id="the-design-block">The <code>design:</code> block</h3>
+<p>Optional. A dataset with one gets the repeated-measures analysis (variance partition, dream, composition and sex checks; see <a href="./methods.html">Methods</a>). Read by <code>validate_design()</code> and <code>prepare_design()</code> (<code>R/lib/design.R</code>). Column names refer to the sample metadata and must be syntactic R names.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>platform</code></td>
+<td><code>array</code> (log-scale values, one probe per symbol, no variance filter) or <code>rnaseq</code> (counts → <code>filterByExpr()</code> → TMM → voom weights)</td>
+</tr>
+<tr class="even">
+<td><code>subject</code></td>
+<td>person id; omit for a cross-sectional dataset</td>
+</tr>
+<tr class="odd">
+<td><code>time</code>, <code>time_order</code></td>
+<td>timepoint column and its levels in chronological order (required with <code>time</code>)</td>
+</tr>
+<tr class="even">
+<td><code>group</code></td>
+<td>arm or subphenotype; cells are group × time</td>
+</tr>
+<tr class="odd">
+<td><code>group_at_first_time</code></td>
+<td><code>true</code>: every sample takes its subject’s first-timepoint group (a status that changes over time, e.g.&nbsp;GSE13904’s “SIRS resolved”)</td>
+</tr>
+<tr class="even">
+<td><code>covariates</code></td>
+<td>further variables in the variance model; categorical ones are random effects</td>
+</tr>
+<tr class="odd">
+<td><code>vp_covariates</code></td>
+<td>numeric covariates for the variance model only (e.g.&nbsp;ROSE’s sequencing QC)</td>
+</tr>
+<tr class="even">
+<td><code>numeric</code></td>
+<td>which covariates are numeric (fixed effects, standardized)</td>
+</tr>
+<tr class="odd">
+<td><code>de_covariates</code></td>
+<td>fixed-effect covariates added to the dream model</td>
+</tr>
+<tr class="even">
+<td><code>drop</code>, <code>keep</code></td>
+<td><code>{column: [values]}</code> sample filters</td>
+</tr>
+<tr class="odd">
+<td><code>set_na</code>, <code>recode</code></td>
+<td><code>{column: [values]}</code> recoded to missing; <code>{column: {from: to}}</code></td>
+</tr>
+<tr class="even">
+<td><code>contrasts</code></td>
+<td>cross-sectional only: <code>{name: "levelA - levelB"}</code>; default every group pair</td>
+</tr>
+<tr class="odd">
+<td><code>control_probes</code></td>
+<td>the array’s control probes for the composition check: <code>{id_pattern: "&lt;regex&gt;"}</code> or <code>{column: &lt;feature-metadata column&gt;, values: [...]}</code>; with <code>covariate: true</code> their first principal component enters the variance and dream models (<code>compute_control_factor()</code>, <code>R/lib/expression.R</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>"NA"</code>, <code>""</code> and <code>NA</code> are missing; samples missing any model variable are dropped and counted. Per-timepoint subsets have no <code>design:</code> block: their factors are described with their parent’s design (<code>variance_parent()</code>, <code>R/targets/variance.R</code>).</p>
+<p><strong>Composition markers.</strong> <code>config/composition_markers.yml</code> lists the neutrophil and lymphocyte marker genes behind the per-sample composition scores (<code>analyze_composition()</code>, <code>R/targets/composition.R</code>). Editing it reruns only the composition targets and what reads them.</p>
+</section>
+<section id="yaml-keys-that-are-booleans" class="level3">
+<h3 class="anchored" data-anchor-id="yaml-keys-that-are-booleans">YAML keys that are booleans</h3>
+<p>R’s <code>yaml</code> package reads an <strong>unquoted</strong> key that is a YAML 1.1 boolean token – <code>y</code>, <code>n</code>, <code>yes</code>, <code>no</code>, <code>on</code>, <code>off</code>, <code>true</code>, <code>false</code>, in any capitalization – as <code>TRUE</code>/<code>FALSE</code>, not the string you wrote. A method argument literally named <code>n</code> silently becomes the key <code>FALSE</code>. <code>read_dataset_metadata()</code> errors on a <code>TRUE</code>/<code>FALSE</code> key under <code>methods:</code>; quote such keys (<code>"n": [...]</code>).</p>
+</section>
+</section>
+<section id="building-a-matrix" class="level2">
+<h2 class="anchored" data-anchor-id="building-a-matrix">Building a matrix</h2>
+<p>The pipeline never assumes a normalization or metadata values. <code>load_input_matrix()</code> (<code>R/lib/matrices.R</code>) builds the matrix one of three ways, first match wins:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>#</th>
+<th>Config</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1</td>
+<td><code>dataset.matrix_path</code></td>
+<td>reads that RDS matrix as-is</td>
+</tr>
+<tr class="even">
+<td>2</td>
+<td><code>dataset.preprocessing_script</code></td>
+<td>runs your script against the raw parquet trio</td>
+</tr>
+<tr class="odd">
+<td>3</td>
+<td>neither</td>
+<td>pivots <code>expression_path</code> wide – no normalization, no filtering</td>
+</tr>
+</tbody>
+</table>
+<p>Every current dataset uses a preprocessing script (<code>R/preprocessing/&lt;dataset&gt;_preprocessing.R</code>), run by <code>run_preprocessing_script()</code> (<code>R/lib/matrices.R</code>). The result must be a plain matrix with row names = feature ids and column names = sample ids. Any sample or gene filtering belongs in the script (or the prebuilt matrix).</p>
+<section id="preprocessing-script-contract" class="level3">
+<h3 class="anchored" data-anchor-id="preprocessing-script-contract">Preprocessing-script contract</h3>
+<p>The script is <code>source()</code>d with these variables already defined:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Variable</th>
+<th>From</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>expression_path</code>, <code>sample_metadata_path</code>, <code>feature_metadata_path</code></td>
+<td><code>dataset.*_path</code></td>
+</tr>
+<tr class="even">
+<td><code>sample_id_col</code>, <code>feature_id_col</code>, <code>value_col</code>, <code>ensembl_col</code></td>
+<td><code>dataset.*_col</code></td>
+</tr>
+<tr class="odd">
+<td><code>tmp_dir</code></td>
+<td>a directory created for this run</td>
+</tr>
+</tbody>
+</table>
+<p>It must write its feature × sample matrix to <code>file.path(tmp_dir, "matrix.rds")</code>. To also run it by hand, guard on <code>tmp_dir</code>, which only exists when the pipeline sources the script:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>framework_run <span class="ot">&lt;-</span> <span class="fu">exists</span>(<span class="st">"tmp_dir"</span>, <span class="at">inherits =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span>framework_run) {</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  expression_path <span class="ot">&lt;-</span> <span class="st">"~/local/path/to/expression.parquet"</span>   <span class="co"># ... etc.</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="co"># ... your logic ...</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (framework_run) <span class="fu">saveRDS</span>(final_mat, <span class="fu">file.path</span>(tmp_dir, <span class="st">"matrix.rds"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The one transform the pipeline applies itself is the non-negativity shift NMF and CoGAPS need (<code>shift_nonneg()</code>, the <code>mat_nn_&lt;dataset&gt;</code> target): an algorithm requirement, not a normalization choice.</p>
+</section>
+</section>
+<section id="dataset-families" class="level2">
+<h2 class="anchored" data-anchor-id="dataset-families">Dataset families</h2>
+<p><code>config/dataset_families.yml</code> lists which datasets are timepoints or subsets of the same cohort (e.g.&nbsp;<code>ANEMONES</code> and <code>ANEMONES_DAY1</code>…<code>ANEMONES_DISCHARGE</code>). It decides two things:</p>
+<ul>
+<li><strong>projectR intercept:</strong> projections within a family leave out the intercept; projections across families include it.</li>
+<li><strong>Gene-space agreement</strong> is computed between datasets in the same family only.</li>
+</ul>
+<p>Families are listed explicitly, not inferred from dataset-id naming.</p>
+</section>
+<section id="gene-identifiers-across-datasets" class="level2">
+<h2 class="anchored" data-anchor-id="gene-identifiers-across-datasets">Gene identifiers across datasets</h2>
+<p>Each dataset’s matrix keeps its platform’s own feature ids (Illumina/Affymetrix probes, Entrez ids, versioned Ensembl ids). Anything that compares datasets or gene sets – enrichment and projectR – first remaps row names to <strong>version-stripped Ensembl gene ids</strong> (<code>ENSG00000001234.2</code> → <code>ENSG00000001234</code>) with <code>build_ensembl_map()</code>/<code>remap_to_ensembl()</code> (<code>R/lib/ingest/symbol_mapping.R</code>), using <code>dataset.ensembl_col</code>. Several probes mapping to one gene are collapsed; a <code>;</code>-separated multi-gene entry takes its first gene.</p>
+<p>Gene <strong>symbols</strong> (<code>build_symbol_map()</code>, <code>dataset.symbol_col</code>) are for display only, never for matching: symbols are ambiguous and renamed across annotation releases.</p>
+<p>A dataset with a missing or wrong <code>ensembl_col</code> keeps its native ids, so it matches almost nothing in other datasets. That shows up not as an error but as near-zero <code>n_genes_matched</code> in <code>projections</code> (projectR logs “0 row names matched”).</p>
+</section>
+<section id="which-datasets-are-built" class="level2">
+<h2 class="anchored" data-anchor-id="which-datasets-are-built">Which datasets are built</h2>
+<p><code>config/pipeline.yml</code> lists the 35 datasets the pipeline builds: 12 full datasets (11 with a <code>design:</code> block; SHIP-TREND has no sample metadata) and 23 per-timepoint subsets. One config is left out:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Dataset</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>gains</code></td>
+<td><code>R/preprocessing/gains_preprocessing.R</code> is an unfinished stub: it reads the four sub-cohort expression files (E-MTAB-4421/4451/5273/5274) but never builds a matrix. Whether to pool the four accessions is still undecided.</td>
+</tr>
+</tbody>
+</table>
+<p>SHIP-TREND (991 healthy samples) has no sample metadata (its phenotype data is access-restricted): it gets factor fits but no design, variance or composition analysis.</p>
+
+
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/cmatkhan\.github\.io\/sepsis_latent_factor_eda\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

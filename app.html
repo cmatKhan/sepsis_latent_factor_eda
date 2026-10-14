@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.10.19">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Launching the app – Sepsis latent-factor stability</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<script src="site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="./index.html">
+    <span class="navbar-title">Sepsis latent-factor stability</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="./index.html"> 
+<span class="menu-text">Overview</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./setup.html"> 
+<span class="menu-text">Setup</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./data.html"> 
+<span class="menu-text">Data</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./methods.html"> 
+<span class="menu-text">Methods</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./workflow.html"> 
+<span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="./app.html" aria-current="page"> 
+<span class="menu-text">Launching the app</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./reference.html"> 
+<span class="menu-text">Function reference</span></a>
+  </li>  
+</ul>
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/cmatKhan/sepsis_latent_factor_eda"> <i class="bi bi-github" role="img" aria-label="GitHub">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#launching" id="toc-launching" class="nav-link active" data-scroll-target="#launching">Launching</a></li>
+  <li><a href="#layout" id="toc-layout" class="nav-link" data-scroll-target="#layout">Layout</a></li>
+  <li><a href="#time-structure" id="toc-time-structure" class="nav-link" data-scroll-target="#time-structure">Time structure</a></li>
+  <li><a href="#explore-fits" id="toc-explore-fits" class="nav-link" data-scroll-target="#explore-fits">Explore fits</a>
+  <ul class="collapse">
+  <li><a href="#the-optimal-fit" id="toc-the-optimal-fit" class="nav-link" data-scroll-target="#the-optimal-fit">The optimal fit</a></li>
+  </ul></li>
+  <li><a href="#inspecting-one-fit" id="toc-inspecting-one-fit" class="nav-link" data-scroll-target="#inspecting-one-fit">Inspecting one fit</a></li>
+  <li><a href="#across-datasets" id="toc-across-datasets" class="nav-link" data-scroll-target="#across-datasets">Across datasets</a></li>
+  <li><a href="#not-yet-in-the-app" id="toc-not-yet-in-the-app" class="nav-link" data-scroll-target="#not-yet-in-the-app">Not yet in the app</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Launching the app</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Note
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>The app is built on schema 1 of the redesigned database. Schema 2 (<a href="./database.html">Database</a>) adds the repeated-measures tables (<code>dataset_design</code>, <code>samples</code>, <code>variance_*</code>, <code>factor_variance</code>, …) and moves the enrichment gene lists (<code>enrichment_results.genes</code>) and the <code>pattern_markers</code> table into per-dataset artifacts; the app doesn’t read those yet. This page describes the app as it is.</p>
+</div>
+</div>
+<section id="launching" class="level2">
+<h2 class="anchored" data-anchor-id="launching">Launching</h2>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">Sys.setenv</span>(<span class="at">STABILITY_DB =</span> <span class="st">"results/stability.sqlite"</span>)   <span class="co"># optional</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>shiny<span class="sc">::</span><span class="fu">runApp</span>(<span class="st">"app"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="va">STABILITY_DB</span><span class="op">=</span>/path/to/stability.sqlite <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">"shiny::runApp('app')"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li><code>STABILITY_DB</code> picks the database; if unset, the app uses <code>db_path</code> from <code>config/pipeline.yml</code> (launched from the project root or <code>app/</code>).</li>
+<li>The app opens the DB read-only. Datasets, methods and fits are queried live.</li>
+</ul>
+</section>
+<section id="layout" class="level2">
+<h2 class="anchored" data-anchor-id="layout">Layout</h2>
+<p>The sidebar holds the choices every page shares: <strong>dataset</strong>, <strong>method</strong> and <strong>rank</strong> (WGCNA: power; the rank defaults to the method’s optimal fit), and the <strong>similarity metric</strong> (cosine, Pearson, Spearman: which per-factor stability is read). A page has its own selector only when it needs a second dataset or fit (Projection comparison’s target and Fit B, the WGCNA overlap’s other power) or a choice inside the fit (factor, module, field). The <strong>Compare settings</strong> panel holds what only the Compare page uses: the methods to set side by side and the optimal fit rule.</p>
+<p>The Compare page has one tab per question.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Tab</th>
+<th>Question</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1. Optimal hyperparameter</td>
+<td>which rank (WGCNA: power) is best for each method on this dataset</td>
+<td>representative fits (<code>v_fits</code>), <code>factors.stability_*</code>, <code>fit_metrics</code>, <code>fit_pairs.ari</code></td>
+</tr>
+<tr class="even">
+<td>2. Best method</td>
+<td>which method is best and most stable on this dataset</td>
+<td>the optimal fits, plus median projectR R² from <code>projections</code></td>
+</tr>
+<tr class="odd">
+<td>3. Across methods</td>
+<td>how similar are the optimal factors of different methods</td>
+<td>computed live from each optimal fit’s loadings (WGCNA: module membership) and scores</td>
+</tr>
+<tr class="even">
+<td>4. Across datasets</td>
+<td>how similar are a method’s factors across datasets</td>
+<td><code>projections</code> (sample space) and <code>gene_space_agreement</code> (gene space)</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="time-structure" class="level2">
+<h2 class="anchored" data-anchor-id="time-structure">Time structure</h2>
+<p>The first page (before Compare) shows how much of each time-course dataset’s variance is <strong>between subjects</strong>, an <strong>average time effect</strong> (the change every subject shares between timepoints), or <strong>other within-subject</strong> variation (change that differs between subjects, plus measurement noise; the two cannot be separated without technical replicates). It decides how much of what a factor can find is about change over time.</p>
+<ul>
+<li><em>All time-course datasets:</em> the split for each pooled dataset (ANEMONES, CORTICUS, GSE13904, GSE54514, GSE95233, GSE110487, GSE273700), with subjects, samples, subjects measured more than once and timepoints. The whisker is a 95% interval from resampling subjects (the time part is shown without an interval because its interval is unreliable near zero).</li>
+<li><em>Across genes:</em> the distribution of each gene’s between-subject share for the selected dataset’s family, once with every gene counted equally and once weighted by gene variance (which is what the pooled value reflects).</li>
+<li><em>Factors of the selected fit</em> (choose a pooled dataset in the sidebar): the same split of each factor’s sample scores, which separates factors that describe stable differences between people from factors with a within-subject component.</li>
+</ul>
+<p><strong>Method.</strong> A sample’s timepoint is the sibling dataset whose matrix contains it (<code>config/dataset_families.yml</code>); subjects come from each dataset’s <code>subject_id_col</code>. For each gene (or factor) the sums of squares are split sequentially into subject, then timepoint within subject, then the rest, and converted to variance components with the degrees of freedom each part uses: within = (SS_time + SS_resid)/(N - S); between = (SS_between/(S - 1) - within)/n0, where n0 is the average number of samples per subject; time = max(SS_time - (T - 1) x resid, 0)/N; resid = SS_resid/(N - S - (T - 1)). Raw sums-of-squares shares would overstate the between-subject part (with two samples per subject even pure noise puts about half of the sum of squares there). Pooled values are ratios of sums over genes, so high-variance genes count more. On simulated data with known components the estimates recover them (0.573 against a true 0.58), and with no subject effect the between-subject estimate is 0.004. The split is computed when the page is opened (about 25 s the first time) and cached for the session.</p>
+<p>The pipeline now stores the model-based version of this split: per dataset and gene from variancePartition (<code>variance_summary</code>, <code>variance_terms</code>, <code>variance_categories</code>, the <code>variance_partition</code> artifact) and per factor (<code>factor_variance</code>); see Methods, “Repeated measures”. Switching this page to the stored values is pending.</p>
+</section>
+<section id="explore-fits" class="level2">
+<h2 class="anchored" data-anchor-id="explore-fits">Explore fits</h2>
+<p>A second page (top navigation) shows the sidebar’s method on the selected dataset, across its hyperparameter (<em>One rank in detail</em> uses the sidebar rank). Tabs depend on the method:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Method</th>
+<th>Tabs</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>PCA</td>
+<td>variance by rank (reconstruction error, cumulative variance explained)</td>
+</tr>
+<tr class="even">
+<td>sPCA</td>
+<td>stability vs rank; Index of Sparseness vs penalty with the chosen penalty per rank; one rank in detail</td>
+</tr>
+<tr class="odd">
+<td>NMF, CoGAPS</td>
+<td>stability vs rank; reconstruction error across seeds; one rank in detail</td>
+</tr>
+<tr class="even">
+<td>ICA</td>
+<td>as NMF, plus ICASSO cluster quality (Iq) by rank</td>
+</tr>
+<tr class="odd">
+<td>WGCNA</td>
+<td>module agreement (ARI) between powers; modules, unassigned genes and scale-free fit by power; for the sidebar power: module sizes and kME of members vs non-members vs the permutation null, the gene dendrogram with module colours, and module overlap with another power</td>
+</tr>
+</tbody>
+</table>
+<p><em>Stability vs rank</em> boxplots each factor’s best match in another same-rank fit, with the chance level (95th percentile of unmatched pairs) marked; ICA separates seed pairs from pairs that involve a bootstrap resample. <em>One rank in detail</em> shows per-factor stability of the representative fit and the seed × seed matrix of mean matched similarity. Cross-rank factor tracking from the old app is not yet ported.</p>
+<section id="the-optimal-fit" class="level3">
+<h3 class="anchored" data-anchor-id="the-optimal-fit">The optimal fit</h3>
+<p>The DB stores one <em>representative</em> fit per rank but no chosen rank, so the app picks it:</p>
+<ul>
+<li><strong>Highest quality that is still stable</strong> (default): among ranks whose stability is at least the threshold (default 0.9), the one with the highest in-sample quality. If none qualifies, the most stable rank. Quality rises with rank, so this is the largest rank whose factors still reproduce across seeds.</li>
+<li><strong>Highest in-sample quality</strong>: ignores stability, so it usually picks the largest rank.</li>
+</ul>
+<p>In-sample quality is <code>1 - mse / val_sd²</code> for PCA, NMF, CoGAPS and ICA; sPCA stores no <code>mse</code>, so its sparse proportion of variance explained is used; WGCNA has no reconstruction, so its mean member kME is used. Quality is comparable within a method, not across methods. Stability is the mean over factors of the median matched similarity across same-rank fit pairs; PCA’s nested components are stable by construction (1), and WGCNA uses the mean ARI against the other powers.</p>
+<p>Cross-method agreement matches factors one-to-one (Hungarian, on |Jaccard| of the top 50 genes per factor) and averages the matched overlaps, or clusters samples by each fit’s scores (k = 4) and compares partitions by ARI. Cross-dataset views are ordered by hierarchical clustering with the two directions of each pair averaged.</p>
+</section>
+</section>
+<section id="inspecting-one-fit" class="level2">
+<h2 class="anchored" data-anchor-id="inspecting-one-fit">Inspecting one fit</h2>
+<p>The sidebar’s method and rank drive the <em>Inspect fit</em> pages, Trajectory across time, Explore fits and Projection comparison (Fit A). For WGCNA the rank is the soft-threshold power and a factor is a module: Factor detail adds <em>Module quality</em> (kME of members, non-members and the permutation null) and <em>Module genes</em> (with gene significance against kME) tabs, and Metadata shows module-trait relationships. Views with no WGCNA data (cross-dataset similarity, trajectory, projection, pattern drivers, gene biplot) say so instead of hiding the page. PCA at rank <em>n</em> is its single max-rank fit’s first <em>n</em> components.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Page</th>
+<th>Shows</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Factor detail</td>
+<td>pick a factor: top genes on each side (WGCNA: top kME); its best match in every other fit of the method, by rank; enrichment; its sample scores against any metadata field</td>
+<td>loadings, <code>v_factor_matches</code>, <code>enrichment_*</code>, scores and sample-metadata artifacts</td>
+</tr>
+<tr class="even">
+<td>Enrichment</td>
+<td>per-factor counts of significant terms and the strongest terms across the fit, by analysis (fgsea, GSEA, over-representation, CoGAPS marker ORA); a one-factor view with dot plot and table</td>
+<td><code>enrichment_queries</code>, <code>enrichment_results</code> (only BH-adjusted p &lt; 0.05 is stored, and only for representative fits)</td>
+</tr>
+<tr class="odd">
+<td>Metadata</td>
+<td>factor × metadata-field association grid (Spearman for numeric fields, Kruskal-Wallis otherwise, BH over the grid; click a cell for the scatter or box plot)</td>
+<td>scores and sample metadata, computed live</td>
+</tr>
+<tr class="even">
+<td>Biplots</td>
+<td>samples at their scores on two chosen factors, with arrows for the top-loading genes, or with every metadata field (numeric: a correlation vector; categorical: a centroid per level)</td>
+<td>loadings, scores, sample metadata</td>
+</tr>
+<tr class="odd">
+<td>Pattern drivers</td>
+<td>genes that differ between two sample groups and carry weight on a factor (projectR <code>projectionDriveR</code>): confidence-interval or Welch-test view, table of shared significant genes</td>
+<td><code>pattern_drivers</code> and its result files; only combinations the pipeline computed</td>
+</tr>
+</tbody>
+</table>
+<p>Gene labels use the dataset’s symbol column, read from the feature-metadata artifact. The app loads <code>arrow</code> because schema-1 artifacts were saved with arrow-backed columns; schema-2 metadata artifacts are plain data frames. Sample and feature metadata artifacts are local files under <code>stability_artifacts/&lt;dataset_id&gt;/</code>.</p>
+</section>
+<section id="across-datasets" class="level2">
+<h2 class="anchored" data-anchor-id="across-datasets">Across datasets</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Page</th>
+<th>Shows</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Trajectory across time</td>
+<td>the focus fit’s basis projected onto each per-timepoint sibling dataset of its family; one line per subject across the time course, optionally coloured by a subject-level metadata field. Timepoints are ordered as listed in <code>config/dataset_families.yml</code></td>
+<td>within-family <code>projections</code>; subject ids from each target’s metadata</td>
+</tr>
+<tr class="even">
+<td>Projection comparison</td>
+<td>for a target dataset: R² by method of every projection; sample-space alignment of two fits’ projected weights; gene-space alignment (Fit A’s loadings projected by least squares onto Fit B’s basis, as projectR does)</td>
+<td><code>projections</code> and their artifacts, loadings</td>
+</tr>
+</tbody>
+</table>
+<p>Dataset-by-dataset similarity for one method is on the Compare page, tab 4.</p>
+</section>
+<section id="not-yet-in-the-app" class="level2">
+<h2 class="anchored" data-anchor-id="not-yet-in-the-app">Not yet in the app</h2>
+<ul>
+<li>On-demand pattern-driver runs: the app is read-only, so only combinations stored by the pipeline are shown.</li>
+<li>Fetching data directly from the HuggingFace Hub (local paths only).</li>
+</ul>
+
+
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/cmatkhan\.github\.io\/sepsis_latent_factor_eda\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

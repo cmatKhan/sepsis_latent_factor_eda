@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.10.19">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Methods – Sepsis latent-factor stability</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<script src="site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="./index.html">
+    <span class="navbar-title">Sepsis latent-factor stability</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="./index.html"> 
+<span class="menu-text">Overview</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./setup.html"> 
+<span class="menu-text">Setup</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./data.html"> 
+<span class="menu-text">Data</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="./methods.html" aria-current="page"> 
+<span class="menu-text">Methods</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./workflow.html"> 
+<span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./app.html"> 
+<span class="menu-text">Launching the app</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./reference.html"> 
+<span class="menu-text">Function reference</span></a>
+  </li>  
+</ul>
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/cmatKhan/sepsis_latent_factor_eda"> <i class="bi bi-github" role="img" aria-label="GitHub">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#the-methods-and-their-parameters" id="toc-the-methods-and-their-parameters" class="nav-link active" data-scroll-target="#the-methods-and-their-parameters">The methods and their parameters</a>
+  <ul class="collapse">
+  <li><a href="#pca-one-fit-per-dataset" id="toc-pca-one-fit-per-dataset" class="nav-link" data-scroll-target="#pca-one-fit-per-dataset">PCA: one fit per dataset</a></li>
+  <li><a href="#spca-choosing-the-sparsity" id="toc-spca-choosing-the-sparsity" class="nav-link" data-scroll-target="#spca-choosing-the-sparsity">sPCA: choosing the sparsity</a></li>
+  <li><a href="#ica-icasso-and-kurtosis" id="toc-ica-icasso-and-kurtosis" class="nav-link" data-scroll-target="#ica-icasso-and-kurtosis">ICA, ICASSO and kurtosis</a></li>
+  <li><a href="#wgcna-one-network-over-all-genes" id="toc-wgcna-one-network-over-all-genes" class="nav-link" data-scroll-target="#wgcna-one-network-over-all-genes">WGCNA: one network over all genes</a></li>
+  <li><a href="#error-handling-and-timings" id="toc-error-handling-and-timings" class="nav-link" data-scroll-target="#error-handling-and-timings">Error handling and timings</a></li>
+  </ul></li>
+  <li><a href="#representative-fits" id="toc-representative-fits" class="nav-link" data-scroll-target="#representative-fits">Representative fits</a></li>
+  <li><a href="#adding-a-method" id="toc-adding-a-method" class="nav-link" data-scroll-target="#adding-a-method">Adding a method</a></li>
+  <li><a href="#methods-considered-and-dropped" id="toc-methods-considered-and-dropped" class="nav-link" data-scroll-target="#methods-considered-and-dropped">Methods considered and dropped</a></li>
+  <li><a href="#repeated-measures-variance-partition-differential-expression-and-sample-checks" id="toc-repeated-measures-variance-partition-differential-expression-and-sample-checks" class="nav-link" data-scroll-target="#repeated-measures-variance-partition-differential-expression-and-sample-checks">Repeated measures: variance partition, differential expression and sample checks</a>
+  <ul class="collapse">
+  <li><a href="#how-it-runs" id="toc-how-it-runs" class="nav-link" data-scroll-target="#how-it-runs">How it runs</a></li>
+  <li><a href="#models" id="toc-models" class="nav-link" data-scroll-target="#models">Models</a></li>
+  <li><a href="#sample-checks" id="toc-sample-checks" class="nav-link" data-scroll-target="#sample-checks">Sample checks</a></li>
+  <li><a href="#what-the-variance-partition-says-about-repeated-measures" id="toc-what-the-variance-partition-says-about-repeated-measures" class="nav-link" data-scroll-target="#what-the-variance-partition-says-about-repeated-measures">What the variance partition says about repeated measures</a></li>
+  </ul></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Methods</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<p>Six latent-factor methods are fit to every dataset. Each lives in one file, <code>R/methods/&lt;name&gt;.R</code>, discovered automatically by <code>discover_method_registries()</code> (<code>R/lib/method_registry.R</code>).</p>
+<section id="the-methods-and-their-parameters" class="level2">
+<h2 class="anchored" data-anchor-id="the-methods-and-their-parameters">The methods and their parameters</h2>
+<p>A method runs for a dataset when it appears under the config’s <code>methods:</code> block (WGCNA nests under <code>methods.network</code>). Each key is the underlying tool’s own argument name. A <strong>scalar</strong> is a fixed setting; a <strong>list</strong> is a swept grid dimension, crossed with the others in the method’s <code>build_grid()</code>. A key only takes effect if that <code>build_grid()</code> uses it; see each method file for its keys and <code>defaults</code>.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Method</th>
+<th>Tool</th>
+<th>Config keys</th>
+<th>Stability design</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>pca</code></td>
+<td><code>prcomp()</code></td>
+<td><code>rank</code> (only its maximum is used)</td>
+<td>deterministic</td>
+</tr>
+<tr class="even">
+<td><code>nmf</code></td>
+<td><code>NNLM::nnmf()</code></td>
+<td><code>k</code> (swept), <code>seed</code> (swept; applied with <code>set.seed()</code>)</td>
+<td>across seeds</td>
+</tr>
+<tr class="odd">
+<td><code>cogaps</code></td>
+<td><code>CoGAPS::CoGAPS()</code></td>
+<td><code>params</code> (<code>nPatterns</code>, <code>seed</code>, <code>nIterations</code>, <code>distributed</code>), <code>distributed_params</code>, <code>run</code></td>
+<td>across seeds</td>
+</tr>
+<tr class="even">
+<td><code>spca</code></td>
+<td><code>elasticnet::spca()</code></td>
+<td><code>K</code> (swept), <code>K_scan</code>, <code>para_scan</code>, <code>para_step</code>, <code>sparse</code>, <code>lambda</code> (one value), <code>max.iter</code>, <code>eps.conv</code>, <code>max_hours</code></td>
+<td>parameter grid</td>
+</tr>
+<tr class="odd">
+<td><code>ica</code></td>
+<td><code>fastICA::fastICA()</code></td>
+<td><code>n.comp</code> (swept), <code>seed</code> (swept), <code>bootstrap</code> (swept), <code>alpha</code> (one value)</td>
+<td>across seeds and resamples</td>
+</tr>
+<tr class="even">
+<td><code>network.wgcna</code></td>
+<td><code>WGCNA::blockwiseModules()</code></td>
+<td><code>power</code> (swept), <code>minModuleSize</code>, <code>mergeCutHeight</code>, <code>networkType</code>, <code>maxBlockSize</code></td>
+<td>parameter grid</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Stability designs.</strong> For NMF, CoGAPS and ICA the question is whether factors recur across random seeds (and, for ICA, bootstrap resamples of subjects). PCA, sPCA and WGCNA are deterministic given their parameters, so for them the question is how structure changes as the swept parameter grows. Every method is also compared across ranks.</p>
+<p><strong>CoGAPS’s three sub-blocks</strong> mirror its three call sites: <code>params</code> goes to <code>CogapsParams()</code>, <code>distributed_params</code> to <code>setDistributedParams()</code>, <code>run</code> to <code>CoGAPS()</code> itself. Some argument names exist on more than one of them, so put each under the function it belongs to. <code>nSets</code> and <code>nThreads</code> default to the cogaps controller’s <code>cpus_per_task</code>.</p>
+<p><strong>Threads and identity.</strong> Parameters that only set parallelism (NMF <code>n.threads</code>, CoGAPS <code>nSets</code>/<code>nThreads</code>, WGCNA <code>nThreads</code>) are listed in the method’s <code>resource_params</code> and left out of a fit’s identity (<code>fit_key</code>).</p>
+<section id="pca-one-fit-per-dataset" class="level3">
+<h3 class="anchored" data-anchor-id="pca-one-fit-per-dataset">PCA: one fit per dataset</h3>
+<p>PCA components are nested – the first <em>k</em> components of a rank-20 fit are the rank-<em>k</em> solution – so PCA is fit once per dataset, at the largest configured rank. The fit also records <code>mse_by_rank</code>, every truncation’s reconstruction error. Choosing the first <em>n</em> components is left to ingestion and the app.</p>
+</section>
+<section id="spca-choosing-the-sparsity" class="level3">
+<h3 class="anchored" data-anchor-id="spca-choosing-the-sparsity">sPCA: choosing the sparsity</h3>
+<p>sPCA runs with <code>sparse = "varnum"</code>, under which <code>para</code> is the fraction of genes allowed a non-zero loading in each component, converted to a count from the dataset’s gene number. Fit time grows steeply with <code>para</code> and K: for EARLI (7465 genes × 189 samples) the median fit took 1.1 min at para 0.1 and K 2–5, but 158 min at para 0.5 and K 16–20.</p>
+<p><strong>How the sparsity is chosen.</strong> We follow Guerra-Urzola, Van Deun, Vera &amp; Sijtsma (2021), “A Guide for Sparse PCA: Model Comparison and Applications”, <em>Psychometrika</em> 86(4):893–919 (<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC8636462/">PMC8636462</a>): fix K, then choose the sparsity that maximizes the <strong>Index of Sparseness</strong></p>
+<pre><code>IS = PEV_sparse × PEV_pca × PS</code></pre>
+<ul>
+<li>PEV_sparse: variance explained by the sparse components.</li>
+<li>PEV_pca: variance explained by the first K ordinary principal components (from the dataset’s PCA fit).</li>
+<li>PS: the proportion of zero loadings; under <code>varnum</code>, PS = 1 − para.</li>
+</ul>
+<p>The authors report that IS beat cross-validation and BIC at recovering the true sparsity, with a single interior peak in their applications (97% sparsity for gene expression).</p>
+<p>The search runs in two stages per dataset (<code>spca_build_grid()</code>, <code>spca_refine_grid()</code> in <code>R/methods/spca.R</code>):</p>
+<ol type="1">
+<li><strong>Scan:</strong> one K (<code>K_scan</code>, default 5) at <code>para_scan</code> = 0.2, 0.3, 0.4, 0.5.</li>
+<li><strong>Refine:</strong> the scan’s IS winner p*, then every K (2–12) at p* − <code>para_step</code>, p* and p* + <code>para_step</code> (default 0.05), skipping pairs the scan already fit.</li>
+</ol>
+<p>That’s about 36 fits per dataset. <code>selection_spca_&lt;dataset&gt;</code> (<code>spca_select_fits()</code>) tabulates IS for every fit and marks the best para per K; those fits are sPCA’s representative fits. If the scan’s winner sits at the edge of <code>para_scan</code>, the refinement still runs, the selection table records <code>at_scan_edge</code> and a warning suggests widening <code>para_scan</code> for that dataset. <code>K_scan</code>, <code>para_scan</code> and <code>para_step</code> can be set per dataset in <code>methods: spca:</code>.</p>
+<ul>
+<li><strong>Why one sparsity per dataset.</strong> On the earlier full grid (30 datasets, K 2–12, para 0.02–0.5; 2,968 fits, 1,451 CPU-hours) every IS winner was at para 0.25–0.50, and para ≤ 0.2 never won. The winner moved by at most 0.10 across K within a dataset but differed between datasets (GSE54514 0.25, GSE95233 0.35, ANEMONES 0.45). Replaying those fits with a scan at K = 5 and the winner ± 0.05 for every other K landed within 0.05 of each K’s winner at ≥ 80% of the Ks in all 30 datasets, losing a mean 0.004% of IS (worst 0.63%), for about half the compute. A lower scan K was noisier and a higher one costlier without agreeing better.</li>
+<li><strong><code>lambda</code> is not swept.</strong> We tested λ ∈ {1e-6, 0.1, 1} under <code>varnum</code> on EARLI: across 113 (K, para) pairs fit at both 1e-6 and 1, total PEV differed by a median of 1.5e-4 and at most 5.7e-4. Under <code>varnum</code>, <code>para</code> fixes the number of non-zero loadings, leaving λ almost nothing to change (the paper makes the same point about LARS-EN). <code>lambda</code> is one value, default 1e-6, and <code>spca_build_grid()</code> rejects a list.</li>
+<li><strong>Convergence.</strong> <code>spca()</code> runs with <code>trace = TRUE</code>, which prints its iteration count every 10 iterations; <code>run_spca_job()</code> captures it and records <code>iterations</code> (a lower bound, to within 10) and whether <code>max.iter</code> was reached without converging (<code>converged</code> in <code>fit_metrics</code>; <code>hit_max_iter</code> in the selection table, where such fits stay, flagged).</li>
+<li><strong>The 8-hour stop.</strong> A fit still running after <code>max_hours</code> (default 8) stops itself and is recorded as failed (<code>killed_not_converged</code>), with the iterations it reached. On the earlier grid only two fits ended this way (ANEMONES para 0.05, K 10 and 11), in the low-para range the scan no longer covers.</li>
+<li><strong>Scores</strong> are computed on the centered matrix, matching how <code>spca()</code> fits the model.</li>
+</ul>
+</section>
+<section id="ica-icasso-and-kurtosis" class="level3">
+<h3 class="anchored" data-anchor-id="ica-icasso-and-kurtosis">ICA, ICASSO and kurtosis</h3>
+<p>ICA (<code>fastICA</code>, after a PCA prewhitening step; <code>run_ica_seed_sweep_job()</code> in <code>R/methods/ica.R</code>) is fit across seeds and, with <code>bootstrap = TRUE</code>, on bootstrap resamples. A resample draws <strong>subjects</strong> with replacement and takes all of each drawn subject’s samples, so a person’s repeated samples stay together; drawing single samples would leave most people in every replicate through their other samples and overstate stability. Subjects come from <code>fit_subjects()</code> (<code>R/targets/run_method_fit.R</code>, the <code>subjects_&lt;dataset&gt;</code> target); in a cross-sectional dataset every sample is its own subject, which is the ordinary bootstrap. A bootstrap fit keeps its sources under the resampled sample ids (<code>boot_idx</code>, <code>boot_subjects</code>) but has no per-sample scores.</p>
+<p><strong>ICASSO</strong> (Himberg, Hyvärinen &amp; Esposito 2004, <em>NeuroImage</em> 22(3):1214–1222) pools every component of every fit at one rank – seeds and bootstrap resamples together – clusters them by |cosine| (average linkage, cut to the rank), and scores each cluster with Iq = mean within-cluster similarity − mean similarity to everything outside it. Iq ≥ 0.7 is the usual “trustworthy” threshold.</p>
+<p><strong>Per-component kurtosis</strong> (Lee &amp; Batzoglou 2003) is the non-Gaussianity fastICA maximizes; a clearly positive excess kurtosis is the expected signature of a real biological source.</p>
+</section>
+<section id="wgcna-one-network-over-all-genes" class="level3">
+<h3 class="anchored" data-anchor-id="wgcna-one-network-over-all-genes">WGCNA: one network over all genes</h3>
+<p>For each soft-thresholding power, WGCNA correlates every pair of genes across samples and raises the correlations to that power, suppressing weak ones. It then computes the topological overlap (TOM) – how many strong partners two genes share – builds a gene tree from 1 − TOM, and cuts it into modules of at least <code>minModuleSize</code> genes. Modules whose eigengenes (first principal components) correlate above 1 − <code>mergeCutHeight</code> are merged.</p>
+<p>These genes × genes matrices grow with the square of the gene count, so <code>blockwiseModules()</code> by default caps a network at 5,000 genes and splits larger data into blocks, building separate networks within each. Genes in different blocks are then never compared, and the block count depends on the gene count. We set <code>maxBlockSize = 50000</code>, so each fit is one network over all genes (about 7,500), as the WGCNA authors recommend whenever memory allows. Its gene tree is then the one the modules were cut from, and ingestion stores it directly. Workers request 6 GB for this.</p>
+<p>Each fit (<code>run_wgcna_param_job()</code>, <code>R/methods/wgcna.R</code>) also stores every gene’s connectivity (total, within its module, outside it, and the difference; <code>intramodularConnectivity.fromExpr()</code>), the scale-free fit of that connectivity at the fit’s power (<code>scaleFreeFitIndex()</code>), and the <code>goodSamplesGenes()</code> result. The TOM itself (genes × genes per fit) is not saved; it can be rebuilt from the dataset’s matrix and the fit’s parameters.</p>
+</section>
+<section id="error-handling-and-timings" class="level3">
+<h3 class="anchored" data-anchor-id="error-handling-and-timings">Error handling and timings</h3>
+<p>Every fit function runs inside <code>capture_fit()</code> (<code>R/lib/method_registry.R</code>): a failing fit returns its error message instead of stopping its batch, and every result records its wall time. sPCA additionally stops itself at <code>max_hours</code>.</p>
+</section>
+</section>
+<section id="representative-fits" class="level2">
+<h2 class="anchored" data-anchor-id="representative-fits">Representative fits</h2>
+<p>Downstream analyses (enrichment, projections, redundancy, pattern drivers) use each method’s <strong>representative fits</strong> (<code>fits.representative</code> in the DB):</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Method</th>
+<th>Representative fits</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>PCA</td>
+<td>its single fit</td>
+</tr>
+<tr class="even">
+<td>NMF, CoGAPS, ICA</td>
+<td>the lowest-reconstruction-error seed at each rank (bootstrap resamples excluded)</td>
+</tr>
+<tr class="odd">
+<td>sPCA</td>
+<td>the Index-of-Sparseness-selected para at each K</td>
+</tr>
+<tr class="even">
+<td>WGCNA</td>
+<td>every fit</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="adding-a-method" class="level2">
+<h2 class="anchored" data-anchor-id="adding-a-method">Adding a method</h2>
+<p>Write one <code>R/methods/&lt;name&gt;.R</code> and add a controller named <code>&lt;name&gt;</code> to <code>config/pipeline.yml</code>. The file defines three things.</p>
+<p><strong>1. A fit function</strong> that reads its matrix from the free variable <code>mat</code> (or <code>mat_nn</code>, the non-negative shift) and, if it resamples, each column’s subject from <code>subjects</code>; <code>run_method_fits()</code> (<code>R/targets/run_method_fit.R</code>) binds both for each call. Its arguments are the columns your <code>build_grid()</code> produces. Wrap the body in <code>capture_fit()</code> so a failure is recorded rather than stopping the batch, and return as much of the model as is cheap to store: ingestion can then change without refitting.</p>
+<p><strong>2. <code>&lt;name&gt;_registry</code></strong>, the fitting contract (the variable name must match the file name):</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>global_object</code></td>
+<td><code>"mat"</code> or <code>"mat_nn"</code></td>
+</tr>
+<tr class="even">
+<td><code>fn</code></td>
+<td>the fit function</td>
+</tr>
+<tr class="odd">
+<td><code>build_grid</code></td>
+<td><code>function(params)</code> returning one row per fit, usually <code>expand.grid()</code> over the fit function’s arguments; <code>params</code> is <code>defaults</code> merged with the dataset config (<code>merge_named_list()</code>)</td>
+</tr>
+<tr class="even">
+<td><code>defaults</code></td>
+<td>optional default parameters</td>
+</tr>
+<tr class="odd">
+<td><code>pkgs</code></td>
+<td>optional packages to load on the worker</td>
+</tr>
+<tr class="even">
+<td><code>resource_defaults</code></td>
+<td>optional <code>function(params, resources)</code> for defaults from the worker’s resources (<code>cpus_per_task</code>)</td>
+</tr>
+<tr class="odd">
+<td><code>needs_nonneg</code></td>
+<td><code>TRUE</code> to fit on the non-negative shift</td>
+</tr>
+<tr class="even">
+<td><code>network</code></td>
+<td><code>TRUE</code> if the config nests under <code>methods.network</code></td>
+</tr>
+<tr class="odd">
+<td><code>refine_grid</code> + <code>select_fits</code></td>
+<td>optional data-driven second stage (as sPCA’s search)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>3. <code>&lt;name&gt;_ingest</code></strong>, the ingestion contract (<code>validate_method_ingest()</code>):</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>family</code></td>
+<td><code>"seed_sweep"</code> or <code>"param_grid"</code></td>
+</tr>
+<tr class="even">
+<td><code>sign_ambiguous</code></td>
+<td><code>TRUE</code> if factors are unique only up to sign (matching uses |similarity|; enrichment tests both ends)</td>
+</tr>
+<tr class="odd">
+<td><code>has_loadings</code></td>
+<td><code>FALSE</code> for a method without a genes × factors matrix (WGCNA)</td>
+</tr>
+<tr class="even">
+<td><code>resource_params</code></td>
+<td>flattened parameter names that only set parallelism</td>
+</tr>
+<tr class="odd">
+<td><code>extract(result, params)</code></td>
+<td>one fit’s result → <code>fit_record_from()</code>: rank, seed, mse, loadings, scores, diagnostics, the raw object, scalar metrics</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why two contracts.</strong> The fit targets depend on the registry and everything it calls, so editing them refits the method – for sPCA, about a day of compute. The ingestion contract is referenced only by ingestion targets, so changing what’s extracted never refits.</p>
+<p><code>R/methods/pca.R</code> is the simplest example; <code>cogaps.R</code> shows sub-blocks, <code>wgcna.R</code> a <code>network</code> method without loadings, <code>spca.R</code> a refine stage.</p>
+</section>
+<section id="methods-considered-and-dropped" class="level2">
+<h2 class="anchored" data-anchor-id="methods-considered-and-dropped">Methods considered and dropped</h2>
+<ul>
+<li><strong>CP and Tucker tensor decompositions</strong> (genes × subjects × timepoints) were implemented and removed on 2026-09-29. The planned data has only 2 timepoints per subject, too few to fit a time mode or choose its rank; tensor rank selection is NP-hard and CP/Tucker results are very sensitive to hyperparameters (<a href="https://rpubs.com/ivanricardo/tensorfactormodels">summary</a>).</li>
+<li><strong>ICAclust</strong> (Nascimento et al., PLoS One 2017) clusters genes by temporal shape with ICA over timepoints; with 2 timepoints its rotation has a single free angle, so the method is degenerate. Never adopted.</li>
+<li><strong>Masking cross-validation and subsample projection</strong> stability designs were explored and removed; see git history to revive them.</li>
+</ul>
+</section>
+<section id="repeated-measures-variance-partition-differential-expression-and-sample-checks" class="level2">
+<h2 class="anchored" data-anchor-id="repeated-measures-variance-partition-differential-expression-and-sample-checks">Repeated measures: variance partition, differential expression and sample checks</h2>
+<p>Most datasets sample each patient more than once. Before deciding how the factor analysis should treat that, the pipeline measures, per gene, how expression variance splits into between-person, time and the rest (variancePartition), tests change over time (dream), and checks each dataset’s samples (leukocyte composition, technical scale, recorded vs inferred sex). It runs for every dataset with a <code>design:</code> block (see Data, “The <code>design:</code> block”) and never touches a factor fit, so it can be rebuilt on its own.</p>
+<section id="how-it-runs" class="level3">
+<h3 class="anchored" data-anchor-id="how-it-runs">How it runs</h3>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Step</th>
+<th>Target</th>
+<th>Function (file)</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>design</td>
+<td><code>design_&lt;dataset&gt;</code></td>
+<td><code>prepare_design()</code> (<code>R/lib/design.R</code>)</td>
+<td>applies the <code>design:</code> block: filters, recodes, standardizes numeric covariates, builds the cell factor, formulas, contrasts (<code>build_contrasts()</code>, <code>makeContrastsDream()</code>) and the canonical correlations between design variables</td>
+</tr>
+<tr class="even">
+<td>expression</td>
+<td><code>expr_&lt;dataset&gt;</code></td>
+<td><code>prepare_expression()</code> (<code>R/lib/expression.R</code>)</td>
+<td>the raw values for the design’s samples: arrays collapsed to one probe per gene symbol (no variance filter); RNA-seq counts, <code>filterByExpr()</code>, TMM</td>
+</tr>
+<tr class="odd">
+<td>controls</td>
+<td><code>controls_&lt;dataset&gt;</code>, <code>control_factor_&lt;dataset&gt;</code></td>
+<td><code>control_probe_matrix()</code>, <code>compute_control_factor()</code> (<code>R/lib/expression.R</code>)</td>
+<td>arrays with <code>control_probes</code>: the control probes’ raw values; with <code>covariate: true</code>, their first principal component as the <code>control_factor</code> covariate</td>
+</tr>
+<tr class="even">
+<td>weights</td>
+<td><code>norm_&lt;dataset&gt;</code></td>
+<td><code>normalize_for_models()</code> (<code>R/targets/variance.R</code>)</td>
+<td>RNA-seq: <code>voomWithDreamWeights()</code> with the dream formula; arrays pass through</td>
+</tr>
+<tr class="odd">
+<td>variance partition</td>
+<td><code>vp_&lt;dataset&gt;</code></td>
+<td><code>run_variance_partition()</code></td>
+<td><code>fitVarPartModel()</code>, ML; per gene: fractions, absolute variances, singular-fit and collinearity flags (<code>vp_record()</code>)</td>
+</tr>
+<tr class="even">
+<td>differential expression</td>
+<td><code>dream_&lt;dataset&gt;</code>, <code>de_tables_&lt;dataset&gt;</code></td>
+<td><code>run_dream()</code>, <code>dream_tables()</code></td>
+<td><code>dream()</code> + <code>eBayes()</code>, then every contrast’s and joint test’s full table</td>
+</tr>
+<tr class="odd">
+<td>limma comparison</td>
+<td><code>dupcor_&lt;dataset&gt;</code></td>
+<td><code>run_duplicate_correlation()</code> (<code>R/targets/variance_qc.R</code>)</td>
+<td>time courses: the same design with one genome-wide subject correlation</td>
+</tr>
+<tr class="even">
+<td>sample checks</td>
+<td><code>composition_&lt;dataset&gt;</code></td>
+<td><code>analyze_composition()</code> (<code>R/targets/composition.R</code>)</td>
+<td>composition scores, expression spread, PCs, technical reference, sex check, and the variance partition of these sample-level traits</td>
+</tr>
+<tr class="odd">
+<td>summaries</td>
+<td><code>vp_explore_&lt;dataset&gt;</code>, <code>vp_summary_&lt;dataset&gt;</code>, <code>variance_explore</code></td>
+<td><code>explore_variance()</code>, <code>combine_variance_explore()</code> (<code>R/targets/variance_explore.R</code>), <code>summarize_variance()</code></td>
+<td>per-gene categories and repeatability, shares over all genes, the factor-analysis genes and the top 8,000, by expression and variance rank, within-person change, time-driven genes across datasets</td>
+</tr>
+<tr class="even">
+<td>plots and tables</td>
+<td><code>vp_qc_&lt;dataset&gt;</code></td>
+<td><code>write_variance_qc()</code> (<code>R/targets/variance_qc.R</code>)</td>
+<td>the vignettes’ plots and CSV tables in <code>results/variance/&lt;dataset&gt;/</code></td>
+</tr>
+<tr class="odd">
+<td>factors</td>
+<td><code>factor_vp_&lt;method&gt;_&lt;dataset&gt;</code></td>
+<td><code>factor_variance_partition()</code> (<code>R/targets/variance_explore.R</code>)</td>
+<td>every fit’s factor scores through the same model (a subset: its parent’s design without subject and time)</td>
+</tr>
+<tr class="even">
+<td>database</td>
+<td><code>variance_files_&lt;dataset&gt;</code>, <code>db_&lt;dataset&gt;</code></td>
+<td><code>write_variance_artifacts()</code>, <code>variance_db_rows()</code> (<code>R/targets/variance_db.R</code>)</td>
+<td>the <code>variance_partition</code>, <code>de_results</code> and <code>composition</code> artifacts and the repeated-measures tables (see Database)</td>
+</tr>
+</tbody>
+</table>
+<p>To rebuild only this module, run the selection in Running the workflow (“Running the pipeline”); <code>R/explore/variance_by_time.R</code> plots the stored summaries interactively. Model tasks run on the <code>vp</code> controller (BiocParallel <code>MulticoreParam</code>, forked workers over its CPUs) and record their own peak memory and CPU time from the job’s cgroup.</p>
+</section>
+<section id="models" class="level3">
+<h3 class="anchored" data-anchor-id="models">Models</h3>
+<p>The models use each platform’s own processing, not the factor-analysis matrix (which is filtered to the top-variance genes), as the variancePartition vignettes recommend.</p>
+<ul>
+<li><strong>Variance partition</strong> (ML, as the vignette recommends for fractions): <code>~ (1|subject) + (1|time) + (1|group) + (1|group:time) + (1|categorical covariates) + numeric covariates</code>. Categorical variables are random effects; numeric covariates are standardized (a fraction, var(Xβ), doesn’t depend on scale; centring keeps a coefficient off the intercept, scaling keeps lme4 from refusing predictors on very different scales). The terms fall into categories: subject, subject-level (variables fixed within a person: sex, age, arm), time, group × time, technical (<code>vp_covariates</code>), covariate, residual. The between-subject total is subject + subject-level, as the vignette’s nesting note says; the residual fraction is reported but not used as a metric (the vignette’s FAQ).</li>
+<li><strong>dream</strong> (REML; Kenward-Roger for ≤ 20 samples, else Satterthwaite): <code>~ 0 + cell + (1|subject)</code> plus any <code>de_covariates</code>, <code>cell</code> = group × time. Time courses test each timepoint against the first within each group with at least 3 repeatedly sampled subjects, plus a joint F-test per group; cross-sectional datasets test group pairs. <code>z.std</code> and <code>F.std</code> make statistics comparable across genes with different degrees of freedom.</li>
+<li><strong>Checks:</strong> dream against <code>duplicateCorrelation()</code> (<code>dupcor_&lt;dataset&gt;</code>; the genome-wide consensus matches the median subject fraction), <code>canCorPairs()</code> between design variables, per-gene collinearity scores and singular-fit flags, and the vignettes’ plots (violin and per-gene bars, expression of each term’s top gene, correlation structure, contrast matrix, dream vs duplicateCorrelation p-values, voom trend).</li>
+</ul>
+</section>
+<section id="sample-checks" class="level3">
+<h3 class="anchored" data-anchor-id="sample-checks">Sample checks</h3>
+<p><code>analyze_composition()</code> (<code>composition_&lt;dataset&gt;</code>) records, per sample:</p>
+<ul>
+<li><strong>Leukocyte composition:</strong> neutrophil and lymphocyte marker scores (<code>config/composition_markers.yml</code>) and their difference, against each sample’s expression spread, location and leading principal components.</li>
+<li><strong>A technical reference:</strong> the array’s own control probes where the platform has them (ANEMONES’ Agilent spike-ins, the Affymetrix hybridization controls), a background stand-in for Illumina series matrices (probes matching no transcript), and library size and TMM factor for RNA-seq. The same sample-level traits also go through the dataset’s variance formula.</li>
+<li><strong>Sex:</strong> inferred from chrY genes against XIST and compared with the recorded sex; subjects whose samples disagree are counted. This catches sample annotations that don’t belong to their arrays.</li>
+</ul>
+<p>Findings (2026-10-13): in the RNA-seq time courses PC1 is the neutrophil-lymphocyte axis (|rho| 0.83–0.90), not library size. ANEMONES’ sample-mean shift follows its spike-in controls (rho 0.92), not composition, so its control probes’ first principal component enters its models as a covariate (<code>control_probes: {covariate: true}</code>): shifting each sample by a control offset over-corrected, because the controls move about twice as much as genes. GSE54514’s sample annotations don’t match its arrays (sex agreement 0.50; samples of one <code>group_id</code> disagree on sex in 35 of 54 subjects), so its subject and time results aren’t interpretable. Smaller sex discordances: ANEMONES (4 subjects), GSE95233 (Patient 198), GSE13904 and GSE273700 (1 subject each), EARLI (3 samples).</p>
+</section>
+<section id="what-the-variance-partition-says-about-repeated-measures" class="level3">
+<h3 class="anchored" data-anchor-id="what-the-variance-partition-says-about-repeated-measures">What the variance partition says about repeated measures</h3>
+<p>From <code>variance_explore</code> (2026-10-13; the numbers are in the DB’s <code>variance_summary</code>):</p>
+<ul>
+<li><strong>Time is a small part of the signal factorization sees.</strong> In the top 8,000 genes, time plus group × time is 1–4% of variance; between-subject is 35–60%; most of the remainder is within-person variation. Factors fit on a full time-course dataset are therefore mostly person-level structure, the same structure a single timepoint contains (median single-timepoint repeatability 0.25–0.5).</li>
+<li><strong>The main biological axis is a stable person trait.</strong> Leukocyte composition, which drives PC1 in the RNA-seq data, is 40–70% subject and about 0–7% time.</li>
+<li><strong>There is little within-person dynamics to recover.</strong> Change between a person’s samples shares no dominant direction (ROSE: its first principal component is 9% of the change) and isn’t explained by composition change; removing each person’s mean would leave factors fit mostly to noise. ROSE’s high residual share comes from noisy low-expressed genes (its subject share rises from 0.08 to 0.34 across expression quartiles).</li>
+</ul>
+<p>So the factor analysis fits the full datasets and every per-timepoint subset as they are, and handles repeated measures in how stability is measured and read:</p>
+<ul>
+<li><strong>Resampling keeps a person’s samples together</strong> (ICA’s bootstrap, above).</li>
+<li><strong>Within-family comparisons are not replication.</strong> A full dataset and its timepoint subsets, or two subsets, share people: their agreement measures temporal reproducibility within a cohort. Only comparisons between cohorts test replication.</li>
+<li><strong>Every factor is described by the same model</strong> (<code>factor_vp_&lt;method&gt;_&lt;dataset&gt;</code>, <code>factor_variance_partition()</code>): its sample scores go through the dataset’s variance formula, giving each factor’s share of between-person, time, group, technical and residual variance. A per-timepoint subset uses its parent’s design restricted to its samples, without subject and time terms.</li>
+</ul>
+
+
+</section>
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/cmatkhan\.github\.io\/sepsis_latent_factor_eda\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

@@ -1,0 +1,2664 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.10.19">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Database – Sepsis latent-factor stability</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<script src="site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="./index.html">
+    <span class="navbar-title">Sepsis latent-factor stability</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="./index.html"> 
+<span class="menu-text">Overview</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./setup.html"> 
+<span class="menu-text">Setup</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./data.html"> 
+<span class="menu-text">Data</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./methods.html"> 
+<span class="menu-text">Methods</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="./database.html" aria-current="page"> 
+<span class="menu-text">Database</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./workflow.html"> 
+<span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./app.html"> 
+<span class="menu-text">Launching the app</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./reference.html"> 
+<span class="menu-text">Function reference</span></a>
+  </li>  
+</ul>
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/cmatKhan/sepsis_latent_factor_eda"> <i class="bi bi-github" role="img" aria-label="GitHub">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#overview" id="toc-overview" class="nav-link active" data-scroll-target="#overview">Overview</a>
+  <ul class="collapse">
+  <li><a href="#design-notes" id="toc-design-notes" class="nav-link" data-scroll-target="#design-notes">Design notes</a></li>
+  </ul></li>
+  <li><a href="#conventions" id="toc-conventions" class="nav-link" data-scroll-target="#conventions">Conventions</a></li>
+  <li><a href="#dataset-level-tables" id="toc-dataset-level-tables" class="nav-link" data-scroll-target="#dataset-level-tables">Dataset-level tables</a>
+  <ul class="collapse">
+  <li><a href="#datasets" id="toc-datasets" class="nav-link" data-scroll-target="#datasets"><code>datasets</code></a></li>
+  <li><a href="#dataset_artifacts" id="toc-dataset_artifacts" class="nav-link" data-scroll-target="#dataset_artifacts"><code>dataset_artifacts</code></a></li>
+  <li><a href="#matrix_diagnostics" id="toc-matrix_diagnostics" class="nav-link" data-scroll-target="#matrix_diagnostics"><code>matrix_diagnostics</code></a></li>
+  </ul></li>
+  <li><a href="#method-and-fit-tables" id="toc-method-and-fit-tables" class="nav-link" data-scroll-target="#method-and-fit-tables">Method and fit tables</a>
+  <ul class="collapse">
+  <li><a href="#methods" id="toc-methods" class="nav-link" data-scroll-target="#methods"><code>methods</code></a></li>
+  <li><a href="#fits" id="toc-fits" class="nav-link" data-scroll-target="#fits"><code>fits</code></a></li>
+  <li><a href="#fit_params" id="toc-fit_params" class="nav-link" data-scroll-target="#fit_params"><code>fit_params</code></a></li>
+  <li><a href="#fit_metrics" id="toc-fit_metrics" class="nav-link" data-scroll-target="#fit_metrics"><code>fit_metrics</code></a></li>
+  <li><a href="#fit_artifacts" id="toc-fit_artifacts" class="nav-link" data-scroll-target="#fit_artifacts"><code>fit_artifacts</code></a></li>
+  <li><a href="#factors" id="toc-factors" class="nav-link" data-scroll-target="#factors"><code>factors</code></a></li>
+  </ul></li>
+  <li><a href="#pair-stability-tables" id="toc-pair-stability-tables" class="nav-link" data-scroll-target="#pair-stability-tables">Pair-stability tables</a>
+  <ul class="collapse">
+  <li><a href="#fit_pairs" id="toc-fit_pairs" class="nav-link" data-scroll-target="#fit_pairs"><code>fit_pairs</code></a></li>
+  <li><a href="#factor_matches" id="toc-factor_matches" class="nav-link" data-scroll-target="#factor_matches"><code>factor_matches</code></a></li>
+  <li><a href="#match_scores" id="toc-match_scores" class="nav-link" data-scroll-target="#match_scores"><code>match_scores</code></a></li>
+  <li><a href="#fit_pair_null" id="toc-fit_pair_null" class="nav-link" data-scroll-target="#fit_pair_null"><code>fit_pair_null</code></a></li>
+  <li><a href="#similarity_histograms" id="toc-similarity_histograms" class="nav-link" data-scroll-target="#similarity_histograms"><code>similarity_histograms</code></a></li>
+  </ul></li>
+  <li><a href="#wgcna-tables" id="toc-wgcna-tables" class="nav-link" data-scroll-target="#wgcna-tables">WGCNA tables</a>
+  <ul class="collapse">
+  <li><a href="#gene_modules" id="toc-gene_modules" class="nav-link" data-scroll-target="#gene_modules"><code>gene_modules</code></a></li>
+  <li><a href="#module_kme_summary" id="toc-module_kme_summary" class="nav-link" data-scroll-target="#module_kme_summary"><code>module_kme_summary</code></a></li>
+  <li><a href="#module_kme_histograms" id="toc-module_kme_histograms" class="nav-link" data-scroll-target="#module_kme_histograms"><code>module_kme_histograms</code></a></li>
+  <li><a href="#wgcna_sft" id="toc-wgcna_sft" class="nav-link" data-scroll-target="#wgcna_sft"><code>wgcna_sft</code></a></li>
+  <li><a href="#gene_significance" id="toc-gene_significance" class="nav-link" data-scroll-target="#gene_significance"><code>gene_significance</code></a></li>
+  </ul></li>
+  <li><a href="#ica-icasso-tables" id="toc-ica-icasso-tables" class="nav-link" data-scroll-target="#ica-icasso-tables">ICA / ICASSO tables</a>
+  <ul class="collapse">
+  <li><a href="#icasso_clusters" id="toc-icasso_clusters" class="nav-link" data-scroll-target="#icasso_clusters"><code>icasso_clusters</code></a></li>
+  <li><a href="#icasso_membership" id="toc-icasso_membership" class="nav-link" data-scroll-target="#icasso_membership"><code>icasso_membership</code></a></li>
+  </ul></li>
+  <li><a href="#enrichment-tables" id="toc-enrichment-tables" class="nav-link" data-scroll-target="#enrichment-tables">Enrichment tables</a>
+  <ul class="collapse">
+  <li><a href="#enrichment_queries" id="toc-enrichment_queries" class="nav-link" data-scroll-target="#enrichment_queries"><code>enrichment_queries</code></a></li>
+  <li><a href="#enrichment_results" id="toc-enrichment_results" class="nav-link" data-scroll-target="#enrichment_results"><code>enrichment_results</code></a></li>
+  </ul></li>
+  <li><a href="#cross-dataset-tables" id="toc-cross-dataset-tables" class="nav-link" data-scroll-target="#cross-dataset-tables">Cross-dataset tables</a>
+  <ul class="collapse">
+  <li><a href="#projections" id="toc-projections" class="nav-link" data-scroll-target="#projections"><code>projections</code></a></li>
+  <li><a href="#gene_space_agreement" id="toc-gene_space_agreement" class="nav-link" data-scroll-target="#gene_space_agreement"><code>gene_space_agreement</code></a></li>
+  </ul></li>
+  <li><a href="#representative-fit-analyses" id="toc-representative-fit-analyses" class="nav-link" data-scroll-target="#representative-fit-analyses">Representative-fit analyses</a>
+  <ul class="collapse">
+  <li><a href="#pattern_drivers" id="toc-pattern_drivers" class="nav-link" data-scroll-target="#pattern_drivers"><code>pattern_drivers</code></a></li>
+  <li><a href="#pattern-markers" id="toc-pattern-markers" class="nav-link" data-scroll-target="#pattern-markers">Pattern markers</a></li>
+  <li><a href="#fit_redundancy" id="toc-fit_redundancy" class="nav-link" data-scroll-target="#fit_redundancy"><code>fit_redundancy</code></a></li>
+  </ul></li>
+  <li><a href="#repeated-measures-tables" id="toc-repeated-measures-tables" class="nav-link" data-scroll-target="#repeated-measures-tables">Repeated-measures tables</a>
+  <ul class="collapse">
+  <li><a href="#dataset_design" id="toc-dataset_design" class="nav-link" data-scroll-target="#dataset_design"><code>dataset_design</code></a></li>
+  <li><a href="#samples" id="toc-samples" class="nav-link" data-scroll-target="#samples"><code>samples</code></a></li>
+  <li><a href="#variance_summary" id="toc-variance_summary" class="nav-link" data-scroll-target="#variance_summary"><code>variance_summary</code></a></li>
+  <li><a href="#variance_terms-variance_categories-variance_bins" id="toc-variance_terms-variance_categories-variance_bins" class="nav-link" data-scroll-target="#variance_terms-variance_categories-variance_bins"><code>variance_terms</code>, <code>variance_categories</code>, <code>variance_bins</code></a></li>
+  <li><a href="#trait_variance-composition_correlations" id="toc-trait_variance-composition_correlations" class="nav-link" data-scroll-target="#trait_variance-composition_correlations"><code>trait_variance</code>, <code>composition_correlations</code></a></li>
+  <li><a href="#de_contrasts" id="toc-de_contrasts" class="nav-link" data-scroll-target="#de_contrasts"><code>de_contrasts</code></a></li>
+  <li><a href="#factor_variance-factor_variance_models" id="toc-factor_variance-factor_variance_models" class="nav-link" data-scroll-target="#factor_variance-factor_variance_models"><code>factor_variance</code>, <code>factor_variance_models</code></a></li>
+  <li><a href="#variance_time_genes-time_gene_recurrence" id="toc-variance_time_genes-time_gene_recurrence" class="nav-link" data-scroll-target="#variance_time_genes-time_gene_recurrence"><code>variance_time_genes</code>, <code>time_gene_recurrence</code></a></li>
+  </ul></li>
+  <li><a href="#views-rdbviews.sql" id="toc-views-rdbviews.sql" class="nav-link" data-scroll-target="#views-rdbviews.sql">Views (<code>R/db/views.sql</code>)</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Database</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="overview" class="level2">
+<h2 class="anchored" data-anchor-id="overview">Overview</h2>
+<p>The pipeline writes a SQLite database at <code>db_path</code> in <code>config/pipeline.yml</code> (default <code>results/stability.sqlite</code>). Bulky results – loadings, scores, diagnostics, raw model objects, projections – are files under <code>stability_artifacts/&lt;dataset_id&gt;/</code> next to it, referenced by paths relative to the DB’s directory, so the two move together.</p>
+<p><strong>It is a derived output.</strong> Every row is rebuilt from the targets store; nothing is edited by hand and there are no migrations.</p>
+<ul>
+<li><code>db_&lt;dataset&gt;</code> (<code>write_dataset_db()</code>, <code>R/targets/db_write.R</code>) writes everything about one dataset in one transaction.</li>
+<li><code>db_cross_dataset</code> (<code>write_cross_dataset_db()</code>) then writes the tables linking two datasets (projections, gene-space agreement) and deletes artifact files no row references.</li>
+<li>Other targets produce rows keyed by <code>fit_key</code> (dataset + method + parameters); the writers resolve keys to integer ids. Fits are upserted on <code>fit_key</code>, so a fit keeps its <code>fit_id</code> across rewrites.</li>
+</ul>
+<p><strong>Schema versioning.</strong> The schema is <code>R/db/schema.sql</code> and <code>R/db/views.sql</code>; <code>open_stability_db()</code> (<code>R/db/connect.R</code>) creates them on a new file and stamps <code>PRAGMA user_version</code> with <code>SCHEMA_VERSION</code>. It refuses a DB with a different version. After any schema change, bump <code>SCHEMA_VERSION</code>, delete the DB and its <code>stability_artifacts/</code>, and run <code>tar_make()</code>; only the ingestion and DB targets rerun.</p>
+<p><strong>What it holds.</strong> The schema-1 build of 30 datasets (2026-10-05) had 7,990 fits in 3.6 GB; the largest tables were <code>match_scores</code> (8.9 M rows), <code>gene_modules</code> (3.3 M), <code>factor_matches</code> (3.0 M) and <code>enrichment_results</code> (2.1 M). Schema 2 moved the two bulkiest contents out of the tables: the enrichment gene lists (about 1.1 GB) and the pattern markers (4.6 M rows) are now per-dataset artifacts (<code>enrichment_genes</code>, <code>pattern_markers</code>).</p>
+<p><strong>Reading it.</strong> Open read-only from R with <code>DBI::dbConnect(RSQLite::SQLite(), path, flags = RSQLite::SQLITE_RO)</code>, or <code>sqlite3 -readonly</code>. Whole-table scans of the 3.6 GB file over the cluster’s network filesystem are slow from a login node; copy it to a compute node’s local disk for heavy queries.</p>
+<section id="design-notes" class="level3">
+<h3 class="anchored" data-anchor-id="design-notes">Design notes</h3>
+<ul>
+<li><strong>Stability without every cell.</strong> For each pair of fits of a method, factors are matched 1-to-1 (Hungarian algorithm on loadings cosine; on |cosine| for methods whose factors can flip sign). Rather than store every factor × factor similarity (85% of which were never read), the DB keeps the matches plus context to judge them: each match’s runner-up and margin, statistics of the unmatched similarities per fit pair, and pooled histograms.</li>
+<li><strong>WGCNA kME in context.</strong> For each gene, its correlation with its own module’s eigengene (kME), its best competing module, an analytic p-value, and an empirical p-value against a permutation null (each eigengene’s samples shuffled 100 times), with member / non-member / permutation summaries and histograms per module. The full genes × modules kME matrix is an artifact.</li>
+<li><strong>Everything computed is kept,</strong> including tables the app doesn’t read yet (pattern drivers, markers, redundancy, ICASSO membership, the diagnostics).</li>
+<li><strong>Method-specific values in long tables</strong> (<code>fit_params</code>, <code>fit_metrics</code>, <code>fit_artifacts</code>) rather than per-method columns.</li>
+<li><strong>Enrichment is stored separately from its jobs.</strong> Each enrichment branch keeps its result trimmed to the significant terms; rows are built afterwards, so changing these tables never reruns fgsea.</li>
+</ul>
+</section>
+</section>
+<section id="conventions" class="level2">
+<h2 class="anchored" data-anchor-id="conventions">Conventions</h2>
+<ul>
+<li><strong>Engine:</strong> SQLite. Column types are SQLite storage classes: <code>INTEGER</code>, <code>REAL</code>, <code>TEXT</code>.</li>
+<li><strong>Booleans</strong> are <code>INTEGER</code> with <code>CHECK (x IN (0,1))</code>.</li>
+<li><strong>Timestamps</strong> are <code>TEXT</code> in ISO-8601 UTC (<code>utc_now()</code>, e.g.&nbsp;<code>2026-10-05T16:13:15Z</code>).</li>
+<li><strong>Creation:</strong> the schema is defined in <code>R/db/schema.sql</code> (tables) and <code>R/db/views.sql</code> (views). <code>open_stability_db()</code> in <code>R/db/connect.R</code> creates them on a new DB and stamps <code>PRAGMA user_version</code>. An existing DB with a different version is refused; delete it and rebuild. There are no migrations.</li>
+<li><strong>Connection pragmas:</strong> <code>foreign_keys = ON</code>, <code>journal_mode = WAL</code>, <code>synchronous = NORMAL</code>, <code>busy_timeout = 30000</code>.</li>
+<li><strong>Who writes:</strong> the DB is written by two <code>deployment = "main"</code> targets only.
+<ul>
+<li><code>db_&lt;dataset&gt;</code>, via <code>write_dataset_db()</code> in <code>R/targets/db_write.R</code>, writes every table scoped to one dataset in a single transaction.</li>
+<li><code>db_cross_dataset</code>, via <code>write_cross_dataset_db()</code> in <code>R/targets/db_write.R</code>, writes the tables that link two datasets (<code>projections</code>, <code>gene_space_agreement</code>).</li>
+<li>Every other target computes in-memory rows keyed by <code>fit_key</code> (and <code>factor_index</code>). The writer resolves those keys to integer ids.</li>
+</ul></li>
+<li><strong>Update semantics:</strong>
+<ul>
+<li><code>datasets</code> and <code>fits</code> are upserted. <code>fits</code> is matched on <code>fit_key</code>, so a fit keeps its <code>fit_id</code> across rewrites.</li>
+<li>All child rows of a dataset are deleted and re-inserted on each write.</li>
+<li>Fits whose <code>fit_key</code> disappeared are deleted, and <code>ON DELETE CASCADE</code> removes their dependents.</li>
+</ul></li>
+<li><strong>Abbreviations below:</strong> <code>PK</code> primary key, <code>FK → t.c</code> foreign key, <code>CASCADE</code> = <code>ON DELETE CASCADE</code>, <code>UQ</code> part of a UNIQUE constraint, <code>NN</code> NOT NULL, <code>IDX</code> indexed.</li>
+</ul>
+</section>
+<section id="dataset-level-tables" class="level2">
+<h2 class="anchored" data-anchor-id="dataset-level-tables">Dataset-level tables</h2>
+<section id="datasets" class="level3">
+<h3 class="anchored" data-anchor-id="datasets"><code>datasets</code></h3>
+<p>One row per dataset (one input matrix and config, e.g.&nbsp;<code>EARLI</code>, <code>ANEMONES_DAY1</code>). It is the root of every cascade. Its metadata columns record how to interpret the sample/feature metadata files, which is what <code>dataset_metadata_sources</code> used to hold.</p>
+<ul>
+<li><strong>Rows from:</strong> the <code>meta_&lt;key&gt;</code> (dataset config, via <code>read_dataset_metadata()</code> in <code>R/lib/metadata.R</code>) and <code>mat_&lt;key&gt;</code> (dimensions) targets.</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code> (upsert).</li>
+</ul>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>description</td>
+<td>TEXT</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>n_samples</td>
+<td>INTEGER</td>
+<td>NN; columns of the analysed matrix</td>
+</tr>
+<tr class="even">
+<td>n_genes</td>
+<td>INTEGER</td>
+<td>NN; rows of the analysed matrix</td>
+</tr>
+<tr class="odd">
+<td>sample_id_col</td>
+<td>TEXT</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>feature_id_col</td>
+<td>TEXT</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>ensembl_col</td>
+<td>TEXT</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>symbol_col</td>
+<td>TEXT</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>subject_id_col</td>
+<td>TEXT</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>sample_metadata_source</td>
+<td>TEXT</td>
+<td>original parquet path (provenance)</td>
+</tr>
+<tr class="odd">
+<td>feature_metadata_source</td>
+<td>TEXT</td>
+<td>original parquet path (provenance)</td>
+</tr>
+<tr class="even">
+<td>written_at</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="dataset_artifacts" class="level3">
+<h3 class="anchored" data-anchor-id="dataset_artifacts"><code>dataset_artifacts</code></h3>
+<p>Paths, relative to the DB directory, of the files cached for a dataset. <code>kind</code> is the file name without <code>.rds</code>.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>kind</th>
+<th>Contents</th>
+<th>Written by</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>matrix</td>
+<td>the analysed (factor-analysis) matrix</td>
+<td><code>matrix_file_&lt;key&gt;</code> (<code>R/targets/projections.R::dataset_matrix_file()</code>)</td>
+</tr>
+<tr class="even">
+<td>sample_metadata, feature_metadata</td>
+<td>the metadata as base-R data frames (read back without arrow)</td>
+<td><code>metadata_files_&lt;key&gt;</code> (<code>R/targets/diagnostics.R::write_metadata_files()</code>)</td>
+</tr>
+<tr class="odd">
+<td>variance_partition</td>
+<td>per-gene variance fractions, absolute variances, fit flags (singular, collinearity), the gene table and <code>explore_variance()</code>’s per-gene summary (categories, repeatability, factor-analysis-gene flag)</td>
+<td><code>variance_files_&lt;key&gt;</code> (<code>R/targets/variance_db.R::write_variance_artifacts()</code>)</td>
+</tr>
+<tr class="even">
+<td>de_results</td>
+<td>every dream contrast and joint test as a full topTable (logFC, t, z.std, F, F.std, p-values)</td>
+<td><code>variance_files_&lt;key&gt;</code></td>
+</tr>
+<tr class="odd">
+<td>composition</td>
+<td><code>analyze_composition()</code> whole: per-sample traits, markers, PCs, correlations, trait variance partition, sex check</td>
+<td><code>variance_files_&lt;key&gt;</code></td>
+</tr>
+<tr class="even">
+<td>enrichment_genes</td>
+<td>each enrichment result’s overlap or leading-edge genes (fit_key, factor_index, query_type, direction, term_id, genes as JSON)</td>
+<td><code>factor_gene_files_&lt;key&gt;</code> (<code>write_factor_gene_artifacts()</code>)</td>
+</tr>
+<tr class="odd">
+<td>pattern_markers</td>
+<td>each representative fit’s marker genes and scores (fit_key, factor_index, gene, score)</td>
+<td><code>factor_gene_files_&lt;key&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK (with kind); FK → datasets.dataset_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>kind</td>
+<td>TEXT</td>
+<td>PK (with dataset_id); CHECK IN the kinds above</td>
+</tr>
+<tr class="odd">
+<td>path</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="matrix_diagnostics" class="level3">
+<h3 class="anchored" data-anchor-id="matrix_diagnostics"><code>matrix_diagnostics</code></h3>
+<p>One row of sanity statistics per dataset for the analysed matrix: scale, skew/kurtosis, conditioning and so on.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>matrix_diagnostics_&lt;key&gt;</code> (<code>R/targets/diagnostics.R::matrix_diagnostics_row()</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK; FK → datasets.dataset_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>val_min</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>val_max</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>val_mean</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>val_sd</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>skew_p50</td>
+<td>REAL</td>
+<td>median per-gene skewness</td>
+</tr>
+<tr class="odd">
+<td>skew_p95</td>
+<td>REAL</td>
+<td>95th percentile per-gene skewness</td>
+</tr>
+<tr class="even">
+<td>kurtosis_p50</td>
+<td>REAL</td>
+<td>median per-gene kurtosis</td>
+</tr>
+<tr class="odd">
+<td>kurtosis_p95</td>
+<td>REAL</td>
+<td>95th percentile per-gene kurtosis</td>
+</tr>
+<tr class="even">
+<td>min_singular_value</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>max_singular_value</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>condition_number</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>max_sample_cor</td>
+<td>REAL</td>
+<td>largest off-diagonal sample–sample correlation (duplicate check)</td>
+</tr>
+<tr class="even">
+<td>computed_at</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+<p><em>(<code>n_genes</code> and <code>n_samples</code> moved to <code>datasets</code>.)</em></p>
+</section>
+</section>
+<section id="method-and-fit-tables" class="level2">
+<h2 class="anchored" data-anchor-id="method-and-fit-tables">Method and fit tables</h2>
+<section id="methods" class="level3">
+<h3 class="anchored" data-anchor-id="methods"><code>methods</code></h3>
+<p>One row per method registry (<code>R/methods/&lt;method&gt;.R</code>). It holds the method properties that code used to hardcode (<code>PARAM_GRID_METHODS</code>, <code>SIGN_AMBIGUOUS_METHODS</code>, method lists), so queries can filter on them.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>METHOD_MANIFEST</code> (<code>R/lib/method_registry.R::discover_method_registries()</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code> (upsert on <code>method</code>).</li>
+</ul>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>method</td>
+<td>TEXT</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>family</td>
+<td>TEXT</td>
+<td>NN; CHECK IN (‘seed_sweep’,‘param_grid’)</td>
+</tr>
+<tr class="odd">
+<td>sign_ambiguous</td>
+<td>INTEGER</td>
+<td>NN; boolean</td>
+</tr>
+<tr class="even">
+<td>has_loadings</td>
+<td>INTEGER</td>
+<td>NN; boolean (0 for WGCNA)</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="fits" class="level3">
+<h3 class="anchored" data-anchor-id="fits"><code>fits</code></h3>
+<p>One row per fitted model, i.e.&nbsp;one row of a method’s parameter grid for one dataset. Failed fits are recorded too, with <code>status = 'failed'</code> and the error message.</p>
+<ul>
+<li><code>fit_key</code> is <code>&lt;method&gt;_&lt;hash&gt;</code>, the hash covering the dataset id, the method and the grid row’s parameters, excluding <code>tar_group</code> and the method’s <code>resource_params</code> (<code>R/targets/ingest.R::fit_key()</code>). It is the stable identity shared with the artifact file names, and it is unique across datasets.</li>
+<li><code>fit_id</code> is the compact integer used in joins.</li>
+<li><strong>Rows from:</strong> <code>ingest_&lt;method&gt;_&lt;key&gt;</code> (<code>R/targets/ingest.R::ingest_method_fits()</code>, which calls the method’s <code>&lt;method&gt;_ingest$extract()</code> in <code>R/methods/&lt;method&gt;.R</code>). A fit that errored at fit time, or an sPCA fit stopped at its time limit (<code>error</code> = “killed_not_converged …”), is a failed row. <code>representative</code> is set from <code>representatives_&lt;method&gt;_&lt;key&gt;</code> (<code>R/targets/ingest.R::representative_keys()</code>; sPCA from <code>selection_spca_&lt;key&gt;</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code> (upsert on <code>fit_key</code>).</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>fit_key</td>
+<td>TEXT</td>
+<td>NN; UNIQUE</td>
+</tr>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>NN; FK → datasets.dataset_id CASCADE; IDX (dataset_id, method, rank)</td>
+</tr>
+<tr class="even">
+<td>method</td>
+<td>TEXT</td>
+<td>NN; FK → methods.method</td>
+</tr>
+<tr class="odd">
+<td>rank</td>
+<td>INTEGER</td>
+<td>number of factors requested (NULL for WGCNA)</td>
+</tr>
+<tr class="even">
+<td>seed</td>
+<td>INTEGER</td>
+<td>NULL for deterministic methods</td>
+</tr>
+<tr class="odd">
+<td>bootstrap</td>
+<td>INTEGER</td>
+<td>NN; DEFAULT 0; boolean (ICA ICASSO resamples)</td>
+</tr>
+<tr class="even">
+<td>representative</td>
+<td>INTEGER</td>
+<td>NN; DEFAULT 0; boolean</td>
+</tr>
+<tr class="odd">
+<td>mse</td>
+<td>REAL</td>
+<td>reconstruction MSE on the method’s input matrix; NULL if not defined (sPCA)</td>
+</tr>
+<tr class="even">
+<td>n_factors</td>
+<td>INTEGER</td>
+<td>realized factors (WGCNA: non-zero modules)</td>
+</tr>
+<tr class="odd">
+<td>status</td>
+<td>TEXT</td>
+<td>NN; CHECK IN (‘ok’,‘failed’)</td>
+</tr>
+<tr class="even">
+<td>error</td>
+<td>TEXT</td>
+<td>error message when status = ‘failed’ (including “killed_not_converged” for sPCA fits stopped at <code>max_hours</code>)</td>
+</tr>
+<tr class="odd">
+<td>written_at</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="fit_params" class="level3">
+<h3 class="anchored" data-anchor-id="fit_params"><code>fit_params</code></h3>
+<p>Every parameter of a fit’s grid row as a long table, replacing the overloaded <code>alpha</code> column and the parameters dropped by the current schema. Examples: sPCA <code>para</code>, <code>lambda</code>; WGCNA <code>power</code>, <code>minModuleSize</code>, <code>networkType</code>; ICA <code>alpha</code>; CoGAPS <code>nIterations</code>. Resource settings (<code>n.threads</code>, <code>nThreads</code>, <code>nSets</code>) are excluded.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>ingest_&lt;method&gt;_&lt;key&gt;</code> (<code>ingest_method_fits()</code>, from the registry <code>extract()</code> <code>params</code> field).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>PK (with name); FK → fits.fit_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>name</td>
+<td>TEXT</td>
+<td>PK (with fit_id); the tool’s own argument name</td>
+</tr>
+<tr class="odd">
+<td>num_value</td>
+<td>REAL</td>
+<td>set when the value is numeric</td>
+</tr>
+<tr class="even">
+<td>text_value</td>
+<td>TEXT</td>
+<td>set when the value is character/logical</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="fit_metrics" class="level3">
+<h3 class="anchored" data-anchor-id="fit_metrics"><code>fit_metrics</code></h3>
+<p>Method-specific scalar results for a fit: - every method: <code>fit_seconds</code> (fit wall time). - sPCA: <code>pev_sparse</code>, <code>iterations</code> (last value spca()’s trace printed, within 10), <code>converged</code> (0 when <code>max.iter</code> was reached or the fit was stopped at <code>max_hours</code>), plus <code>pev_pca</code>, <code>prop_sparse</code>, <code>index_of_sparseness</code>, <code>is_selected</code>, <code>hit_max_iter</code> and <code>at_scan_edge</code> from the Index-of-Sparseness table. - NMF: <code>n_iteration</code>, <code>target_loss</code>, <code>average_epochs</code>, <code>run_seconds</code>. - CoGAPS: <code>mean_chisq</code>. - ICA: <code>orthonormality_residual</code> (‖W Wᵀ − I‖), <code>prewhiten_var_retained</code>. - WGCNA: <code>n_blocks</code> (1 when the network was built in one block), <code>n_unassigned</code>, <code>scale_free_r2</code> and <code>mean_k</code> (scale-free fit and mean connectivity at the fit’s power).</p>
+<ul>
+<li><strong>Rows from:</strong> <code>ingest_&lt;method&gt;_&lt;key&gt;</code> (<code>&lt;method&gt;_ingest$extract()</code> <code>metrics</code>), plus <code>selection_spca_&lt;key&gt;</code> (<code>R/methods/spca.R::spca_select_fits()</code>) for the IS columns.</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>PK (with name); FK → fits.fit_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>name</td>
+<td>TEXT</td>
+<td>PK (with fit_id)</td>
+</tr>
+<tr class="odd">
+<td>value</td>
+<td>REAL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="fit_artifacts" class="level3">
+<h3 class="anchored" data-anchor-id="fit_artifacts"><code>fit_artifacts</code></h3>
+<p>Paths, relative to the DB directory, of the per-fit files that hold the bulky results. Replaces the nine <code>*_file</code> columns on <code>fits</code>.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>kind</th>
+<th>Contents</th>
+<th>Methods</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>loadings</td>
+<td>genes × factors matrix</td>
+<td>all except WGCNA</td>
+</tr>
+<tr class="even">
+<td>scores</td>
+<td>samples × factors (WGCNA: eigengenes)</td>
+<td>all</td>
+</tr>
+<tr class="odd">
+<td>diag</td>
+<td>method diagnostics list (PCA <code>sdev</code>/<code>center</code>/<code>mse_by_rank</code>; sPCA <code>pev</code>/<code>var_all</code>/<code>n_nonzero</code>/<code>center</code>/<code>trace</code> + the rest of <code>spca()</code>’s output; ICA <code>W</code>/<code>K</code>/<code>A</code>/<code>S</code> (rows named by sample)/prewhitening rotation/<code>boot_idx</code>/<code>boot_subjects</code>; CoGAPS SD matrices; NMF traces; WGCNA per-gene <code>connectivity</code>, <code>scale_free</code>, <code>gsg</code>)</td>
+<td>per method</td>
+</tr>
+<tr class="even">
+<td>raw</td>
+<td>full native result object</td>
+<td>CoGAPS (<code>CogapsResult</code>), WGCNA (<code>blockwiseModules()</code> output)</td>
+</tr>
+<tr class="odd">
+<td>dendrogram</td>
+<td>the gene tree the modules were cut from (<code>net$dendrograms[[1]]</code>; hclust pieces)</td>
+<td>WGCNA (single block)</td>
+</tr>
+<tr class="even">
+<td>redundancy</td>
+<td>K × K within-fit cosine matrix</td>
+<td>nmf, cogaps, spca, ica (representatives)</td>
+</tr>
+<tr class="odd">
+<td>kme</td>
+<td>full genes × modules kME matrix</td>
+<td>WGCNA</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Rows from:</strong> <code>ingest_&lt;method&gt;_&lt;key&gt;</code> (loadings, scores, diag, raw, dendrogram), <code>redundancy_&lt;method&gt;_&lt;key&gt;</code> (redundancy), and <code>wgcna_fit_diag_&lt;key&gt;</code> (kme, via <code>R/targets/diagnostics.R::wgcna_fit_diagnostics()</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>PK (with kind); FK → fits.fit_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>kind</td>
+<td>TEXT</td>
+<td>PK (with fit_id); CHECK IN (‘loadings’,‘scores’,‘diag’,‘raw’,‘dendrogram’,‘redundancy’,‘kme’)</td>
+</tr>
+<tr class="odd">
+<td>path</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="factors" class="level3">
+<h3 class="anchored" data-anchor-id="factors"><code>factors</code></h3>
+<p>One row per latent factor of a fit: a component or pattern, or for WGCNA a non-zero module.</p>
+<ul>
+<li>Per-factor stability is the median matched |similarity| across same-rank fit pairs, per metric.</li>
+<li>ICA kurtosis lives here, replacing <code>ica_component_kurtosis</code>.</li>
+<li><strong>Rows from:</strong> <code>ingest_&lt;method&gt;_&lt;key&gt;</code> (factor list and <code>factor_metrics</code>: kurtosis, n_genes), plus <code>pairs_&lt;method&gt;_&lt;key&gt;</code> (stability; <code>R/lib/ingest/pairs.R::factor_stability()</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>factor_id</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>NN; FK → fits.fit_id CASCADE; UQ (fit_id, factor_index)</td>
+</tr>
+<tr class="odd">
+<td>factor_index</td>
+<td>INTEGER</td>
+<td>NN; column position (WGCNA: module number)</td>
+</tr>
+<tr class="even">
+<td>label</td>
+<td>TEXT</td>
+<td>display label (e.g.&nbsp;<code>PC3</code>, <code>Pattern_2</code>, <code>ME5</code>)</td>
+</tr>
+<tr class="odd">
+<td>n_genes</td>
+<td>INTEGER</td>
+<td>genes in the WGCNA module / sPCA non-zero loadings; NULL otherwise</td>
+</tr>
+<tr class="even">
+<td>stability_cosine</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>stability_pearson</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>stability_spearman</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>kurtosis</td>
+<td>REAL</td>
+<td>ICA only</td>
+</tr>
+<tr class="even">
+<td>excess_kurtosis</td>
+<td>REAL</td>
+<td>ICA only</td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="pair-stability-tables" class="level2">
+<h2 class="anchored" data-anchor-id="pair-stability-tables">Pair-stability tables</h2>
+<p>Stability compares every pair of fits of one method within a dataset (all seeds, all ranks).</p>
+<ul>
+<li>Factor methods use Hungarian matching on loadings cosine (on |cosine| for sign-ambiguous methods). WGCNA matches modules by gene Jaccard.</li>
+<li>Instead of storing every factor × factor cell, the DB stores the matches plus enough unmatched-cell context (runner-up, null stats, histograms) to judge each match.</li>
+<li>Statistics over unmatched cells use |value|.</li>
+<li><strong>Rows from:</strong> <code>pairs_&lt;method&gt;_&lt;key&gt;</code> (<code>R/targets/ingest.R::compute_method_pairs()</code>, which calls <code>R/lib/ingest/pairs.R::compute_factor_pairs()</code> or <code>compute_wgcna_pairs()</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<section id="fit_pairs" class="level3">
+<h3 class="anchored" data-anchor-id="fit_pairs"><code>fit_pairs</code></h3>
+<p>One row per compared pair of fits of the same method and dataset, stored once with <code>fit_a &lt; fit_b</code>.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_pair_id</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>fit_a</td>
+<td>INTEGER</td>
+<td>NN; FK → fits.fit_id CASCADE; UQ (fit_a, fit_b)</td>
+</tr>
+<tr class="odd">
+<td>fit_b</td>
+<td>INTEGER</td>
+<td>NN; FK → fits.fit_id CASCADE; IDX; CHECK (fit_a &lt; fit_b)</td>
+</tr>
+<tr class="even">
+<td>same_rank</td>
+<td>INTEGER</td>
+<td>NN; boolean</td>
+</tr>
+<tr class="odd">
+<td>n_factors_a</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>n_factors_b</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+<tr class="odd">
+<td>ari</td>
+<td>REAL</td>
+<td>WGCNA only: adjusted Rand index of the module assignments</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="factor_matches" class="level3">
+<h3 class="anchored" data-anchor-id="factor_matches"><code>factor_matches</code></h3>
+<p>One row per Hungarian-matched factor pair within a fit pair: min(n_factors_a, n_factors_b) rows per fit pair.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>match_id</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>fit_pair_id</td>
+<td>INTEGER</td>
+<td>NN; FK → fit_pairs.fit_pair_id CASCADE; UQ (fit_pair_id, factor_a)</td>
+</tr>
+<tr class="odd">
+<td>factor_a</td>
+<td>INTEGER</td>
+<td>NN; FK → factors.factor_id CASCADE; IDX</td>
+</tr>
+<tr class="even">
+<td>factor_b</td>
+<td>INTEGER</td>
+<td>NN; FK → factors.factor_id CASCADE; IDX</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="match_scores" class="level3">
+<h3 class="anchored" data-anchor-id="match_scores"><code>match_scores</code></h3>
+<p>The similarity of a matched pair under each metric, with its runner-up context.</p>
+<ul>
+<li><code>runner_up</code> is the largest |value| among the unmatched cells in factor_a’s row and factor_b’s column.</li>
+<li><code>margin</code> = |value| − runner_up. Positive means the match is clearly better than any alternative.</li>
+<li>Metrics: cosine, pearson and spearman for factor methods; jaccard for WGCNA.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>match_id</td>
+<td>INTEGER</td>
+<td>PK (with metric); FK → factor_matches.match_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>metric</td>
+<td>TEXT</td>
+<td>PK (with match_id); CHECK IN (‘cosine’,‘pearson’,‘spearman’,‘jaccard’)</td>
+</tr>
+<tr class="odd">
+<td>value</td>
+<td>REAL</td>
+<td>NN; signed</td>
+</tr>
+<tr class="even">
+<td>runner_up</td>
+<td>REAL</td>
+<td>NULL when the fit pair has no unmatched cell in that row/column</td>
+</tr>
+<tr class="odd">
+<td>margin</td>
+<td>REAL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="fit_pair_null" class="level3">
+<h3 class="anchored" data-anchor-id="fit_pair_null"><code>fit_pair_null</code></h3>
+<p>Background (“null”) distribution of the unmatched cells of one fit pair under one metric: the similarity level a non-match reaches.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_pair_id</td>
+<td>INTEGER</td>
+<td>PK (with metric); FK → fit_pairs.fit_pair_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>metric</td>
+<td>TEXT</td>
+<td>PK (with fit_pair_id); CHECK IN (‘cosine’,‘pearson’,‘spearman’,‘jaccard’)</td>
+</tr>
+<tr class="odd">
+<td>n</td>
+<td>INTEGER</td>
+<td>NN; number of unmatched cells</td>
+</tr>
+<tr class="even">
+<td>mean</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>sd</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>median</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>p95</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>max</td>
+<td>REAL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="similarity_histograms" class="level3">
+<h3 class="anchored" data-anchor-id="similarity_histograms"><code>similarity_histograms</code></h3>
+<p>Fixed-bin histograms (20 bins over |value| in [0, 1]) of matched and unmatched cells, pooled over all fit pairs of a method at one pair of levels.</p>
+<ul>
+<li><code>level</code> is <code>rank</code> for factor methods and <code>power</code> for WGCNA, with <code>level_a &lt;= level_b</code>.</li>
+<li>These are the plotted distributions behind <code>fit_pair_null</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK (all of: dataset_id, method, level_a, level_b, metric, bin); FK → datasets.dataset_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>method</td>
+<td>TEXT</td>
+<td>PK; FK → methods.method</td>
+</tr>
+<tr class="odd">
+<td>level_a</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>level_b</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="odd">
+<td>metric</td>
+<td>TEXT</td>
+<td>PK; CHECK IN (‘cosine’,‘pearson’,‘spearman’,‘jaccard’)</td>
+</tr>
+<tr class="even">
+<td>bin</td>
+<td>INTEGER</td>
+<td>PK; 1–20</td>
+</tr>
+<tr class="odd">
+<td>bin_lo</td>
+<td>REAL</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>bin_hi</td>
+<td>REAL</td>
+<td>NN</td>
+</tr>
+<tr class="odd">
+<td>n_matched</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>n_unmatched</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="wgcna-tables" class="level2">
+<h2 class="anchored" data-anchor-id="wgcna-tables">WGCNA tables</h2>
+<section id="gene_modules" class="level3">
+<h3 class="anchored" data-anchor-id="gene_modules"><code>gene_modules</code></h3>
+<p>One row per gene per WGCNA fit: its module assignment (0 = unassigned) and its own-module kME, with context.</p>
+<ul>
+<li><code>next_module</code> / <code>kme_next</code> are the gene’s best competing module.</li>
+<li><code>p_analytic</code> is the Fisher-z p-value of <code>kme_own</code> with n = <code>datasets.n_samples</code>, as in <code>WGCNA::corPvalueStudent</code>.</li>
+<li><code>p_perm</code> is the empirical p-value of <code>kme_own</code> against the module’s permutation null (see <code>module_kme_summary</code>).</li>
+<li>The full genes × modules kME matrix is the fit’s <code>kme</code> artifact.</li>
+<li><strong>Rows from:</strong> <code>wgcna_fit_diag_&lt;key&gt;</code>, a dynamic branch per WGCNA fit (<code>R/targets/diagnostics.R::wgcna_fit_diagnostics()</code>). The module assignment comes from <code>ingest_wgcna_&lt;key&gt;</code>.</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>PK (with gene); FK → fits.fit_id CASCADE; IDX (fit_id, module)</td>
+</tr>
+<tr class="even">
+<td>gene</td>
+<td>TEXT</td>
+<td>PK (with fit_id)</td>
+</tr>
+<tr class="odd">
+<td>module</td>
+<td>INTEGER</td>
+<td>NN; 0 = unassigned</td>
+</tr>
+<tr class="even">
+<td>kme_own</td>
+<td>REAL</td>
+<td>NULL for module 0</td>
+</tr>
+<tr class="odd">
+<td>next_module</td>
+<td>INTEGER</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>kme_next</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>margin</td>
+<td>REAL</td>
+<td>kme_own − kme_next</td>
+</tr>
+<tr class="even">
+<td>p_analytic</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>p_perm</td>
+<td>REAL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module_kme_summary" class="level3">
+<h3 class="anchored" data-anchor-id="module_kme_summary"><code>module_kme_summary</code></h3>
+<p>Summary of kME against one module’s eigengene, for three groups: - <code>member</code>: genes in the module; - <code>nonmember</code>: all other genes, the empirical background; - <code>permutation</code>: all genes against <code>n_perm</code> sample-shuffled copies of the eigengene (the permutation null; default 100 permutations, seeded from <code>fit_key</code>).</p>
+<ul>
+<li><strong>Rows from:</strong> <code>wgcna_fit_diag_&lt;key&gt;</code> (<code>wgcna_fit_diagnostics()</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>PK (with module, grp); FK → fits.fit_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>module</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="odd">
+<td>grp</td>
+<td>TEXT</td>
+<td>PK; CHECK IN (‘member’,‘nonmember’,‘permutation’)</td>
+</tr>
+<tr class="even">
+<td>n</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+<tr class="odd">
+<td>mean</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>sd</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>median</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>p95</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>p99</td>
+<td>REAL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module_kme_histograms" class="level3">
+<h3 class="anchored" data-anchor-id="module_kme_histograms"><code>module_kme_histograms</code></h3>
+<p>Fixed-bin kME histograms (40 bins on [−1, 1]) for the same three groups, used to plot a gene’s kME against its context.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>wgcna_fit_diag_&lt;key&gt;</code>.</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>PK (with module, grp, bin); FK → fits.fit_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>module</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="odd">
+<td>grp</td>
+<td>TEXT</td>
+<td>PK; CHECK IN (‘member’,‘nonmember’,‘permutation’)</td>
+</tr>
+<tr class="even">
+<td>bin</td>
+<td>INTEGER</td>
+<td>PK; 1–40</td>
+</tr>
+<tr class="odd">
+<td>bin_lo</td>
+<td>REAL</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>bin_hi</td>
+<td>REAL</td>
+<td>NN</td>
+</tr>
+<tr class="odd">
+<td>count</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="wgcna_sft" class="level3">
+<h3 class="anchored" data-anchor-id="wgcna_sft"><code>wgcna_sft</code></h3>
+<p>Dataset-level scale-free-topology fit (<code>WGCNA::pickSoftThreshold</code>) per candidate power, used to choose the soft-thresholding power.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>wgcna_dataset_diag_&lt;key&gt;</code> (<code>R/targets/diagnostics.R::wgcna_dataset_diagnostics()</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK (with power); FK → datasets.dataset_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>power</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="odd">
+<td>sft_r_sq</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>slope</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>truncated_r_sq</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>mean_k</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>median_k</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>max_k</td>
+<td>REAL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="gene_significance" class="level3">
+<h3 class="anchored" data-anchor-id="gene_significance"><code>gene_significance</code></h3>
+<p>Per-gene association with each sample-metadata field: Spearman for numeric fields, Kruskal–Wallis for categorical ones. Used for WGCNA gene-significance vs kME views.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>wgcna_dataset_diag_&lt;key&gt;</code> (<code>wgcna_dataset_diagnostics()</code>), using <code>sample_meta_&lt;key&gt;</code>.</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK (with field, gene); FK → datasets.dataset_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>field</td>
+<td>TEXT</td>
+<td>PK; sample-metadata column</td>
+</tr>
+<tr class="odd">
+<td>gene</td>
+<td>TEXT</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>test</td>
+<td>TEXT</td>
+<td>NN; CHECK IN (‘spearman’,‘kruskal’)</td>
+</tr>
+<tr class="odd">
+<td>statistic</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>p_value</td>
+<td>REAL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="ica-icasso-tables" class="level2">
+<h2 class="anchored" data-anchor-id="ica-icasso-tables">ICA / ICASSO tables</h2>
+<p>ICASSO clusters the components of all ICA fits (seeds and bootstrap resamples) at one rank, to assess which components recur.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>icasso_ica_&lt;key&gt;</code> (<code>R/targets/ingest.R::compute_method_icasso()</code>, which calls <code>R/lib/ingest/icasso.R</code>). That target also writes the dendrogram file with <code>fit_key</code> leaf labels.</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<section id="icasso_clusters" class="level3">
+<h3 class="anchored" data-anchor-id="icasso_clusters"><code>icasso_clusters</code></h3>
+<p>One row per ICASSO cluster at a rank.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK (with rank, cluster_id); FK → datasets.dataset_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>rank</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="odd">
+<td>cluster_id</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>iq</td>
+<td>REAL</td>
+<td>cluster quality index (Iq)</td>
+</tr>
+<tr class="odd">
+<td>n_members</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>centrotype_factor_id</td>
+<td>INTEGER</td>
+<td>FK → factors.factor_id CASCADE</td>
+</tr>
+<tr class="odd">
+<td>dendro_file</td>
+<td>TEXT</td>
+<td>relative path of the rank’s dendrogram (same value on each row of a rank)</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="icasso_membership" class="level3">
+<h3 class="anchored" data-anchor-id="icasso_membership"><code>icasso_membership</code></h3>
+<p>Which ICASSO cluster each ICA component belongs to at its rank.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>factor_id</td>
+<td>INTEGER</td>
+<td>PK; FK → factors.factor_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>NN; FK (with rank, cluster_id) → icasso_clusters CASCADE</td>
+</tr>
+<tr class="odd">
+<td>rank</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>cluster_id</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+<tr class="odd">
+<td>intra_sim</td>
+<td>REAL</td>
+<td>the component’s mean |cosine| to the other members of its cluster</td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="enrichment-tables" class="level2">
+<h2 class="anchored" data-anchor-id="enrichment-tables">Enrichment tables</h2>
+<section id="enrichment_queries" class="level3">
+<h3 class="anchored" data-anchor-id="enrichment_queries"><code>enrichment_queries</code></h3>
+<p>One row per enrichment query run for a factor: which test, and which gene direction.</p>
+<ul>
+<li>GSEA-type queries (<code>fgsea</code>, <code>gsea</code>) use <code>direction = 'both'</code>; a hit’s sign comes from its NES.</li>
+<li>ORA-type queries are per direction.</li>
+<li><strong>Rows from:</strong> <code>fgsea_&lt;method&gt;_&lt;key&gt;</code> (runs <code>R/ingest_jobs/fgsea_job.R</code>) and <code>wgcna_ora_&lt;key&gt;</code> (runs <code>R/ingest_jobs/wgcna_ora_job.R</code>), each branch storing its job’s result trimmed to the significant terms (<code>R/targets/enrichment.R::trim_enrichment_result()</code>). <code>enrichment_&lt;key&gt;</code> (<code>enrichment_rows()</code>) turns them into rows, so a change to these tables never reruns the jobs.</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>query_id</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>factor_id</td>
+<td>INTEGER</td>
+<td>NN; FK → factors.factor_id CASCADE; UQ (factor_id, query_type, direction)</td>
+</tr>
+<tr class="odd">
+<td>query_type</td>
+<td>TEXT</td>
+<td>NN; ‘fgsea’ (Hallmark GSEA), ‘gsea’ (GSEA against the other collections), ‘cogaps_fora’ (CoGAPS marker-gene ORA), ‘ora’ (top-100-gene ORA; WGCNA module ORA)</td>
+</tr>
+<tr class="even">
+<td>direction</td>
+<td>TEXT</td>
+<td>NN; CHECK IN (‘pos’,‘neg’,‘both’)</td>
+</tr>
+<tr class="odd">
+<td>query_size</td>
+<td>INTEGER</td>
+<td>genes in the query set (ORA) / ranked list length (GSEA)</td>
+</tr>
+<tr class="even">
+<td>queried_at</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="enrichment_results" class="level3">
+<h3 class="anchored" data-anchor-id="enrichment_results"><code>enrichment_results</code></h3>
+<p>One row per enriched term for a query. ORA-only and GSEA-only columns are NULL for the other type.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>query_id</td>
+<td>INTEGER</td>
+<td>PK (with term_id); FK → enrichment_queries.query_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>term_id</td>
+<td>TEXT</td>
+<td>PK</td>
+</tr>
+<tr class="odd">
+<td>source</td>
+<td>TEXT</td>
+<td>NN; MSigDB collection: ‘HALLMARK’, ‘GO:BP’, ‘GO:MF’, ‘KEGG’, ‘REAC’ or ‘WP’</td>
+</tr>
+<tr class="even">
+<td>term_name</td>
+<td>TEXT</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>p_value</td>
+<td>REAL</td>
+<td>NN; fgsea’s BH-adjusted p (<code>padj</code>); only terms with padj &lt; 0.05 are stored; IDX (query_id, p_value)</td>
+</tr>
+<tr class="even">
+<td>intersection_size</td>
+<td>INTEGER</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>term_size</td>
+<td>INTEGER</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>nes</td>
+<td>REAL</td>
+<td>GSEA only</td>
+</tr>
+<tr class="odd">
+<td>es</td>
+<td>REAL</td>
+<td>GSEA only</td>
+</tr>
+<tr class="even">
+<td>log2err</td>
+<td>REAL</td>
+<td>GSEA only</td>
+</tr>
+<tr class="odd">
+<td>is_main_pathway</td>
+<td>INTEGER</td>
+<td>boolean; fgsea <code>collapsePathways</code></td>
+</tr>
+</tbody>
+</table>
+<p>The overlap / leading-edge genes of each result are in the dataset’s <code>enrichment_genes</code> artifact.</p>
+</section>
+</section>
+<section id="cross-dataset-tables" class="level2">
+<h2 class="anchored" data-anchor-id="cross-dataset-tables">Cross-dataset tables</h2>
+<p>Written by <code>db_cross_dataset</code> (<code>R/targets/db_write.R::write_cross_dataset_db()</code>). It runs after every <code>db_&lt;dataset&gt;</code>, so fit ids on both sides are resolvable.</p>
+<section id="projections" class="level3">
+<h3 class="anchored" data-anchor-id="projections"><code>projections</code></h3>
+<p>projectR projection of a source fit’s loadings onto another dataset’s matrix, either a related timepoint (<code>within_dataset</code>) or another cohort (<code>cross_dataset</code>).</p>
+<ul>
+<li>The projected matrix is in the file at <code>path</code>.</li>
+<li><strong>Rows from:</strong> <code>projectr_&lt;key&gt;</code>, one branch per (source dataset, target dataset) (<code>R/targets/projections.R::projection_rows()</code>, running <code>R/ingest_jobs/projectr_job.R</code>).</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>projection_id</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>source_fit_id</td>
+<td>INTEGER</td>
+<td>NN; FK → fits.fit_id CASCADE; UQ (source_fit_id, target_dataset_id, include_intercept)</td>
+</tr>
+<tr class="odd">
+<td>target_dataset_id</td>
+<td>TEXT</td>
+<td>NN; FK → datasets.dataset_id CASCADE; IDX</td>
+</tr>
+<tr class="even">
+<td>projection_type</td>
+<td>TEXT</td>
+<td>NN; CHECK IN (‘within_dataset’,‘cross_dataset’)</td>
+</tr>
+<tr class="odd">
+<td>include_intercept</td>
+<td>INTEGER</td>
+<td>NN; boolean</td>
+</tr>
+<tr class="even">
+<td>n_genes_matched</td>
+<td>INTEGER</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>n_samples</td>
+<td>INTEGER</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>mean_r_squared</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>median_r_squared</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>mean_pval</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>median_pval</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>mean_pvar</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>median_pvar</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>path</td>
+<td>TEXT</td>
+<td>NN; relative path of the projection result</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="gene_space_agreement" class="level3">
+<h3 class="anchored" data-anchor-id="gene_space_agreement"><code>gene_space_agreement</code></h3>
+<p>How similar two datasets’ optimal fits of the same method are in gene space: the source fit’s loadings are projected onto the target fit’s (projectR, shared Ensembl genes), and the mean |matched projection| is reported. Computed in both directions for every pair of datasets in the same family (<code>config/dataset_families.yml</code>).</p>
+<ul>
+<li><strong>Rows from:</strong> <code>gene_space_&lt;key&gt;</code> (<code>R/targets/projections.R::gene_space_rows()</code>), with <code>&lt;key&gt;</code> as the source dataset.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>source_fit_id</td>
+<td>INTEGER</td>
+<td>PK (with target_fit_id); FK → fits.fit_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>target_fit_id</td>
+<td>INTEGER</td>
+<td>PK; FK → fits.fit_id CASCADE</td>
+</tr>
+<tr class="odd">
+<td>n_genes_matched</td>
+<td>INTEGER</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>mean_abs_diagonal</td>
+<td>REAL</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="representative-fit-analyses" class="level2">
+<h2 class="anchored" data-anchor-id="representative-fit-analyses">Representative-fit analyses</h2>
+<p>These run on representative fits only (<code>fits.representative = 1</code>).</p>
+<section id="pattern_drivers" class="level3">
+<h3 class="anchored" data-anchor-id="pattern_drivers"><code>pattern_drivers</code></h3>
+<p>projectionDriveR differential-gene results for one factor and one sample-metadata contrast. Full results are in the file at <code>path</code>.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>drivers_&lt;key&gt;</code> (<code>R/lib/ingest/driver.R::pattern_driver_rows()</code>), using <code>sample_meta_&lt;key&gt;</code>.</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>driver_id</td>
+<td>INTEGER</td>
+<td>PK</td>
+</tr>
+<tr class="even">
+<td>factor_id</td>
+<td>INTEGER</td>
+<td>NN; FK → factors.factor_id CASCADE; UQ (factor_id, grouping_col, group1_level, group2_level, mode)</td>
+</tr>
+<tr class="odd">
+<td>grouping_col</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>group1_level</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+<tr class="odd">
+<td>group2_level</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>mode</td>
+<td>TEXT</td>
+<td>NN; CHECK IN (‘CI’,‘PV’)</td>
+</tr>
+<tr class="odd">
+<td>n_genes_considered</td>
+<td>INTEGER</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>n_significant_shared</td>
+<td>INTEGER</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>path</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+<tr class="even">
+<td>computed_at</td>
+<td>TEXT</td>
+<td>NN</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="pattern-markers" class="level3">
+<h3 class="anchored" data-anchor-id="pattern-markers">Pattern markers</h3>
+<p>Marker genes per factor (patternMarkers-style scores), used to diagnose “too many patterns” (a factor with no markers), are the dataset’s <code>pattern_markers</code> artifact (<code>R/targets/ingest.R::compute_method_redundancy()</code>, <code>R/lib/ingest/redundancy.R</code>); their count per fit is <code>fit_redundancy.n_factors_with_no_markers</code>.</p>
+</section>
+<section id="fit_redundancy" class="level3">
+<h3 class="anchored" data-anchor-id="fit_redundancy"><code>fit_redundancy</code></h3>
+<p>Within-fit redundancy summary: off-diagonal cosine between a fit’s own factors, and the number of factors with no marker genes. The full K × K matrix is the fit’s <code>redundancy</code> artifact.</p>
+<ul>
+<li><strong>Rows from:</strong> <code>redundancy_&lt;method&gt;_&lt;key&gt;</code> (<code>compute_method_redundancy()</code>).</li>
+<li><strong>Written by:</strong> <code>write_dataset_db()</code>.</li>
+</ul>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>fit_id</td>
+<td>INTEGER</td>
+<td>PK; FK → fits.fit_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>max_offdiag_cosine</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>median_offdiag_cosine</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>n_factors_with_no_markers</td>
+<td>INTEGER</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="repeated-measures-tables" class="level2">
+<h2 class="anchored" data-anchor-id="repeated-measures-tables">Repeated-measures tables</h2>
+<p>Written for every dataset with a <code>design:</code> block and, from the parent’s design, for its per-timepoint subsets (<code>R/targets/variance_db.R::variance_db_rows()</code>, called by <code>write_dataset_db()</code>). The computations are in <code>R/targets/variance.R</code>, <code>composition.R</code> and <code>variance_explore.R</code>; see Methods, “Repeated measures”.</p>
+<section id="dataset_design" class="level3">
+<h3 class="anchored" data-anchor-id="dataset_design"><code>dataset_design</code></h3>
+<p>The design behind a dataset’s repeated-measures results.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK; FK → datasets.dataset_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>parent_dataset_id</td>
+<td>TEXT</td>
+<td>NN; the dataset whose design applies (itself, or a subset’s parent)</td>
+</tr>
+<tr class="odd">
+<td>is_subset</td>
+<td>INTEGER</td>
+<td>NN; boolean</td>
+</tr>
+<tr class="even">
+<td>platform</td>
+<td>TEXT</td>
+<td>‘array’ or ‘rnaseq’</td>
+</tr>
+<tr class="odd">
+<td>subject_col, time_col, group_col</td>
+<td>TEXT</td>
+<td>sample-metadata columns</td>
+</tr>
+<tr class="even">
+<td>time_order</td>
+<td>TEXT</td>
+<td>JSON array, chronological</td>
+</tr>
+<tr class="odd">
+<td>covariates, technical_covariates</td>
+<td>TEXT</td>
+<td>JSON arrays (technical: the variance-model-only covariates, e.g.&nbsp;<code>control_factor</code>)</td>
+</tr>
+<tr class="even">
+<td>vp_formula, dream_formula</td>
+<td>TEXT</td>
+<td>the parent’s model formulas</td>
+</tr>
+<tr class="odd">
+<td>n_samples, n_subjects, n_dropped</td>
+<td>INTEGER</td>
+<td>samples in the design, distinct subjects, samples dropped (parents only)</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="samples" class="level3">
+<h3 class="anchored" data-anchor-id="samples"><code>samples</code></h3>
+<p>One row per sample in the design: its design values and sample-level checks. Subset rows come from the parent’s analysis (PCs and expression statistics are the parent’s).</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Type</th>
+<th>Attributes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>dataset_id</td>
+<td>TEXT</td>
+<td>PK (with sample_id); FK → datasets.dataset_id CASCADE</td>
+</tr>
+<tr class="even">
+<td>sample_id</td>
+<td>TEXT</td>
+<td>PK</td>
+</tr>
+<tr class="odd">
+<td>subject, timepoint, grp, cell</td>
+<td>TEXT</td>
+<td>design values (<code>cell</code> = group × time)</td>
+</tr>
+<tr class="even">
+<td>expr_mean, expr_sd, expr_q10, expr_median, expr_q90</td>
+<td>REAL</td>
+<td>the sample’s expression distribution (model input scale)</td>
+</tr>
+<tr class="odd">
+<td>pc1, pc2, pc3</td>
+<td>REAL</td>
+<td>sample scores on the expression PCs</td>
+</tr>
+<tr class="even">
+<td>neutrophil_score, lymphocyte_score, nl_score</td>
+<td>REAL</td>
+<td>marker scores (z-scored within dataset); nl = neutrophil − lymphocyte</td>
+</tr>
+<tr class="odd">
+<td>control_mean</td>
+<td>REAL</td>
+<td>mean of the array’s control probes (arrays)</td>
+</tr>
+<tr class="even">
+<td>control_factor</td>
+<td>REAL</td>
+<td>the control probes’ first PC, standardized (datasets with <code>control_probes: {covariate: true}</code>)</td>
+</tr>
+<tr class="odd">
+<td>log2_lib_size, norm_factor</td>
+<td>REAL</td>
+<td>RNA-seq library size and TMM factor</td>
+</tr>
+<tr class="even">
+<td>chrY_score, xist</td>
+<td>REAL</td>
+<td>sex-gene expression</td>
+</tr>
+<tr class="odd">
+<td>inferred_sex, recorded_sex</td>
+<td>TEXT</td>
+<td>‘F’/‘M’</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="variance_summary" class="level3">
+<h3 class="anchored" data-anchor-id="variance_summary"><code>variance_summary</code></h3>
+<p>One row per dataset with its own design: the headline repeated-measures numbers.</p>
+<ul>
+<li><strong>Fit:</strong> n_genes, n_genes_failed, n_factor_genes (genes the factor analysis uses), share_singular, max_colinearity, dupcor_consensus (limma’s genome-wide subject correlation).</li>
+<li><strong>Gene-level shares:</strong> between_median, time_median, residual_median, technical_median (median over genes; between = subject + subject-level variables, time = time + group × time); repeatability_median (between / (between + residual)); time_within_median (time / (time + residual)); share_time_gt05/10/20 (genes with time above 5/10/20%).</li>
+<li><strong>Variance-weighted shares:</strong> <code>between_vw_*</code>, <code>time_vw_*</code>, <code>residual_vw_*</code> over all genes (<code>_all</code>), the factor-analysis genes (<code>_factor_genes</code>) and the top 8,000 by variance (<code>_top</code>).</li>
+<li><strong>Within-person change</strong> (subjects sampled more than once; each later sample minus the subject’s first): n_subjects_repeated, n_changes, change_pc1_share (share of the change on its first PC), change_pc1_cor_nl, median_r2_nl_all / _factor_genes and median_r2_technical_all / _factor_genes (median R² of each gene’s change against the change in composition or in the technical covariates).</li>
+<li><strong>Sample checks:</strong> rho_pc1_nl, rho_sd_nl, rho_mean_nl (Spearman, against the neutrophil-lymphocyte score), rho_sd_technical, rho_mean_technical (against control mean or library size), n_control_probes, control_probes (which), control_factor_fraction, sex_separation, sex_agreement, n_subjects_sex_discordant, nl_subject_fraction, nl_time_fraction, nl_group_fraction.</li>
+<li><strong>Run:</strong> vp_seconds, dream_seconds, fitted_at.</li>
+</ul>
+</section>
+<section id="variance_terms-variance_categories-variance_bins" class="level3">
+<h3 class="anchored" data-anchor-id="variance_terms-variance_categories-variance_bins"><code>variance_terms</code>, <code>variance_categories</code>, <code>variance_bins</code></h3>
+<ul>
+<li><strong>variance_terms</strong> (dataset_id, term): each model term’s category (‘subject’, ‘subject-level’, ‘time’, ‘group x time’, ‘group’, ‘technical’, ‘covariate’, ‘residual’, or ‘derived’ for the between-subject and time totals) and its distribution over genes: n_genes, mean, q10, median, q90, share_gt05, share_gt10.</li>
+<li><strong>variance_categories</strong> (dataset_id, category): present, mean, median, and variance-weighted shares vw_all, vw_factor_genes, vw_top.</li>
+<li><strong>variance_bins</strong> (dataset_id, binning, bin): median between-subject (<code>between_subject</code>), time and residual fractions by expression quartile (<code>binning = 'expression_quartile'</code>, Q1 = lowest) and by variance rank (<code>'variance_rank'</code>).</li>
+</ul>
+</section>
+<section id="trait_variance-composition_correlations" class="level3">
+<h3 class="anchored" data-anchor-id="trait_variance-composition_correlations"><code>trait_variance</code>, <code>composition_correlations</code></h3>
+<ul>
+<li><strong>trait_variance</strong> (dataset_id, trait, term): the sample-level traits (expression mean/sd/q90, PC1–3, marker scores, control mean, library size, TMM factor) through the dataset’s variance formula: fraction and category per term.</li>
+<li><strong>composition_correlations</strong> (dataset_id, x, y): Spearman rho and p-value between every pair of those traits.</li>
+</ul>
+</section>
+<section id="de_contrasts" class="level3">
+<h3 class="anchored" data-anchor-id="de_contrasts"><code>de_contrasts</code></h3>
+<p>One row per dream contrast or joint test (dataset_id, contrast): kind (‘pairwise’ or ‘omnibus’), readable (the levels compared, or the contrasts tested jointly), n_genes, n_fdr05. Full tables are the <code>de_results</code> artifact.</p>
+</section>
+<section id="factor_variance-factor_variance_models" class="level3">
+<h3 class="anchored" data-anchor-id="factor_variance-factor_variance_models"><code>factor_variance</code>, <code>factor_variance_models</code></h3>
+<ul>
+<li><strong>factor_variance</strong> (factor_id, term): every fitted factor’s sample scores through the dataset’s variance formula (a subset: its parent’s, without subject and time): category and fraction per term. FK → factors.factor_id CASCADE. From <code>factor_vp_&lt;method&gt;_&lt;key&gt;</code> (<code>R/targets/variance_explore.R::factor_variance_partition()</code>).</li>
+<li><strong>factor_variance_models</strong> (dataset_id, method): the formula used and the number of factors.</li>
+</ul>
+</section>
+<section id="variance_time_genes-time_gene_recurrence" class="level3">
+<h3 class="anchored" data-anchor-id="variance_time_genes-time_gene_recurrence"><code>variance_time_genes</code>, <code>time_gene_recurrence</code></h3>
+<ul>
+<li><strong>variance_time_genes</strong> (dataset_id, symbol): genes with time + group × time above 10% of their variance, with their time (<code>time_all</code>) and between-subject (<code>between_subject</code>) fractions.</li>
+<li><strong>time_gene_recurrence</strong> (symbol): in how many datasets, and which, a gene is time-driven. Written by <code>write_cross_dataset_db()</code> from <code>variance_explore</code>.</li>
+</ul>
+</section>
+</section>
+<section id="views-rdbviews.sql" class="level2">
+<h2 class="anchored" data-anchor-id="views-rdbviews.sql">Views (<code>R/db/views.sql</code>)</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>View</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>v_fits</code></td>
+<td><code>fits</code> joined to <code>methods.family</code>, with the common <code>fit_params</code> (para, lambda, power, alpha) pivoted to columns</td>
+</tr>
+<tr class="even">
+<td><code>v_factor_matches</code></td>
+<td><code>factor_matches</code> + <code>match_scores</code> in both orientations (a→b and b→a), joined to fit and factor ids, rank, seed and dataset, so per-fit/per-factor stability queries need no direction UNION</td>
+</tr>
+<tr class="odd">
+<td><code>v_ingest_summary</code></td>
+<td>per (dataset, method): family, n_fits, n_ok, n_failed, last written_at; replaces the <code>ingests</code> table</td>
+</tr>
+</tbody>
+</table>
+
+
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/cmatkhan\.github\.io\/sepsis_latent_factor_eda\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
