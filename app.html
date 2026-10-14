@@ -80,7 +80,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-55617497126496852ff9f5a59253c640.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -146,12 +146,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span class="menu-text">Methods</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./database.html"> 
-<span class="menu-text">Database</span></a>
-  </li>  
-  <li class="nav-item">
     <a class="nav-link" href="./workflow.html"> 
 <span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
   </li>  
   <li class="nav-item">
     <a class="nav-link active" href="./app.html" aria-current="page"> 
@@ -186,7 +186,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <ul>
   <li><a href="#launching" id="toc-launching" class="nav-link active" data-scroll-target="#launching">Launching</a></li>
   <li><a href="#layout" id="toc-layout" class="nav-link" data-scroll-target="#layout">Layout</a></li>
-  <li><a href="#time-structure" id="toc-time-structure" class="nav-link" data-scroll-target="#time-structure">Time structure</a></li>
+  <li><a href="#overview-and-variance-by-dataset" id="toc-overview-and-variance-by-dataset" class="nav-link" data-scroll-target="#overview-and-variance-by-dataset">Overview and Variance by dataset</a></li>
   <li><a href="#explore-fits" id="toc-explore-fits" class="nav-link" data-scroll-target="#explore-fits">Explore fits</a>
   <ul class="collapse">
   <li><a href="#the-optimal-fit" id="toc-the-optimal-fit" class="nav-link" data-scroll-target="#the-optimal-fit">The optimal fit</a></li>
@@ -229,7 +229,7 @@ Note
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>The app is built on schema 1 of the redesigned database. Schema 2 (<a href="./database.html">Database</a>) adds the repeated-measures tables (<code>dataset_design</code>, <code>samples</code>, <code>variance_*</code>, <code>factor_variance</code>, …) and moves the enrichment gene lists (<code>enrichment_results.genes</code>) and the <code>pattern_markers</code> table into per-dataset artifacts; the app doesn’t read those yet. This page describes the app as it is.</p>
+<p>The first page reads the schema-2 repeated-measures tables. The other pages still read the schema-1 tables only; they don’t yet use the schema-2 enrichment gene lists or pattern markers.</p>
 </div>
 </div>
 <section id="launching" class="level2">
@@ -283,16 +283,14 @@ Note
 </tbody>
 </table>
 </section>
-<section id="time-structure" class="level2">
-<h2 class="anchored" data-anchor-id="time-structure">Time structure</h2>
-<p>The first page (before Compare) shows how much of each time-course dataset’s variance is <strong>between subjects</strong>, an <strong>average time effect</strong> (the change every subject shares between timepoints), or <strong>other within-subject</strong> variation (change that differs between subjects, plus measurement noise; the two cannot be separated without technical replicates). It decides how much of what a factor can find is about change over time.</p>
+<section id="overview-and-variance-by-dataset" class="level2">
+<h2 class="anchored" data-anchor-id="overview-and-variance-by-dataset">Overview and Variance by dataset</h2>
+<p>The first two pages answer: how much of each dataset’s variance is change over time, and how much is between patients? It reads the stored variancePartition results (<code>variance_summary</code>, <code>variance_categories</code>, <code>variance_terms</code>, <code>variance_bins</code>, the <code>variance_partition</code> artifact); nothing is computed when the page opens. Code: <code>app/R/mod_variance.R</code>, <code>app/R/variance_helpers.R</code>.</p>
 <ul>
-<li><em>All time-course datasets:</em> the split for each pooled dataset (ANEMONES, CORTICUS, GSE13904, GSE54514, GSE95233, GSE110487, GSE273700), with subjects, samples, subjects measured more than once and timepoints. The whisker is a 95% interval from resampling subjects (the time part is shown without an interval because its interval is unreliable near zero).</li>
-<li><em>Across genes:</em> the distribution of each gene’s between-subject share for the selected dataset’s family, once with every gene counted equally and once weighted by gene variance (which is what the pooled value reflects).</li>
-<li><em>Factors of the selected fit</em> (choose a pooled dataset in the sidebar): the same split of each factor’s sample scores, which separates factors that describe stable differences between people from factors with a within-subject component.</li>
+<li><strong>Overview</strong> (all datasets; the sidebar is hidden on this page). Stacked bars for every time-course dataset: between patients (patient plus patient-level variables), time (time plus group x time), technical covariates, and residual (within-person change that is not shared by time, plus noise). The gene-set menu chooses what is averaged: the factor-analysis genes (default), all modelled genes, the top 8,000 by variance (each weighted by gene variance), or the typical gene (median). The table beneath gives repeatability (between / (between + residual)), time / (time + residual), the share of genes with time above 10%, and flags (sex agreement below 0.9, mostly singular fits, failed genes).</li>
+<li><strong>Variance by dataset</strong> has evidence tabs that follow the sidebar dataset (a per-timepoint subset shows its parent): <em>Design and model</em> (formulas, samples dropped, singular fits, differential expression contrasts); <em>Genes</em> (shares by expression quartile and variance rank, per-term distributions, the genes with the largest time effect); <em>Within-person change</em> (each person’s path over the first three expression PCs with the group mean per timepoint, so group-specific trajectories are visible; the share of each person’s change from their first sample that lies on one axis, and its correlation with the composition change); <em>Sample checks</em> (recorded vs inferred sex, PC1 against the neutrophil-lymphocyte score, how much of each sample-level trait is a person trait, trait correlations).</li>
 </ul>
-<p><strong>Method.</strong> A sample’s timepoint is the sibling dataset whose matrix contains it (<code>config/dataset_families.yml</code>); subjects come from each dataset’s <code>subject_id_col</code>. For each gene (or factor) the sums of squares are split sequentially into subject, then timepoint within subject, then the rest, and converted to variance components with the degrees of freedom each part uses: within = (SS_time + SS_resid)/(N - S); between = (SS_between/(S - 1) - within)/n0, where n0 is the average number of samples per subject; time = max(SS_time - (T - 1) x resid, 0)/N; resid = SS_resid/(N - S - (T - 1)). Raw sums-of-squares shares would overstate the between-subject part (with two samples per subject even pure noise puts about half of the sum of squares there). Pooled values are ratios of sums over genes, so high-variance genes count more. On simulated data with known components the estimates recover them (0.573 against a true 0.58), and with no subject effect the between-subject estimate is 0.004. The split is computed when the page is opened (about 25 s the first time) and cached for the session.</p>
-<p>The pipeline now stores the model-based version of this split: per dataset and gene from variancePartition (<code>variance_summary</code>, <code>variance_terms</code>, <code>variance_categories</code>, the <code>variance_partition</code> artifact) and per factor (<code>factor_variance</code>); see Methods, “Repeated measures”. Switching this page to the stored values is pending.</p>
+<p><strong>Missing data.</strong> A method not yet run, a table from an older schema or an absent artifact file is noted where it would appear and logged once to the console (<code>app/R/notes.R</code>); it never stops the app. The database is opened read-only; if that fails (a WAL-mode file on a read-only file system) it is opened as an immutable snapshot and the app must be restarted after the file is replaced.</p>
 </section>
 <section id="explore-fits" class="level2">
 <h2 class="anchored" data-anchor-id="explore-fits">Explore fits</h2>

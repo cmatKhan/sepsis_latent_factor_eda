@@ -80,7 +80,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-55617497126496852ff9f5a59253c640.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -146,12 +146,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span class="menu-text">Methods</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./database.html"> 
-<span class="menu-text">Database</span></a>
-  </li>  
-  <li class="nav-item">
     <a class="nav-link" href="./workflow.html"> 
 <span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
   </li>  
   <li class="nav-item">
     <a class="nav-link" href="./app.html"> 
@@ -184,14 +184,15 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#on-htcf-spack" id="toc-on-htcf-spack" class="nav-link active" data-scroll-target="#on-htcf-spack">On HTCF (spack)</a>
+  <li><a href="#r-and-packages" id="toc-r-and-packages" class="nav-link active" data-scroll-target="#r-and-packages">R and packages</a>
   <ul class="collapse">
-  <li><a href="#two-packages-that-need-care" id="toc-two-packages-that-need-care" class="nav-link" data-scroll-target="#two-packages-that-need-care">Two packages that need care</a></li>
+  <li><a href="#cogaps-and-projectr-need-to-be-installed-from-github" id="toc-cogaps-and-projectr-need-to-be-installed-from-github" class="nav-link" data-scroll-target="#cogaps-and-projectr-need-to-be-installed-from-github">CoGAPS and ProjectR need to be installed from github</a></li>
   </ul></li>
   <li><a href="#raw-data" id="toc-raw-data" class="nav-link" data-scroll-target="#raw-data">Raw data</a></li>
-  <li><a href="#running-elsewhere-without-spack-or-another-scheduler" id="toc-running-elsewhere-without-spack-or-another-scheduler" class="nav-link" data-scroll-target="#running-elsewhere-without-spack-or-another-scheduler">Running elsewhere (without spack, or another scheduler)</a></li>
-  <li><a href="#building-these-docs" id="toc-building-these-docs" class="nav-link" data-scroll-target="#building-these-docs">Building these docs</a>
+  <li><a href="#developer-notes" id="toc-developer-notes" class="nav-link" data-scroll-target="#developer-notes">Developer notes</a>
   <ul class="collapse">
+  <li><a href="#claude" id="toc-claude" class="nav-link" data-scroll-target="#claude">Claude</a></li>
+  <li><a href="#building-these-docs" id="toc-building-these-docs" class="nav-link" data-scroll-target="#building-these-docs">Building these docs</a></li>
   <li><a href="#documenting-functions" id="toc-documenting-functions" class="nav-link" data-scroll-target="#documenting-functions">Documenting functions</a></li>
   </ul></li>
   </ul>
@@ -219,74 +220,66 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
-<section id="on-htcf-spack" class="level2">
-<h2 class="anchored" data-anchor-id="on-htcf-spack">On HTCF (spack)</h2>
-<p><strong>R and system libraries</strong> come from the spack environment <code>/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1</code>. It’s the one <code>rstudio_spack.sbatch</code> launches RStudio Server from, so an RStudio session on the cluster already has it. Outside RStudio, activate it the way <code>run_pipeline.sbatch</code> does:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="va">SPACK_ENV</span><span class="op">=</span>/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="bu">eval</span> <span class="st">"</span><span class="va">$(</span><span class="ex">spack</span> env activate <span class="at">--sh</span> <span class="st">"</span><span class="va">$SPACK_ENV</span><span class="st">"</span><span class="va">)</span><span class="st">"</span></span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">LD_LIBRARY_PATH</span><span class="op">=</span><span class="st">"</span><span class="va">$SPACK_ENV</span><span class="st">/view/lib:</span><span class="va">$SPACK_ENV</span><span class="st">/view/lib64</span><span class="va">${LD_LIBRARY_PATH</span><span class="op">:+</span>:<span class="va">$LD_LIBRARY_PATH}</span><span class="st">"</span></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="bu">unset</span> <span class="va">R_LIBS</span> <span class="va">R_LIBS_USER</span> <span class="va">R_LIBS_SITE</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p><code>spack</code> here is the one on <code>PATH</code> (spack 1.1); <code>/ref/mblab/software/spack/bin/spack</code> is an old 0.17 install that fails to activate the environment.</p>
-<p><code>spack env activate</code> doesn’t set <code>LD_LIBRARY_PATH</code>, and packages compiled against the environment’s libraries need it. Unsetting <code>R_LIBS*</code> keeps other libraries off the path, so the project’s renv library is the only one in use.</p>
+<section id="r-and-packages" class="level2">
+<h2 class="anchored" data-anchor-id="r-and-packages">R and packages</h2>
+<p><strong>R.</strong> The project needs R 4.6.1 (the version in <code>renv.lock</code>) with a toolchain that can build R packages from source. If you are using a SLURM cluster, you may have luck using spack for this. See <a href="https://github.com/BrentLab/htcf_spack_rstudio_server">this example</a> of setting up a R environment for rstudio server and R 4.6.1 via spack</p>
 <p><strong>R packages</strong> come from the project’s renv library (<code>renv.lock</code>). renv activates automatically from <code>.Rprofile</code> when R starts in the project directory. From a fresh clone:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">options</span>(<span class="at">renv.install.timeout =</span> <span class="dv">6</span> <span class="sc">*</span> <span class="dv">3600</span>)</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>renv<span class="sc">::</span><span class="fu">restore</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">options</span>(<span class="at">renv.install.timeout =</span> <span class="dv">6</span> <span class="sc">*</span> <span class="dv">3600</span>)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>renv<span class="sc">::</span><span class="fu">restore</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>If this is a completely fresh installation with none of these packages already installed, this can take hours. Additionally, note the following:</p>
 <ul>
 <li><strong>The renv cache.</strong> renv links packages from its cache (<code>~/.cache/R/renv</code>) when a matching build is there, so a restore on a machine that has built them before takes minutes, not hours.</li>
 <li><strong>Interrupted installs</strong> leave <code>00LOCK-&lt;package&gt;</code> directories in the project library, and installing that package then fails until they are removed.</li>
-<li><strong>The timeout.</strong> Everything builds from source against the spack libraries (roughly 300 packages, hours of build time). renv’s default deadline for a whole install is one hour, and when it’s reached renv rolls back the entire batch. Finished builds stay in renv’s cache, so a re-run picks up where it stopped.</li>
-<li><strong><code>.Rprofile</code> turns off two renv start-up checks</strong>, <code>synchronized.check</code> (a scan of every project file, about a minute on <code>/scratch</code>) and the sandbox (about 40 s on <code>~/.cache</code> when 20 workers start at once). Together they took every worker’s R start-up from 68 s to about 10 s. Run <code>renv::status()</code> by hand when you want the check.</li>
+<li><strong>The timeout.</strong> Many packages build from source (roughly 300 on the cluster this project was developed on, hours of build time). renv’s default deadline for a whole install is one hour, and when it’s reached renv rolls back the entire batch. Finished builds stay in renv’s cache, so a re-run picks up where it stopped.</li>
+<li><strong><code>.Rprofile</code> turns off two renv start-up checks</strong>, <code>synchronized.check</code> (a scan of every project file, about a minute on a network filesystem) and the sandbox (about 40 s on a network filesystem when 20 workers start at once). Together they took every worker’s R start-up from 68 s to about 10 s. Run <code>renv::status()</code> by hand when you want the check.</li>
 </ul>
-<section id="two-packages-that-need-care" class="level3">
-<h3 class="anchored" data-anchor-id="two-packages-that-need-care">Two packages that need care</h3>
-<p><strong>CoGAPS is installed from a patched local checkout, not a repository.</strong> Its committed <code>configure</code> leaves the autoconf-archive OpenMP macros unexpanded (<a href="https://github.com/FertigLab/CoGAPS/issues/150">FertigLab/CoGAPS#150</a>), so built as-is it compiles single-threaded without saying so. The upstream fix (<a href="https://github.com/FertigLab/CoGAPS/pull/151">#151</a>) only changes their Dockerfile, so regenerate <code>configure</code> before installing:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/FertigLab/CoGAPS.git logs/build/CoGAPS</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> <span class="at">-C</span> logs/build/CoGAPS checkout f9075096   <span class="co"># master as installed (3.33.2), after #151</span></span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ACLOCAL_PATH</span><span class="op">=</span><span class="st">"</span><span class="va">$(</span><span class="ex">spack</span> location <span class="at">-i</span> autoconf-archive<span class="va">)</span><span class="st">/share/aclocal"</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="kw">(</span><span class="bu">cd</span> logs/build/CoGAPS <span class="kw">&amp;&amp;</span> <span class="ex">autoreconf</span> <span class="at">-fi</span><span class="kw">)</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'renv::install(normalizePath("logs/build/CoGAPS"))'</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'library(CoGAPS); stopifnot(compiledWithOpenMPSupport())'</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>Without spack, install <code>autoconf-archive</code> however the system provides it and point <code>ACLOCAL_PATH</code> at its <code>aclocal</code> directory.</p>
-<p><strong>projectR is the <code>feature-add_center_by_loadings</code> branch of <a href="https://github.com/cmatKhan/projectR/tree/feature-add_center_by_loadings">cmatKhan/projectR</a>.</strong> It adds <code>center_by_loadings</code>, used to project PCA fits. renv records it as a GitHub remote, so <code>renv::restore()</code> installs it.</p>
+<section id="cogaps-and-projectr-need-to-be-installed-from-github" class="level3">
+<h3 class="anchored" data-anchor-id="cogaps-and-projectr-need-to-be-installed-from-github">CoGAPS and ProjectR need to be installed from github</h3>
+<ol type="1">
+<li><strong>CoGAPS is installed from a patched local checkout, not a repository.</strong> Its committed <code>configure</code> leaves the autoconf-archive OpenMP macros unexpanded (<a href="https://github.com/FertigLab/CoGAPS/issues/150">FertigLab/CoGAPS#150</a>), so built as-is it compiles single-threaded without saying so. The upstream fix (<a href="https://github.com/FertigLab/CoGAPS/pull/151">#151</a>) only changes their Dockerfile, so regenerate <code>configure</code> before installing:</li>
+</ol>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/FertigLab/CoGAPS.git logs/build/CoGAPS</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> <span class="at">-C</span> logs/build/CoGAPS checkout f9075096   <span class="co"># master as installed (3.33.2), after #151</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ACLOCAL_PATH</span><span class="op">=&lt;</span>the aclocal directory that holds autoconf-archive<span class="st">'s macros&gt;</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="st">(cd logs/build/CoGAPS &amp;&amp; autoreconf -fi)</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="st">Rscript -e '</span>renv::install<span class="er">(</span><span class="ex">normalizePath</span><span class="er">(</span><span class="st">"logs/build/CoGAPS"</span><span class="kw">))</span><span class="st">'</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="st">Rscript -e '</span><span class="ex">library</span><span class="er">(</span><span class="ex">CoGAPS</span><span class="kw">);</span> <span class="ex">stopifnot</span><span class="er">(</span><span class="fu">compiledWithOpenMPSupport()</span><span class="kw">)</span><span class="st">'</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><code>autoreconf</code> needs <code>autoconf-archive</code>: install it with your system’s package manager and point <code>ACLOCAL_PATH</code> at the <code>aclocal</code> directory that holds its macros.</p>
+<ol start="2" type="1">
+<li><strong>projectR is the <code>feature-add_center_by_loadings</code> branch</strong> of <a href="https://github.com/cmatKhan/projectR/tree/feature-add_center_by_loadings">cmatKhan/projectR</a>. It adds <code>center_by_loadings</code>, used to project PCA fits. renv records it as a GitHub remote, so <code>renv::restore()</code> installs it.</li>
+</ol>
 </section>
 </section>
 <section id="raw-data" class="level2">
 <h2 class="anchored" data-anchor-id="raw-data">Raw data</h2>
-<p>Dataset configs give data paths relative to a data root: <code>data_root</code> in <code>config/pipeline.yml</code> (<code>/scratch/mblab/chasem/hf_sepsis_collection</code> on HTCF), overridden by the <code>SEPSIS_DATA_ROOT</code> environment variable. See <a href="./data.html">Data</a>.</p>
+<p>Dataset configs give data paths relative to a data root: <code>data_root</code> in <code>config/pipeline.yml</code> (eg, <code>/scratch/mblab/chasem/hf_sepsis_collection</code>), overridden by the <code>SEPSIS_DATA_ROOT</code> environment variable. See <a href="./data.html">Data</a>.</p>
 </section>
-<section id="running-elsewhere-without-spack-or-another-scheduler" class="level2">
-<h2 class="anchored" data-anchor-id="running-elsewhere-without-spack-or-another-scheduler">Running elsewhere (without spack, or another scheduler)</h2>
-<p>Nothing in the pipeline depends on spack. Only two places put R on the path: <code>config/pipeline.yml</code> for the workers, and <code>run_pipeline.sbatch</code> for the main process. On another SLURM cluster:</p>
-<ol type="1">
-<li><p>Get R 4.6 however the cluster provides it, e.g.&nbsp;<code>module load R/4.6.1</code>, and run <code>renv::restore()</code> once in the project.</p></li>
-<li><p>In <code>config/pipeline.yml</code>, give the workers’ setup lines in place of the spack activation:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cluster</span><span class="kw">:</span></span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">setup_lines</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">"module load R/4.6.1"</span><span class="kw">]</span></span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">partition</span><span class="kw">:</span><span class="at"> &lt;your partition, or null&gt;</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div></li>
-<li><p>In <code>run_pipeline.sbatch</code>, replace the spack activation lines with the same <code>module load</code>.</p></li>
-<li><p>Point <code>data_root</code> (or <code>SEPSIS_DATA_ROOT</code>) at that machine’s copy of the data.</p></li>
-</ol>
-<p>This mirrors the <code>script_lines = "module load R"</code> example in crew.cluster’s documentation. For SGE, PBS or LSF clusters, swap <code>crew_controller_slurm()</code>/<code>crew_options_slurm()</code> in <code>R/targets/controllers.R</code> for crew.cluster’s <code>_sge</code>/<code>_pbs</code>/<code>_lsf</code> equivalents. To run on one machine, use <code>crew::crew_controller_local()</code>. crew.cluster labels itself Experimental/Maturing; targets and crew are mature.</p>
+<section id="developer-notes" class="level2">
+<h2 class="anchored" data-anchor-id="developer-notes">Developer notes</h2>
+<section id="claude" class="level3">
+<h3 class="anchored" data-anchor-id="claude">Claude</h3>
+<p>Claude was used extensively to develop this project.</p>
 </section>
-<section id="building-these-docs" class="level2">
-<h2 class="anchored" data-anchor-id="building-these-docs">Building these docs</h2>
+<section id="building-these-docs" class="level3">
+<h3 class="anchored" data-anchor-id="building-these-docs">Building these docs</h3>
 <p>The site is a <a href="https://quarto.org">Quarto</a> website in <code>docs/</code>. Quarto ships with RStudio Server (<code>.../rstudio-server/bin/quarto/bin/quarto</code>); elsewhere, install it from quarto.org.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">quarto</span> render docs      <span class="co"># writes docs/_site/</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="ex">quarto</span> preview docs     <span class="co"># live preview while editing</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">quarto</span> render docs      <span class="co"># writes docs/_site/</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">quarto</span> preview docs     <span class="co"># live preview while editing</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Rendering first runs <code>docs/build_reference.R</code>, which builds the <a href="./reference.html">Function reference</a> from the roxygen comments in the code (it needs the project’s <code>roxygen2</code>).</p>
+</section>
 <section id="documenting-functions" class="level3">
 <h3 class="anchored" data-anchor-id="documenting-functions">Documenting functions</h3>
 <p>Every function carries a standard <a href="https://roxygen2.r-lib.org">roxygen</a> block: a title line, a description, <code>@param</code> for each argument and <code>@return</code>. This is a project, not a package, so there are no <code>man/</code> pages; the blocks feed the reference page instead.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co">#' Stable identity for a fit</span></span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="co">#'</span></span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="co">#' Dataset + method + parameters, excluding resource-only settings.</span></span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co">#'</span></span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="co">#' @param dataset_id Dataset id.</span></span>
-<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="co">#' @param method Method name.</span></span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="co">#' @param params Flattened parameter list (`flatten_params()`).</span></span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a><span class="co">#' @param resource_params Parameter names left out of the identity.</span></span>
-<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="co">#' @return The fit key, `"&lt;method&gt;_&lt;16 hex characters&gt;"`.</span></span>
-<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>fit_key <span class="ot">&lt;-</span> <span class="cf">function</span>(dataset_id, method, params, <span class="at">resource_params =</span> <span class="fu">character</span>(<span class="dv">0</span>)) { ... }</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co">#' Stable identity for a fit</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="co">#'</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="co">#' Dataset + method + parameters, excluding resource-only settings.</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="co">#'</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="co">#' @param dataset_id Dataset id.</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="co">#' @param method Method name.</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co">#' @param params Flattened parameter list (`flatten_params()`).</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="co">#' @param resource_params Parameter names left out of the identity.</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="co">#' @return The fit key, `"&lt;method&gt;_&lt;16 hex characters&gt;"`.</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>fit_key <span class="ot">&lt;-</span> <span class="cf">function</span>(dataset_id, method, params, <span class="at">resource_params =</span> <span class="fu">character</span>(<span class="dv">0</span>)) { ... }</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Comments never change targets’ hashes, so documenting a function never reruns anything.</p>
 
 

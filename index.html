@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>Overview – Sepsis latent-factor stability</title>
+<title>Latent Factors in Repeat Measure Sepsis Transcriptomics – Sepsis latent-factor stability</title>
 <style>
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -45,7 +45,7 @@ ul.task-list li input[type="checkbox"] {
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-55617497126496852ff9f5a59253c640.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -111,12 +111,12 @@ ul.task-list li input[type="checkbox"] {
 <span class="menu-text">Methods</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./database.html"> 
-<span class="menu-text">Database</span></a>
-  </li>  
-  <li class="nav-item">
     <a class="nav-link" href="./workflow.html"> 
 <span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
   </li>  
   <li class="nav-item">
     <a class="nav-link" href="./app.html"> 
@@ -149,8 +149,9 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#pages" id="toc-pages" class="nav-link active" data-scroll-target="#pages">Pages</a></li>
-  <li><a href="#layout" id="toc-layout" class="nav-link" data-scroll-target="#layout">Layout</a></li>
+  <li><a href="#table-of-contents" id="toc-table-of-contents" class="nav-link active" data-scroll-target="#table-of-contents">Table of contents</a></li>
+  <li><a href="#introduction" id="toc-introduction" class="nav-link" data-scroll-target="#introduction">Introduction</a></li>
+  <li><a href="#what-is-in-this-project" id="toc-what-is-in-this-project" class="nav-link" data-scroll-target="#what-is-in-this-project">What is in this project?</a></li>
   </ul>
 </nav>
     </div>
@@ -159,7 +160,7 @@ ul.task-list li input[type="checkbox"] {
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">Overview</h1>
+<h1 class="title">Latent Factors in Repeat Measure Sepsis Transcriptomics</h1>
 </div>
 
 
@@ -176,18 +177,8 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<p>This project measures how stable the latent factors found in sepsis gene-expression datasets are, and compares them across datasets. Six methods are fit to every dataset – PCA, NMF, CoGAPS, sparse PCA (sPCA), ICA and WGCNA – across random seeds and across their rank or sparsity parameters. Stability, enrichment, projections and diagnostics are then written to one SQLite database, which a Shiny app browses.</p>
-<p>One <a href="https://books.ropensci.org/targets/">targets</a> pipeline (<code>_targets.R</code>) does all of it, with the heavy steps running as SLURM jobs through <a href="https://wlandau.github.io/crew.cluster/">crew.cluster</a>:</p>
-<ol type="1">
-<li><strong>Matrices.</strong> Each dataset’s config says how to build its genes × samples matrix from the raw data (<a href="./data.html">Data</a>).</li>
-<li><strong>Fits.</strong> Each method’s parameter grid is fit, one fit per grid row (<a href="./methods.html">Methods</a>).</li>
-<li><strong>Repeated measures.</strong> For datasets with a study design, a variance partition and differential expression per gene, and sample checks (leukocyte composition, technical scale, recorded vs inferred sex) (<a href="./methods.html">Methods</a>).</li>
-<li><strong>Ingestion.</strong> Fits are compared with each other (stability), enriched, projected onto the other datasets, described by the repeated-measures model and summarized, then written to the database (<a href="./database.html">Database</a>).</li>
-<li><strong>App.</strong> A Shiny app browses the database (<a href="./app.html">Launching the app</a>).</li>
-</ol>
-<p>targets re-runs only what a change invalidates: editing one dataset’s config rebuilds that dataset only, editing one method rebuilds that method only (<a href="./workflow.html">Running the workflow</a>).</p>
-<section id="pages" class="level2">
-<h2 class="anchored" data-anchor-id="pages">Pages</h2>
+<section id="table-of-contents" class="level2">
+<h2 class="anchored" data-anchor-id="table-of-contents">Table of contents</h2>
 <table class="caption-top table">
 <thead>
 <tr class="header">
@@ -198,27 +189,27 @@ ul.task-list li input[type="checkbox"] {
 <tbody>
 <tr class="odd">
 <td><a href="./setup.html">Setup</a></td>
-<td>R, packages and the cluster environment; building these docs</td>
+<td>Installation</td>
 </tr>
 <tr class="even">
 <td><a href="./data.html">Data</a></td>
-<td>data root, dataset configs, building a matrix, gene identifiers, which datasets are included</td>
+<td>How to store the data and feed it to the project</td>
 </tr>
 <tr class="odd">
 <td><a href="./methods.html">Methods</a></td>
-<td>the six methods and their parameters, how sPCA’s sparsity is chosen, adding a method, repeated measures (variance partition, differential expression, sample checks)</td>
+<td>Description of the currently implemented variance and latent factor methods</td>
 </tr>
 <tr class="even">
-<td><a href="./database.html">Database</a></td>
-<td>what the database holds, how it’s written, every table</td>
+<td><a href="./workflow.html">Running the workflow</a></td>
+<td>running the targets pipeline on a SLURM cluster</td>
 </tr>
 <tr class="odd">
-<td><a href="./workflow.html">Running the workflow</a></td>
-<td>running the pipeline, what reruns what, SLURM resources</td>
+<td><a href="./database.html">Database</a></td>
+<td>A description of the database that serves as a backend to the Shiny app</td>
 </tr>
 <tr class="even">
 <td><a href="./app.html">Launching the app</a></td>
-<td>the Shiny explorer</td>
+<td>the Shiny app data explorer</td>
 </tr>
 <tr class="odd">
 <td><a href="./reference.html">Function reference</a></td>
@@ -227,86 +218,38 @@ ul.task-list li input[type="checkbox"] {
 </tbody>
 </table>
 </section>
-<section id="layout" class="level2">
-<h2 class="anchored" data-anchor-id="layout">Layout</h2>
-<table class="caption-top table">
-<colgroup>
-<col style="width: 50%">
-<col style="width: 50%">
-</colgroup>
-<thead>
-<tr class="header">
-<th>Path</th>
-<th>What</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>_targets.R</code></td>
-<td>the pipeline: sources the code, builds the targets for every dataset in <code>config/pipeline.yml</code></td>
-</tr>
-<tr class="even">
-<td><code>config/pipeline.yml</code></td>
-<td>datasets to build, data root, DB path, SLURM resources per method</td>
-</tr>
-<tr class="odd">
-<td><code>config/&lt;dataset&gt;_config.yml</code></td>
-<td>one dataset: data paths, its study design (<code>design:</code>) and each method’s parameter grid</td>
-</tr>
-<tr class="even">
-<td><code>config/composition_markers.yml</code></td>
-<td>marker genes for the per-sample leukocyte composition scores</td>
-</tr>
-<tr class="odd">
-<td><code>config/dataset_families.yml</code></td>
-<td>which datasets are timepoints of the same cohort</td>
-</tr>
-<tr class="even">
-<td><code>R/methods/</code></td>
-<td>one file per method: fit function, <code>&lt;name&gt;_registry</code> (fitting) and <code>&lt;name&gt;_ingest</code> (ingestion)</td>
-</tr>
-<tr class="odd">
-<td><code>R/lib/</code></td>
-<td>config reading, data paths, matrix loading, study designs (<code>design.R</code>), expression input for the variance models (<code>expression.R</code>), method discovery</td>
-</tr>
-<tr class="even">
-<td><code>R/lib/ingest/</code></td>
-<td>the computations behind the DB: similarity, factor/module pairs, redundancy, ICASSO, pattern drivers, gene-id mapping</td>
-</tr>
-<tr class="odd">
-<td><code>R/targets/</code></td>
-<td>target factories, SLURM controllers, ingestion, enrichment, projections, diagnostics, the repeated-measures analysis (<code>variance*.R</code>, <code>composition.R</code>), DB writers</td>
-</tr>
-<tr class="even">
-<td><code>R/ingest_jobs/</code></td>
-<td>the enrichment and projectR job functions</td>
-</tr>
-<tr class="odd">
-<td><code>R/db/</code></td>
-<td>the DB schema (<code>schema.sql</code>, <code>views.sql</code>) and <code>open_stability_db()</code></td>
-</tr>
-<tr class="even">
-<td><code>R/preprocessing/</code></td>
-<td>one matrix-building script per dataset</td>
-</tr>
-<tr class="odd">
-<td><code>R/explore/</code></td>
-<td>interactive scripts over stored results (<code>variance_by_time.R</code>)</td>
-</tr>
-<tr class="even">
-<td><code>app/</code></td>
-<td>the Shiny app</td>
-</tr>
-<tr class="odd">
-<td><code>run_pipeline.sbatch</code></td>
-<td>runs <code>tar_make()</code> as a SLURM job</td>
-</tr>
-<tr class="even">
-<td><code>docs/</code></td>
-<td>this site</td>
-</tr>
-</tbody>
-</table>
+<section id="introduction" class="level2">
+<h2 class="anchored" data-anchor-id="introduction">Introduction</h2>
+<p>This project explores the stability and cross-dataset agreement of latent factors derived from sepsis related repeated measure transcriptomic data. To do this, we ask the following questions:</p>
+<ol type="1">
+<li>How much of the variance in each dataset is explained by change over time? Or, is the variance completely dominated by between patient factors?</li>
+</ol>
+<p>Then, of the different latent factor methods, we ask the following:</p>
+<ol type="1">
+<li>For those that are stochastic in nature, how stable are the factors across seeds within the same parameter settings?</li>
+<li>How do the factors discovered at different ranks, and other settings, relate to one another?</li>
+<li>How well do the different bases capture similar patterns across datasets?</li>
+<li>Is there an ‘optimal’ method, and within that ‘optimal’ method are there optimal settings? If so, how stable are these settings?</li>
+</ol>
+<p>Since there is no single very large repeated measure dataset, this project attempts to find general patterns that address these questions by implementing different latent factor methods on many different datasets. Currently, an analysis of variance is conducted with <a href="https://bioconductor.org/packages/release/bioc/html/variancePartition.html">variancePartition</a>, and the following latent factor methods are applied to each of 13 configured datasets:</p>
+<ul>
+<li><a href="./methods.html#pca-one-fit-per-dataset">PCA</a></li>
+<li><a href="./methods.html#the-methods-and-their-parameters">NMF</a> (only RNA-seq)</li>
+<li><a href="./methods.html#the-methods-and-their-parameters">CoGAPS</a> (only RNA-seq)</li>
+<li><a href="./methods.html#spca-choosing-the-sparsity">sPCA</a></li>
+<li><a href="./methods.html#ica-icasso-and-kurtosis">ICA</a></li>
+<li><a href="./methods.html#wgcna-one-network-over-all-genes">WGCNA</a></li>
+</ul>
+<p>The results of each of these analyses is ingested into a SQLite database, and displayed with a Shiny app.</p>
+</section>
+<section id="what-is-in-this-project" class="level2">
+<h2 class="anchored" data-anchor-id="what-is-in-this-project">What is in this project?</h2>
+<ol type="1">
+<li><strong>Calculation</strong> Given <a href="./data.html">Data</a> and <a href="./methods.html">Methods</a> configuration, a <a href="https://books.ropensci.org/targets/">targets</a> pipeline orchestrates the submission and monitoring of all computational steps, including the ingestion phase.</li>
+<li><strong>Ingestion.</strong> Fits are compared with each other (stability), enriched, projected onto the other datasets, described by the repeated-measures model and summarized, then written to the database (<a href="./database.html">Database</a>).</li>
+<li><strong>App.</strong> A Shiny app browses the database (<a href="./app.html">Launching the app</a>).</li>
+</ol>
+<p>targets re-runs only what a change invalidates: editing one dataset’s config rebuilds that dataset only, editing one method rebuilds that method only (<a href="./workflow.html">Running the workflow</a>).</p>
 
 
 </section>

@@ -45,7 +45,7 @@ ul.task-list li input[type="checkbox"] {
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-55617497126496852ff9f5a59253c640.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -111,12 +111,12 @@ ul.task-list li input[type="checkbox"] {
 <span class="menu-text">Methods</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./database.html"> 
-<span class="menu-text">Database</span></a>
-  </li>  
-  <li class="nav-item">
     <a class="nav-link" href="./workflow.html"> 
 <span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
   </li>  
   <li class="nav-item">
     <a class="nav-link" href="./app.html"> 
@@ -250,9 +250,6 @@ ul.task-list li input[type="checkbox"] {
 </tr>
 </tbody>
 </table>
-<p><strong>Stability designs.</strong> For NMF, CoGAPS and ICA the question is whether factors recur across random seeds (and, for ICA, bootstrap resamples of subjects). PCA, sPCA and WGCNA are deterministic given their parameters, so for them the question is how structure changes as the swept parameter grows. Every method is also compared across ranks.</p>
-<p><strong>CoGAPS’s three sub-blocks</strong> mirror its three call sites: <code>params</code> goes to <code>CogapsParams()</code>, <code>distributed_params</code> to <code>setDistributedParams()</code>, <code>run</code> to <code>CoGAPS()</code> itself. Some argument names exist on more than one of them, so put each under the function it belongs to. <code>nSets</code> and <code>nThreads</code> default to the cogaps controller’s <code>cpus_per_task</code>.</p>
-<p><strong>Threads and identity.</strong> Parameters that only set parallelism (NMF <code>n.threads</code>, CoGAPS <code>nSets</code>/<code>nThreads</code>, WGCNA <code>nThreads</code>) are listed in the method’s <code>resource_params</code> and left out of a fit’s identity (<code>fit_key</code>).</p>
 <section id="pca-one-fit-per-dataset" class="level3">
 <h3 class="anchored" data-anchor-id="pca-one-fit-per-dataset">PCA: one fit per dataset</h3>
 <p>PCA components are nested – the first <em>k</em> components of a rank-20 fit are the rank-<em>k</em> solution – so PCA is fit once per dataset, at the largest configured rank. The fit also records <code>mse_by_rank</code>, every truncation’s reconstruction error. Choosing the first <em>n</em> components is left to ingestion and the app.</p>

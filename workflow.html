@@ -80,7 +80,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-55617497126496852ff9f5a59253c640.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -146,12 +146,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span class="menu-text">Methods</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./database.html"> 
-<span class="menu-text">Database</span></a>
-  </li>  
-  <li class="nav-item">
     <a class="nav-link active" href="./workflow.html" aria-current="page"> 
 <span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
   </li>  
   <li class="nav-item">
     <a class="nav-link" href="./app.html"> 
@@ -192,6 +192,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#main-process-memory" id="toc-main-process-memory" class="nav-link" data-scroll-target="#main-process-memory">Main-process memory</a></li>
   <li><a href="#tuning" id="toc-tuning" class="nav-link" data-scroll-target="#tuning">Tuning</a></li>
   </ul></li>
+  <li><a href="#running-on-a-scheduler-other-than-slurm" id="toc-running-on-a-scheduler-other-than-slurm" class="nav-link" data-scroll-target="#running-on-a-scheduler-other-than-slurm">Running on a scheduler other than SLURM</a></li>
   <li><a href="#logs-and-monitoring" id="toc-logs-and-monitoring" class="nav-link" data-scroll-target="#logs-and-monitoring">Logs and monitoring</a></li>
   <li><a href="#rebuilding-the-database" id="toc-rebuilding-the-database" class="nav-link" data-scroll-target="#rebuilding-the-database">Rebuilding the database</a></li>
   </ul>
@@ -372,6 +373,19 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <p><strong>The <code>vp</code> controller also records its own use:</strong> <code>norm_</code>, <code>vp_</code> and <code>dream_</code> store their job’s cgroup peak memory and CPU seconds in their result (<code>$resources</code>, <code>job_resources()</code> in <code>R/targets/variance.R</code>), and <code>vp_summary_&lt;key&gt;</code> reports them. That was needed when these tasks used socket (<code>SnowParam</code>) workers, which left the job’s process tree so <code>seff</code> missed them; since 2026-10-14 they use forked (<code>MulticoreParam</code>) workers, which use no ports and which <code>seff</code> should count. Compare the two on the next run.</p>
 <p>The current values and the measurements behind them are in <code>config/pipeline.yml</code>’s comments.</p>
 </section>
+</section>
+<section id="running-on-a-scheduler-other-than-slurm" class="level2">
+<h2 class="anchored" data-anchor-id="running-on-a-scheduler-other-than-slurm">Running on a scheduler other than SLURM</h2>
+<p>The pipeline has only run on SLURM (HTCF). The targets themselves don’t depend on that: they only name a controller (<code>tar_resources_crew(controller = "prep")</code> in <code>R/targets/factories.R</code>), so the pipeline’s logic is the same on any crew backend. Six things are tied to SLURM, and a port would change these:</p>
+<ol type="1">
+<li><strong>Controller construction.</strong> <code>build_controller_group()</code> (<code>R/targets/controllers.R</code>) is the only place controllers are built, and it calls <code>crew.cluster::crew_controller_slurm()</code> with <code>crew_options_slurm()</code>. The other <a href="https://wlandau.github.io/crew.cluster/">crew.cluster</a> schedulers (SGE, PBS, LSF) have their own controller and options functions, and <code>crew::crew_controller_local()</code> runs everything on one machine (useful for tests).</li>
+<li><strong>The <code>controllers:</code> block.</strong> Its fields map onto SLURM: <code>time_minutes</code> is the job’s <code>--time</code> (and sets the soft wall time, <code>seconds_wall</code>), <code>memory_gigabytes_required</code> and <code>cpus_per_task</code> are the job’s resources, and <code>partition</code> (under <code>cluster:</code>) is the SLURM partition. Other schedulers name and limit these differently, and the comments in <code>config/pipeline.yml</code> reason about SLURM’s behaviour (jobs killed for exceeding memory, per-user job limits).</li>
+<li><strong>The worker environment.</strong> <code>worker_script_lines()</code> (<code>R/targets/controllers.R</code>) puts R on each worker’s PATH from the spack environment in the <code>cluster:</code> block, then changes into the project directory so renv activates. <code>cluster.setup_lines</code> replaces the spack lines with whatever provides R elsewhere.</li>
+<li><strong>Starting the run.</strong> <code>run_pipeline.sbatch</code> is a SLURM script that runs the <code>tar_make()</code> main process. Any way of keeping that process alive for the whole run works, because the workers connect back to it.</li>
+<li><strong>Resource recording.</strong> <code>job_resources()</code> (<code>R/targets/variance.R</code>) reads the job’s cgroup (v2) under <code>slurmstepd.scope</code>, using <code>SLURM_JOB_ID</code>. Outside SLURM, or without cgroup v2, it returns no usable measurement; the <code>vp</code> tasks’ <code>$resources</code> would be empty.</li>
+<li><strong>Names and comments.</strong> The method registries’ <code>resource_defaults()</code> take an argument called <code>slurm_cfg</code> (only <code>cpus_per_task</code> is read from it), and comments and docs mention SLURM and HTCF throughout.</li>
+</ol>
+<p>A port is therefore mostly a rewrite of <code>build_controller_group()</code> and the <code>controllers:</code> fields, plus items 3 to 5. The resource numbers in <code>config/pipeline.yml</code> were tuned on SLURM and would need tuning again.</p>
 </section>
 <section id="logs-and-monitoring" class="level2">
 <h2 class="anchored" data-anchor-id="logs-and-monitoring">Logs and monitoring</h2>

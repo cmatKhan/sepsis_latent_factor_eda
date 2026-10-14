@@ -80,7 +80,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-bdb270e355756caa14f105f278139700.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-55617497126496852ff9f5a59253c640.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -146,12 +146,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span class="menu-text">Methods</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./database.html"> 
-<span class="menu-text">Database</span></a>
-  </li>  
-  <li class="nav-item">
     <a class="nav-link" href="./workflow.html"> 
 <span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
   </li>  
   <li class="nav-item">
     <a class="nav-link" href="./app.html"> 
@@ -187,6 +187,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#data-root" id="toc-data-root" class="nav-link active" data-scroll-target="#data-root">Data root</a></li>
   <li><a href="#dataset-configs" id="toc-dataset-configs" class="nav-link" data-scroll-target="#dataset-configs">Dataset configs</a>
   <ul class="collapse">
+  <li><a href="#adding-a-dataset" id="toc-adding-a-dataset" class="nav-link" data-scroll-target="#adding-a-dataset">Adding a dataset</a></li>
   <li><a href="#the-design-block" id="toc-the-design-block" class="nav-link" data-scroll-target="#the-design-block">The <code>design:</code> block</a></li>
   <li><a href="#yaml-keys-that-are-booleans" id="toc-yaml-keys-that-are-booleans" class="nav-link" data-scroll-target="#yaml-keys-that-are-booleans">YAML keys that are booleans</a></li>
   </ul></li>
@@ -224,141 +225,58 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <section id="data-root" class="level2">
 <h2 class="anchored" data-anchor-id="data-root">Data root</h2>
-<p>Raw data lives in the HuggingFace sepsis collection (ROSE comes from dbGaP), copied to the cluster at <code>/scratch/mblab/chasem/hf_sepsis_collection</code>. Dataset configs give paths relative to that root; <code>R/lib/data_paths.R::resolve_data_paths()</code> joins them. The root is <code>data_root</code> in <code>config/pipeline.yml</code>, overridden by the <code>SEPSIS_DATA_ROOT</code> environment variable. Every reader of a dataset config goes through <code>read_dataset_yaml()</code>, so moving the data means changing one setting.</p>
+<p>Raw data, except for ROSE, lives in the <a href="https://huggingface.co/collections/cmatkhan/sepsis-transcriptomics">HuggingFace sepsis collection</a> (ROSE comes from dbGaP). Download this collection to a local directory, eg <code>~/projects/sepsis_transcriptomics_collection</code>. The dataset configs give paths relative to that local root and is set by the environmental variable <code>SEPSIS_DATA_ROOT</code> environmental variable.</p>
 </section>
 <section id="dataset-configs" class="level2">
 <h2 class="anchored" data-anchor-id="dataset-configs">Dataset configs</h2>
-<p>Each <code>config/&lt;dataset&gt;_config.yml</code> describes <strong>one matrix</strong>: where its data is, how to build it, and each method’s parameter grid. Subsets analysed separately (e.g.&nbsp;one timepoint) are separate configs, each with its own <code>dataset.id</code>; there’s no “several matrices in one config”. <code>config/dataset_metadata.example.yml</code> is a fully commented template. Configs are read and validated by <code>read_dataset_metadata()</code> / <code>validate_dataset_metadata()</code> (<code>R/lib/metadata.R</code>).</p>
-<p>To add a dataset:</p>
+<p>Each <code>config/&lt;dataset&gt;_config.yml</code> describes where its data is, how to build it, and each configured latent factor method’s parameter grid. Subsets analysed separately (e.g.&nbsp;one timepoint) are separate configs, each with its own <code>dataset.id</code>; there’s no “several matrices in one config”. <a href="https://github.com/cmatKhan/sepsis_latent_factor_eda/blob/main/config/dataset_metadata.example.yml">config/dataset_metadata.example.yml</a> is a fully commented template. Configs are read and validated by <code>read_dataset_metadata()</code> / <code>validate_dataset_metadata()</code> (<code>R/lib/metadata.R</code>).</p>
+<section id="adding-a-dataset" class="level3">
+<h3 class="anchored" data-anchor-id="adding-a-dataset">Adding a dataset</h3>
+<p>A dataset is three parquet files in one directory under the data root, a config, and a line in <code>config/pipeline.yml</code>. The files are named by the config’s <code>*_path</code> keys (conventionally <code>&lt;dataset&gt;/expression.parquet</code>, <code>feature_metadata.parquet</code> and <code>sample_metadata.parquet</code>). Extra columns are ignored.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>File</th>
+<th>One row per</th>
+<th>Columns the config names</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>expression.parquet</code></td>
+<td>feature × sample (long format)</td>
+<td><code>feature_id_col</code>, <code>sample_id_col</code>, <code>value_col</code>. Defaults <code>feature_id</code>, <code>sample_id</code>, <code>value</code>; existing configs use <code>GeneID</code> or <code>IlluminaID</code> for the feature column. Counts for RNA-seq, log-scale values for arrays: the pipeline normalizes nothing by itself.</td>
+</tr>
+<tr class="even">
+<td><code>feature_metadata.parquet</code></td>
+<td>feature</td>
+<td><code>feature_id_col</code>: unique, and the same ids as the expression file’s features. <code>ensembl_col</code>: Ensembl gene id (a <code>;</code>-separated list takes its first gene); every comparison across datasets goes through it. <code>symbol_col</code>: gene symbol; display only, except that arrays with a <code>design:</code> block are collapsed to one probe per symbol.</td>
+</tr>
+<tr class="odd">
+<td><code>sample_metadata.parquet</code></td>
+<td>sample</td>
+<td><code>sample_id_col</code>: the same ids as the expression file’s samples. Plus every column a <code>design:</code> block names (subject, time, group, covariates), and <code>subject_id_col</code> if you set it.</td>
+</tr>
+</tbody>
+</table>
+<p>The sample metadata file is optional: without it (e.g.&nbsp;SHIP-TREND) the dataset gets factor fits but no design, variance or composition analysis.</p>
 <ol type="1">
-<li>Write <code>config/&lt;dataset&gt;_config.yml</code> (copy the example).</li>
+<li>Put the three files under <code>&lt;data root&gt;/&lt;dataset&gt;/</code>.</li>
+<li>Write <code>config/&lt;dataset&gt;_config.yml</code>, starting from <code>config/dataset_metadata.example.yml</code>: the three paths (relative to the data root), the column names above, a <code>methods:</code> block, usually a <code>preprocessing_script</code> (<a href="#building-a-matrix">Building a matrix</a>), and a <code>design:</code> block if you want the repeated-measures analysis (<a href="#the-design-block">below</a>).</li>
 <li>Add its <code>dataset.id</code> to <code>datasets:</code> in <code>config/pipeline.yml</code>.</li>
 <li>Run the pipeline. Only the new dataset’s targets are built.</li>
 </ol>
 <p>File names needn’t match ids (<code>ANEMONES_day1_config.yml</code> declares <code>ANEMONES_DAY1</code>); the pipeline finds a config by its declared <code>dataset.id</code>.</p>
-<p>The <code>dataset:</code> block:</p>
-<table class="caption-top table">
-<colgroup>
-<col style="width: 50%">
-<col style="width: 50%">
-</colgroup>
-<thead>
-<tr class="header">
-<th>Key</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>id</code></td>
-<td>unique dataset id, used in target and DB names</td>
-</tr>
-<tr class="even">
-<td><code>description</code></td>
-<td>free text</td>
-</tr>
-<tr class="odd">
-<td><code>expression_path</code></td>
-<td>long-format expression parquet (feature id, sample id, value)</td>
-</tr>
-<tr class="even">
-<td><code>sample_metadata_path</code>, <code>feature_metadata_path</code></td>
-<td>sample and feature metadata parquets</td>
-</tr>
-<tr class="odd">
-<td><code>sample_id_col</code>, <code>feature_id_col</code>, <code>value_col</code></td>
-<td>column names in those files</td>
-</tr>
-<tr class="even">
-<td><code>ensembl_col</code></td>
-<td>feature-metadata column holding Ensembl gene ids – the cross-dataset identifier (below)</td>
-</tr>
-<tr class="odd">
-<td><code>symbol_col</code></td>
-<td>optional; feature-metadata column of gene symbols, for display only</td>
-</tr>
-<tr class="even">
-<td><code>subject_id_col</code></td>
-<td>optional; sample-metadata column naming each sample’s subject (person). Links a person’s samples across a family’s datasets and keeps them together when fits resample (<code>fit_subjects()</code>, <code>R/targets/run_method_fit.R</code>); a <code>design:</code> block’s <code>subject</code> takes precedence</td>
-</tr>
-<tr class="odd">
-<td><code>matrix_path</code> / <code>preprocessing_script</code></td>
-<td>how the matrix is built (below)</td>
-</tr>
-</tbody>
-</table>
-<p><code>feature_id_col</code> must match the column of <code>feature_metadata_path</code> whose values equal the matrix’s row names.</p>
-<p>The <code>methods:</code> block holds each method’s parameter grid; see <a href="./methods.html">Methods</a>. A method runs for a dataset only if it appears there.</p>
+<p>Every key of the <code>dataset:</code>, <code>design:</code> and <code>methods:</code> blocks is documented in the comments of the example config; each method’s keys are also in <a href="./methods.html">Methods</a>. The notes below cover the parts that are easy to miss.</p>
+</section>
 <section id="the-design-block" class="level3">
 <h3 class="anchored" data-anchor-id="the-design-block">The <code>design:</code> block</h3>
-<p>Optional. A dataset with one gets the repeated-measures analysis (variance partition, dream, composition and sex checks; see <a href="./methods.html">Methods</a>). Read by <code>validate_design()</code> and <code>prepare_design()</code> (<code>R/lib/design.R</code>). Column names refer to the sample metadata and must be syntactic R names.</p>
-<table class="caption-top table">
-<colgroup>
-<col style="width: 50%">
-<col style="width: 50%">
-</colgroup>
-<thead>
-<tr class="header">
-<th>Field</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>platform</code></td>
-<td><code>array</code> (log-scale values, one probe per symbol, no variance filter) or <code>rnaseq</code> (counts → <code>filterByExpr()</code> → TMM → voom weights)</td>
-</tr>
-<tr class="even">
-<td><code>subject</code></td>
-<td>person id; omit for a cross-sectional dataset</td>
-</tr>
-<tr class="odd">
-<td><code>time</code>, <code>time_order</code></td>
-<td>timepoint column and its levels in chronological order (required with <code>time</code>)</td>
-</tr>
-<tr class="even">
-<td><code>group</code></td>
-<td>arm or subphenotype; cells are group × time</td>
-</tr>
-<tr class="odd">
-<td><code>group_at_first_time</code></td>
-<td><code>true</code>: every sample takes its subject’s first-timepoint group (a status that changes over time, e.g.&nbsp;GSE13904’s “SIRS resolved”)</td>
-</tr>
-<tr class="even">
-<td><code>covariates</code></td>
-<td>further variables in the variance model; categorical ones are random effects</td>
-</tr>
-<tr class="odd">
-<td><code>vp_covariates</code></td>
-<td>numeric covariates for the variance model only (e.g.&nbsp;ROSE’s sequencing QC)</td>
-</tr>
-<tr class="even">
-<td><code>numeric</code></td>
-<td>which covariates are numeric (fixed effects, standardized)</td>
-</tr>
-<tr class="odd">
-<td><code>de_covariates</code></td>
-<td>fixed-effect covariates added to the dream model</td>
-</tr>
-<tr class="even">
-<td><code>drop</code>, <code>keep</code></td>
-<td><code>{column: [values]}</code> sample filters</td>
-</tr>
-<tr class="odd">
-<td><code>set_na</code>, <code>recode</code></td>
-<td><code>{column: [values]}</code> recoded to missing; <code>{column: {from: to}}</code></td>
-</tr>
-<tr class="even">
-<td><code>contrasts</code></td>
-<td>cross-sectional only: <code>{name: "levelA - levelB"}</code>; default every group pair</td>
-</tr>
-<tr class="odd">
-<td><code>control_probes</code></td>
-<td>the array’s control probes for the composition check: <code>{id_pattern: "&lt;regex&gt;"}</code> or <code>{column: &lt;feature-metadata column&gt;, values: [...]}</code>; with <code>covariate: true</code> their first principal component enters the variance and dream models (<code>compute_control_factor()</code>, <code>R/lib/expression.R</code>)</td>
-</tr>
-</tbody>
-</table>
-<p><code>"NA"</code>, <code>""</code> and <code>NA</code> are missing; samples missing any model variable are dropped and counted. Per-timepoint subsets have no <code>design:</code> block: their factors are described with their parent’s design (<code>variance_parent()</code>, <code>R/targets/variance.R</code>).</p>
+<p>Optional. A dataset with one gets the repeated-measures analysis (<a href="./methods.html">Methods</a>). <code>group_at_first_time: true</code> is for a group that changes over time (GSE13904’s “SIRS resolved”): every sample takes its subject’s first-timepoint group. Per-timepoint subsets have no <code>design:</code> block: their factors are described with their parent’s design (<code>variance_parent()</code>, <code>R/targets/variance.R</code>).</p>
 <p><strong>Composition markers.</strong> <code>config/composition_markers.yml</code> lists the neutrophil and lymphocyte marker genes behind the per-sample composition scores (<code>analyze_composition()</code>, <code>R/targets/composition.R</code>). Editing it reruns only the composition targets and what reads them.</p>
 </section>
 <section id="yaml-keys-that-are-booleans" class="level3">
