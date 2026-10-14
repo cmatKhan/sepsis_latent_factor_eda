@@ -17,7 +17,18 @@ tail -f logs/targets_main_<jobid>.out
 ```
 
 The argument is passed to `tar_make(names = ...)`. targets builds the named targets plus
-whatever they depend on.
+whatever they depend on, and nothing else, so a part of the pipeline can run without the long
+fits. For example, the repeated-measures analysis alone for every dataset:
+
+```sh
+sbatch run_pipeline.sbatch 'c(starts_with("design_"), starts_with("expr_"), starts_with("norm_"),
+  starts_with("vp_"), starts_with("dream_"), starts_with("de_tables_"), starts_with("dupcor_"),
+  starts_with("composition_"), starts_with("controls_"), starts_with("control_factor_"),
+  any_of("variance_explore"))'
+```
+
+Check `tar_outdated(names = ...)` with the same selection first: it lists exactly what would
+build.
 
 **From RStudio Server on the cluster**, open the project and use the console:
 
@@ -46,12 +57,13 @@ for a name):
 
 | Stage | Targets |
 |---|---|
-| inputs | `inputs_<key>` (file target over the config, preprocessing script and raw data), `meta_<key>`, `mat_<key>`, `mat_nn_<key>` |
+| inputs | `inputs_<key>` (file target over the config, preprocessing script and raw data), `meta_<key>`, `mat_<key>`, `mat_nn_<key>`, `sample_meta_<key>`, `subjects_<key>` (each matrix column's subject, `fit_subjects()`) |
 | fits, per method `<m>` | `grid_<m>_<key>`, `fit_<m>_<key>` (one branch per batch of grid rows); sPCA adds `grid_spca_refine_<key>`, `fit_spca_refine_<key>`, `selection_spca_<key>` |
-| ingestion, per method | `ingest_<m>_<key>`, `pairs_<m>_<key>`, `representatives_<m>_<key>`, `redundancy_<m>_<key>`, `fgsea_jobs_<m>_<key>`/`fgsea_<m>_<key>`, `icasso_ica_<key>` |
+| ingestion, per method | `ingest_<m>_<key>`, `pairs_<m>_<key>`, `representatives_<m>_<key>`, `redundancy_<m>_<key>`, `fgsea_jobs_<m>_<key>`/`fgsea_<m>_<key>`, `icasso_ica_<key>`, `factor_vp_<m>_<key>` (score-level variance partition, when the dataset or its parent has a design) |
+| repeated measures (datasets with a `design:` block; `R/targets/variance.R`) | `design_<key>`, `expr_<key>`, `norm_<key>`, `vp_<key>`, `dream_<key>`, `de_tables_<key>` (every contrast's table; the only reader of the dream fit), `dupcor_<key>` (time courses), `controls_<key>` (arrays with `control_probes`), `control_factor_<key>` (with `control_probes: {covariate: true}`), `composition_<key>`, `vp_explore_<key>`, `vp_summary_<key>`, `vp_qc_<key>` (plots and tables in `results/variance/<dataset>/`), `variance_files_<key>` |
 | WGCNA | `wgcna_ora_jobs_`/`wgcna_ora_<key>`, `wgcna_fit_jobs_`/`wgcna_fit_diag_<key>`, `wgcna_dataset_diag_<key>` |
-| per dataset | `sample_meta_<key>`, `metadata_files_<key>`, `matrix_file_<key>`, `matrix_diagnostics_<key>`, `ensembl_map_<key>`, `enrichment_<key>`, `drivers_<key>`, `db_<key>` |
-| across datasets | `projectr_jobs_<key>`/`projectr_<key>`, `gene_space_<key>`, `db_cross_dataset`, plus `msigdb_pathways`, `db_schema`, `ensembl_maps`, `matrix_files`, `dataset_families` |
+| per dataset | `metadata_files_<key>`, `matrix_file_<key>`, `matrix_diagnostics_<key>`, `ensembl_map_<key>`, `enrichment_<key>`, `factor_gene_files_<key>`, `drivers_<key>`, `db_<key>` |
+| across datasets | `projectr_jobs_<key>`/`projectr_<key>`, `gene_space_<key>`, `db_cross_dataset`, `variance_explore`, plus `msigdb_pathways`, `db_schema`, `ensembl_maps`, `matrix_files`, `dataset_families`, `composition_markers` |
 
 ## What reruns when
 
@@ -63,7 +75,8 @@ and whitespace don't count).
 | a dataset's config, preprocessing script or raw files | that dataset only |
 | a method's grid in one config (e.g. adding a rank) | only the new grid rows' fits, then that dataset's ingestion |
 | a method's fit function or `<name>_registry` | every fit of that method (sPCA: about a day) |
-| `run_method_fits()`, the grid helpers, `capture_fit()` | every fit of every method that uses them |
+| `run_method_fits()`, `fit_subjects()`, the grid helpers, `capture_fit()` | every fit of every method that uses them |
+| a dataset's `design:` block, `R/lib/design.R` or `R/targets/variance*.R` | that dataset's repeated-measures targets and score-level partitions, then its DB write -- never a fit |
 | a controller's `batch_size` or `cpus_per_task` | that method's fits (they change the grid) |
 | a controller's memory, time or worker settings | nothing |
 | a method's `<name>_ingest` or the ingestion code in `R/targets/` | ingestion and the DB writes only |
@@ -90,13 +103,14 @@ runs tasks until it's idle or reaches its time limits.
 - **Backups for out-of-memory.** A controller's `backup:` block (crew backup controllers)
   retries a task whose worker crashed `crashes_max` times -- typically killed for exceeding
   memory on the largest datasets -- on `<name>_backup` with more memory.
-- **One fit per worker for long fits.** sPCA uses `tasks_max: 1`, so no long fit starts late in
-  a worker's life.
+- **One fit per worker for long fits.** sPCA and the `vp` controller (variancePartition and
+  dream, BiocParallel `SnowParam` over `cpus_per_task`) use `tasks_max: 1`, so no long task
+  starts late in a worker's life.
 
 ### Tuning
 
 Aim for about 75% average memory and CPU use, never below 50%, and err on the high side. Size
-memory for the largest dataset (about 8,000 genes × 518 samples), not EARLI.
+memory for the largest dataset (SHIP-TREND: 8,000 genes × 991 samples), not EARLI.
 
 1. Run the method, e.g. `tar_make(names = starts_with("fit_nmf_"))`.
 2. Find the worker array ids: `sacct -X -S <start> --format=JobID,JobName | grep crew-worker`.
@@ -104,6 +118,11 @@ memory for the largest dataset (about 8,000 genes × 518 samples), not EARLI.
    `python /scratch/mblab/chasem/seff-array/seff-array.py <array id>`. seff-array needs a
    terminal; from a non-interactive shell wrap it:
    `script -qc "stty cols 100; python .../seff-array.py <id>" /dev/null`.
+
+**The `vp` controller is the exception:** `seff`/`sacct` miss the Snow worker processes (they
+leave the job's process tree), so `norm_`, `vp_` and `dream_` record their job's cgroup peak
+memory and CPU seconds in their result (`$resources`, `job_resources()` in
+`R/targets/variance.R`); `vp_summary_<key>` reports them.
 
 The current values and the measurements behind them are in `config/pipeline.yml`'s comments.
 

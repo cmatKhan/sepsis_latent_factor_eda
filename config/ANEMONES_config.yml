@@ -1,6 +1,3 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
 dataset:
   id: ANEMONES
   description: >
@@ -26,18 +23,24 @@ dataset:
 
   preprocessing_script: R/preprocessing/anemones_preprocessing.R
 
-  # Used by the app's trajectory-across-time feature to collapse
-  # sample_metadata to one row per subject when matching a subject across
-  # sibling per-timepoint datasets (see
-  # app/R/metadata_helpers.R::subject_level_metadata()). `patient_id`
-  # repeats per subject across ANEMONES's 4 timepoint levels (Day 1, Day 2,
-  # Day 5, Day Discharge). Originally also required by CP/Tucker's
-  # genes x subjects x timepoints tensor (removed 2026-09-29, see
-  # docs/methods.qmd ("Methods considered and dropped")).
+  # The person id: `patient_id` repeats across ANEMONES's 4 timepoint levels
+  # (Day 1, Day 2, Day 5, Day Discharge). Links a person's samples across
+  # the timepoint subsets and groups them in resampling (fit_subjects()).
   subject_id_col: patient_id
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# Controls (30) are sampled at Day 1 only; "Day: ..." levels sort
+# chronologically.
+# control_probes: the array's own positive controls (feature metadata
+# control_type = pos: 96 ERCC, 10 Agilent E1A spike-ins, corner and other
+# controls). The deposited values have no between-sample normalization and
+# the controls share the samples' overall shift (ERCC mean vs all-gene mean
+# r = 0.99), so their first principal component enters the variance and dream
+# models as a covariate (covariate: true; compute_control_factor()). Shifting
+# each sample by a control offset over-corrected (controls move ~2x as much as
+# genes; sex agreement fell 0.99 -> 0.94) -- 2026-10-13.
+design: {platform: array, subject: patient_id, time: timepoint, time_order: ["Day: 1", "Day: 2", "Day: 5", "Day: Discharge"], group: disease, covariates: [sex], control_probes: {column: control_type, values: [pos], covariate: true}}
+
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

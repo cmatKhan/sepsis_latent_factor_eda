@@ -1,7 +1,3 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-
 dataset:
   id: ROSE
   description: >
@@ -40,8 +36,12 @@ dataset:
 
   preprocessing_script: R/preprocessing/rose_preprocessing.R
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# class is the Hyper/Hypo-inflammatory subphenotype. vp_covariates: the
+# technical sequencing QC metrics, variance model only (p_usable left out:
+# it is exactly 100 - p_rrna).
+design: {platform: rnaseq, subject: subject_number, time: timepoint, time_order: ["Day 0", "Day 2"], group: class, covariates: [gender, scr_age], vp_covariates: [n_processed, p_pseudoaligned, p_rrna, p_mtrrna, p_ercc, frag_len], numeric: [scr_age, n_processed, p_pseudoaligned, p_rrna, p_mtrrna, p_ercc, frag_len]}
+
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

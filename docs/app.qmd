@@ -3,8 +3,11 @@ title: "Launching the app"
 ---
 
 ::: {.callout-note}
-The app is built on the redesigned database schema ([Database](database.qmd)). The earlier app's
-analyses are all ported except on-demand pattern-driver runs (see the end of this page).
+The app is built on schema 1 of the redesigned database. Schema 2 ([Database](database.qmd))
+adds the repeated-measures tables (`dataset_design`, `samples`, `variance_*`,
+`factor_variance`, ...) and moves the enrichment gene lists (`enrichment_results.genes`) and the
+`pattern_markers` table into per-dataset artifacts; the app doesn't read those yet. This page
+describes the app as it is.
 :::
 
 ## Launching
@@ -70,7 +73,12 @@ part (with two samples per subject even pure noise puts about half of the sum of
 Pooled values are ratios of sums over genes, so high-variance genes count more. On simulated data
 with known components the estimates recover them (0.573 against a true 0.58), and with no subject
 effect the between-subject estimate is 0.004. The split is computed when the page is opened (about
-25 s the first time) and cached for the session; it is not stored in the database.
+25 s the first time) and cached for the session.
+
+The pipeline now stores the model-based version of this split: per dataset and gene from
+variancePartition (`variance_summary`, `variance_terms`, `variance_categories`, the
+`variance_partition` artifact) and per factor (`factor_variance`); see Methods, "Repeated
+measures". Switching this page to the stored values is pending.
 
 ## Explore fits
 
@@ -130,8 +138,9 @@ PCA at rank *n* is its single max-rank fit's first *n* components.
 | Biplots | samples at their scores on two chosen factors, with arrows for the top-loading genes, or with every metadata field (numeric: a correlation vector; categorical: a centroid per level) | loadings, scores, sample metadata |
 | Pattern drivers | genes that differ between two sample groups and carry weight on a factor (projectR `projectionDriveR`): confidence-interval or Welch-test view, table of shared significant genes | `pattern_drivers` and its result files; only combinations the pipeline computed |
 
-Gene labels use the dataset's symbol column, read from the feature-metadata artifact (the app loads
-`arrow` to read it: those artifacts were saved with arrow-backed columns). Sample and feature
+Gene labels use the dataset's symbol column, read from the feature-metadata artifact. The app
+loads `arrow` because schema-1 artifacts were saved with arrow-backed columns; schema-2 metadata
+artifacts are plain data frames. Sample and feature
 metadata artifacts are local files under `stability_artifacts/<dataset_id>/`.
 
 ## Across datasets

@@ -16,13 +16,12 @@ if (!requireNamespace("roxygen2", quietly = TRUE)) {
 
 root <- normalizePath("..")
 sections <- c(
-  "R/lib" = "Configuration, data paths, matrices and method discovery",
+  "R/lib" = "Configuration, data paths, matrices, study designs and method discovery",
   "R/lib/ingest" = "Ingestion computations",
   "R/db" = "Database connection",
-  "R/targets" = "Target factories, controllers, ingestion and DB writers",
+  "R/targets" = "Target factories, controllers, variance partition, ingestion and DB writers",
   "R/ingest_jobs" = "Enrichment and projectR jobs",
-  "R/methods" = "Methods",
-  "R/de" = "Differential expression"
+  "R/methods" = "Methods"
 )
 
 md_escape <- function(x) gsub("\n", " ", trimws(x))

@@ -2,14 +2,12 @@ library(tidyverse)
 library(here)
 library(DESeq2)
 
-# When this script is sourced by the rslurm setup scripts (see
-# R/lib/matrices.R::run_preprocessing_script()), expression_path/
+# When the `mat_<dataset>` target runs this script
+# (run_preprocessing_script(), R/lib/matrices.R), expression_path/
 # sample_metadata_path/feature_metadata_path/tmp_dir are already defined in
-# this script's environment -- tmp_dir is unique to that call path, so its
-# presence is what distinguishes "run by the framework" from "run directly
-# (e.g. line-by-line in the console) for interactive exploration." In the
-# interactive case, fall back to local paths and skip the final saveRDS()
-# below -- exploring intermediate objects is the point, not writing output.
+# its environment; tmp_dir's presence is what distinguishes that from running
+# it line by line in the console, which falls back to local paths and skips
+# the final saveRDS().
 framework_run <- exists("tmp_dir", inherits = FALSE)
 
 if (!framework_run) {

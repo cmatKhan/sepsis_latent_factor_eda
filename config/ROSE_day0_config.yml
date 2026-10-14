@@ -1,7 +1,3 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-#
 # Single-timepoint slice of ROSE (design: timecourse). Built from the SAME
 # raw parquet trio as config/ROSE_config.yml, filtered to
 # timepoint == "Day 0" (122 samples) inside
@@ -15,24 +11,18 @@ dataset:
 
   hf_collection: "dbGAP"       # documentation only
 
-  expression_path: /home/chase/projects/sepsis_timecourse_factors_eda/data/rose_counts.parquet
-  sample_metadata_path: /home/chase/projects/sepsis_timecourse_factors_eda/data/rose_sample_meta.parquet
-  feature_metadata_path: /home/chase/projects/sepsis_timecourse_factors_eda/data/rose_feature_meta.parquet
+  expression_path: ROSE/rose_counts.parquet
+  sample_metadata_path: ROSE/rose_sample_meta.parquet
+  feature_metadata_path: ROSE/rose_feature_meta.parquet
   sample_id_col: sample_id
   feature_id_col: feature_id   # matches this dataset's actual parquet schema directly -- see config/ROSE_config.yml's NOTE re: the GeneID/feature_id mixup fixed there
   value_col: value
   ensembl_col: feature_id
   symbol_col: symbol
-  subject_id_col: subject_number   # for projectR trajectory views (app.R's Trajectory-across-time tab) -- same subject column as the parent full dataset's config, since this is just a timepoint-filtered subset of it
+  subject_id_col: subject_number   # same subject column as config/ROSE_config.yml; links a person's samples across the timepoint subsets
 
   preprocessing_script: R/preprocessing/rose_day0_preprocessing.R
-  # No timepoint_col -- this is a single-timepoint matrix (no time
-  # dimension left; only 2 timepoint levels existed even in the base
-  # config). subject_id_col above is set anyway, for the app's
-  # trajectory-across-time feature.
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

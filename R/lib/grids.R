@@ -1,5 +1,4 @@
-# Merging a method's config overrides onto its registry `defaults`
-# (docs: Methods, "Adding a method").
+# Merging a method's config overrides onto its registry `defaults`.
 
 #' Null default
 #'

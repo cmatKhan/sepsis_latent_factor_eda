@@ -4,16 +4,12 @@
 # config/<ID>_config.yml; this file holds what is shared across datasets:
 # which datasets the pipeline builds, where the raw data lives on this
 # machine, how SLURM workers get R, and one resource profile per method.
-# The `slurm:` blocks in the dataset configs are only read by the legacy
-# rslurm driver (R/create_slurm_bundle.R).
 
 # Dataset ids to include -- each must have a config/<ID>_config.yml.
 # Adding an id here adds that dataset's targets; removing one leaves its
 # results in the store (see targets::tar_prune()).
-# Not listed (inputs missing, 2026-10-04): ROSE, ROSE_DAY0, ROSE_DAY2 (data
-# paths point at /home/chase/...; no ROSE data in data_root) and MARS,
-# SHIP-TREND (preprocessing scripts don't exist); gains (its preprocessing
-# script is an unfinished stub that never writes a matrix).
+# Not listed: gains (its preprocessing script is a stub until pooling its
+# four accessions is decided; see config/gains_config.yml).
 datasets:
   - ANEMONES
   - ANEMONES_DAY1
@@ -45,6 +41,11 @@ datasets:
   - GSE95233_D02
   - GSE95233_D03
   - hfgp-500fg
+  - MARS
+  - ROSE
+  - ROSE_DAY0
+  - ROSE_DAY2
+  - SHIP-TREND
 
 # Methods configured in a dataset config but not built by the pipeline
 # (no targets are created for them), e.g. `skip_methods: [cogaps]`.
@@ -75,17 +76,18 @@ cluster:
 
 # One crew_controller_slurm() per entry (R/targets/controllers.R). Each
 # method's fits run on the controller with the method's name; `prep` runs
-# matrix loading/preprocessing. Values match the per-method `slurm:` blocks
-# every dataset config carried for rslurm, then tuned from seff/seff-array
+# matrix loading/preprocessing. Values are tuned from seff/seff-array
 # (target: ~75% average memory/CPU use, never under 50%; size for the
-# largest dataset, ANEMONES, not EARLI). crew scales each controller's
+# largest dataset, not EARLI: SHIP-TREND (991 samples) since 2026-10-13,
+# then MARS (802), ANEMONES (447 x 8000 genes)). crew scales each controller's
 # workers with the task backlog and back down when idle: a worker exits
 # after `seconds_idle` (default 30) with nothing to do. There is no worker
 # cap by default -- SLURM's scheduler and per-user limits decide what runs
 # when (R/targets/controllers.R's UNCAPPED_WORKERS stands in for "no cap").
 # Set `workers` only for a reason other than limiting submissions: pca, nmf
 # and ica cap it because their fits take seconds, far less than a worker's
-# ~30 s R start-up, so one worker per task would mostly pay for start-ups. `time_minutes` is the SLURM --time of one
+# ~30 s R start-up, so one worker per task would mostly pay for start-ups.
+# `time_minutes` is the SLURM --time of one
 # worker, not of one fit: a worker stops taking new fits after
 # `seconds_wall` (default: half of time_minutes) and finishes the one it's
 # on, so time_minutes * 60 must cover seconds_wall + the longest fit.
@@ -107,8 +109,9 @@ controllers:
   # spends ~1 s of bookkeeping per branch, so batch methods whose fits
   # take seconds (changing it re-runs that method's fits).
   prep:
-    # 1.5 GB peak, 40 s
-    memory_gigabytes_required: 3
+    # 1.5 GB peak, 40 s (EARLI); SHIP-TREND (991 samples, 48 M long-format
+    # rows) peaked at 3.4 GB of R heap in a dry run (2026-10-13), MARS 2.0 GB.
+    memory_gigabytes_required: 6
     cpus_per_task: 1
     time_minutes: 60
     crashes_max: 1
@@ -125,10 +128,26 @@ controllers:
     backup:
       memory_gigabytes_required: 16
       crashes_max: 2
+  vp:
+    # variancePartition and dream per dataset (R/targets/variance.R): one
+    # long task per worker, BiocParallel SnowParam over cpus_per_task.
+    # seff/sacct miss the Snow worker processes; each result records its
+    # job's cgroup peak memory and CPU seconds instead ($resources). Measured
+    # 2026-10-13 (8 CPUs): peak 3.3-4.5 GB for vp/norm, 8.25 GB for
+    # dream_ANEMONES (32k genes x 447 samples, 11 min); CPU efficiency
+    # 0.4-0.9. 12 GB puts ANEMONES at ~70%.
+    memory_gigabytes_required: 12
+    cpus_per_task: 8
+    time_minutes: 1440
+    tasks_max: 1
+    crashes_max: 1
+    backup:
+      memory_gigabytes_required: 24
+      crashes_max: 2
   fgsea:
     # Enrichment per representative fit (R/ingest_jobs/fgsea_job.R) and
-    # module ORA per WGCNA fit; BiocParallel uses cpus_per_task. The rslurm
-    # setup used 80 GB / 8 CPUs / 24 h; not yet tuned under targets.
+    # module ORA per WGCNA fit; BiocParallel uses cpus_per_task. Not yet
+    # tuned under targets.
     memory_gigabytes_required: 32
     cpus_per_task: 8
     time_minutes: 720
@@ -140,8 +159,7 @@ controllers:
   projectr:
     # One branch per (source dataset, target dataset): every representative
     # fit of the source projected onto one target (projection_rows(),
-    # R/targets/projections.R). The rslurm setup used 4 GB / 1 CPU per
-    # projection. Not yet tuned under targets.
+    # R/targets/projections.R). Not yet tuned under targets.
     memory_gigabytes_required: 4
     cpus_per_task: 1
     time_minutes: 120
@@ -194,8 +212,10 @@ controllers:
     # (one fit hit 4.27 GB on the 5 GB backup), 98% CPU, single-threaded.
     # Fit time grows steeply with para (fraction of genes nonzero) and K:
     # median 1-7 min at para 0.1, 37-160 min at 0.5, 1.5-3.5 h at >= 0.7.
-    # The IS search (R/methods/spca.R) keeps the grid at para <= 0.5 plus
-    # refinement, ~99 fits per dataset at K 2-12. One worker per fit (tasks_max 1):
+    # The sparsity search (R/methods/spca.R) scans para 0.2-0.5 at one K, then
+    # fits every K at the winner +/- 0.05: about 36 fits per dataset at
+    # K 2-12 (was ~99 with the full grid). Resources unchanged until tuned
+    # on the new grid. One worker per fit (tasks_max 1):
     # fits are long next to R's ~30 s start-up, and a worker can't then be
     # cut off by --time partway through a fit it picked up late. SLURM
     # queues whatever can't start yet.

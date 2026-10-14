@@ -1,7 +1,3 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-
 dataset:
   id: GSE95233
   description: >
@@ -26,8 +22,13 @@ dataset:
 
   preprocessing_script: R/preprocessing/gse95233_preprocessing.R
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# 22 healthy-control samples have timepoint "NA" (dropped). sex "H" (homme;
+# Patients 18 and 67, 4 samples) is male: all four have the male XIST/chrY
+# pattern (logs/dev/infer_sex_gse95233.R, 2026-10-13).
+# control_probes: Affymetrix hybridization spike-ins, the technical reference in the composition check.
+design: {platform: array, subject: patient_id, time: timepoint, time_order: [D01, D02, D03], covariates: [sex, age], numeric: [age], drop: {timepoint: ["NA"]}, recode: {sex: {H: M}}, control_probes: {id_pattern: "^AFFX-(BioB|BioC|BioDn|CreX|r2-Ec-bio|r2-P1-cre)"}}
+
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

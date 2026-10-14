@@ -3,12 +3,11 @@
 #     defaults) -- the fit targets depend on it, so editing it refits;
 #   - `<name>_ingest`, the ingestion contract (method properties and
 #     extract()) -- only ingestion depends on it.
-# discover_method_registries() sources every file and validates both. Field
-# lists: docs, Methods, "Adding a method".
+# discover_method_registries() sources every file and validates both.
 
 #' Run one fit, recording failures and wall time
 #'
-#' Wraps a fit function's body (every method except sPCA) so a failing fit
+#' Wraps a fit function's body (every method) so a failing fit
 #' returns its error message instead of stopping the rest of its batch;
 #' ingestion records it as failed. A fit-target dependency: editing this
 #' function refits every method that uses it.
@@ -55,8 +54,8 @@ discover_method_registries <- function(dir = here::here("R/methods")) {
     if (!exists(registry_var, envir = globalenv(), inherits = FALSE)) {
       stop(
         "R/methods/", basename(f), " must define a `", registry_var, "` list ",
-        "(a file named `<name>.R` must define `<name>_registry`) -- see ",
-        "R/README.md's \"Adding a new method\" section."
+        "(a file named `<name>.R` must define `<name>_registry`, the fitting contract: ",
+        "fn, global_object, build_grid, defaults)."
       )
     }
 
@@ -64,8 +63,8 @@ discover_method_registries <- function(dir = here::here("R/methods")) {
     validate_method_registry(registry, key)
     ingest_var <- paste0(key, "_ingest")
     if (!exists(ingest_var, envir = globalenv(), inherits = FALSE)) {
-      stop("R/methods/", basename(f), " must define `", ingest_var, "` (the ingest contract) -- ",
-           "see R/README.md's \"Adding a new method\" section.")
+      stop("R/methods/", basename(f), " must define `", ingest_var, "`, the ingest contract: ",
+           "family, sign_ambiguous, has_loadings, resource_params, extract.")
     }
     spec <- get(ingest_var, envir = globalenv())
     validate_method_ingest(spec, key)
@@ -77,13 +76,13 @@ discover_method_registries <- function(dir = here::here("R/methods")) {
 #' Validate a fitting contract
 #'
 #' Fails when _targets.R is read rather than mid-run: required fields
-#' (`global_object`, `jobname`, `fn`, `build_grid`) and their types.
+#' (`global_object`, `fn`, `build_grid`) and their types.
 #'
 #' @param registry A `<name>_registry` list.
 #' @param key The method name.
 #' @return `registry`, invisibly.
 validate_method_registry <- function(registry, key) {
-  required <- c("global_object", "jobname", "fn", "build_grid")
+  required <- c("global_object", "fn", "build_grid")
   missing <- setdiff(required, names(registry))
   if (length(missing) > 0) {
     stop("`", key, "_registry` is missing required field(s): ", paste(missing, collapse = ", "))
@@ -104,8 +103,7 @@ validate_method_registry <- function(registry, key) {
 #' Validate an ingestion contract
 #'
 #' Required fields: `family` (`"seed_sweep"` or `"param_grid"`),
-#' `sign_ambiguous`, `has_loadings`, `resource_params` and `extract`
-#' (docs: Methods, "Adding a method").
+#' `sign_ambiguous`, `has_loadings`, `resource_params` and `extract`.
 #'
 #' @param spec A `<name>_ingest` list.
 #' @param key The method name.

@@ -1,4 +1,4 @@
--- Convenience views over R/db/schema.sql (documented in R/db/SCHEMA.md).
+-- Convenience views over R/db/schema.sql.
 -- Statements are separated by a line holding only ";;".
 
 -- fits + method family, with the commonly filtered parameters pivoted out

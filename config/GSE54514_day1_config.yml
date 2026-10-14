@@ -1,19 +1,9 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-#
 # Single-timepoint slice of GSE54514 (design: timecourse, see
 # sepsis_collection_description.agent). Built from the SAME raw parquet
 # trio as config/GSE54514_config.yml, filtered to
 # day == "1" (53 samples) inside
-# R/preprocessing/gse54514_day1_preprocessing.R. See docs/data.qmd ("Dataset configs": one matrix per config)
-# (in R/lib/metadata.R's header) for why this is a separate config/matrix
-# rather than a flag on the parent -- one dataset_metadata.yml per matrix.
-#
-# NOTE: GSE54514 has no base (non-timepoint) preprocessing script yet -- see
-# config/GSE54514_config.yml's TODO. This script was written fresh (not
-# adapted from an existing base script) following the same array-platform
-# pattern used elsewhere in this project (see docs/data.qmd).
+# R/preprocessing/gse54514_day1_preprocessing.R.
+# One config per matrix, so each timepoint is its own dataset.
 dataset:
   id: GSE54514_DAY1
   description: >
@@ -29,15 +19,10 @@ dataset:
   value_col: value
   ensembl_col: ENSEMBL
   symbol_col: SYMBOL
-  subject_id_col: group_id   # for projectR trajectory views (app.R's Trajectory-across-time tab) -- same subject column as the parent full dataset's config, since this is just a timepoint-filtered subset of it
+  subject_id_col: group_id   # same subject column as the parent config; links a person's samples across the timepoint subsets
 
   preprocessing_script: R/preprocessing/gse54514_day1_preprocessing.R
-  # No timepoint_col -- this is a single-timepoint matrix (no time
-  # dimension left). subject_id_col above is set anyway, for the app's
-  # trajectory-across-time feature.
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

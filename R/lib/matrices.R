@@ -1,6 +1,6 @@
 # Building a dataset's input matrix: a prebuilt `matrix_path`, a
 # `preprocessing_script`, or a plain long-to-wide pivot of `expression_path`,
-# first match wins (docs: Data, "Building a matrix").
+# first match wins.
 
 #' Null default
 #'
@@ -16,8 +16,7 @@
 #' Sources the script with `expression_path`, `sample_metadata_path`,
 #' `feature_metadata_path`, `sample_id_col`, `feature_id_col`, `value_col`,
 #' `ensembl_col` and `tmp_dir` defined; the script must write its feature x
-#' sample matrix to `file.path(tmp_dir, "matrix.rds")` (docs: Data,
-#' "Preprocessing-script contract").
+#' sample matrix to `file.path(tmp_dir, "matrix.rds")`.
 #'
 #' @param ds A resolved config's `dataset:` block.
 #' @return The feature x sample matrix the script wrote.
@@ -40,8 +39,8 @@ run_preprocessing_script <- function(ds) {
   out_path <- file.path(tmp_dir, "matrix.rds")
   if (!file.exists(out_path)) {
     stop("preprocessing_script '", ds$preprocessing_script, "' did not write ",
-         "the required output file ", out_path, " -- see R/README.md's ",
-         "\"Preprocessing script contract\".")
+         "the required output file ", out_path, ": a preprocessing script must save its ",
+         "feature x sample matrix with saveRDS() to file.path(tmp_dir, \"matrix.rds\").")
   }
   readRDS(out_path)
 }

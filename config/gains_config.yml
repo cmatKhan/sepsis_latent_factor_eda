@@ -1,7 +1,3 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-#
 # TODO (scope): the collection notes describe "gains" as "sepsis datasets
 # (4 accessions) used for sepsistratifier (SRS) inference" -- confirm the
 # 4 accessions (E-MTAB-4421/4451/5273/5274) should genuinely be pooled
@@ -9,14 +5,14 @@
 # (they may be different sub-cohorts/timepoints/platforms bundled for a
 # different purpose -- SRS group inference -- than this pipeline's).
 #
-# TODO: R/gains_preprocessing.R does not exist yet, and unlike the other
-# new configs it needs REAL merge logic, not just a pivot: it must read
+# NOT IN THE PIPELINE (2026-10-13): R/preprocessing/gains_preprocessing.R is
+# a stub until the pooling question above is decided. It needs real merge
+# logic, not just a pivot: it must read
 # and combine all 4 partitioned expression files
 # (expression/accession=<id>/part-0.parquet), each shaped
 # IlluminaID/sample_id/value, then align samples against
 # sample_metadata.parquet's `accession` column (which distinguishes the
-# 4 sub-cohorts). read_dataset_metadata() will fail fast with a clear
-# "does not exist" error until it's written.
+# 4 sub-cohorts).
 
 dataset:
   id: gains
@@ -41,8 +37,6 @@ dataset:
 
   preprocessing_script: R/preprocessing/gains_preprocessing.R
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

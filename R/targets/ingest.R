@@ -96,9 +96,8 @@ fit_record_from <- function(rank = NA, seed = NA, bootstrap = FALSE, mse = NA,
 #'
 #' @param error Error message.
 #' @param rank,seed,bootstrap The fit's requested parameters.
-#' @param power Unused; WGCNA's power is recorded through `fit_params`.
 #' @return A fit_record_from() record with `status = "failed"` and `error`.
-fit_failed <- function(error, rank = NA, seed = NA, bootstrap = FALSE, power = NA) {
+fit_failed <- function(error, rank = NA, seed = NA, bootstrap = FALSE) {
   rec <- fit_record_from(rank = rank, seed = seed, bootstrap = bootstrap)
   rec$status <- "failed"
   rec$error <- error
@@ -121,8 +120,12 @@ extract_fit <- function(spec, result, params) {
   if (is.null(result)) return(fit_failed("no result", rank = rank, seed = params$seed))
   if (!is.null(result$error)) return(fit_failed(result$error, rank = rank, seed = params$seed))
   if (isTRUE(result$killed_not_converged)) {
-    return(fit_failed(sprintf("killed_not_converged (stopped after %.1f h)", (result$elapsed %||% NA) / 3600),
-                      rank = rank, seed = params$seed))
+    rec <- fit_failed(sprintf("killed_not_converged (stopped after %.1f h, %s iterations reached)",
+                              (result$elapsed %||% NA) / 3600, format(result$iterations %||% NA)),
+                      rank = rank, seed = params$seed)
+    rec$metrics <- c(iterations = result$iterations %||% NA_real_, converged = 0,
+                     fit_seconds = as.numeric(result$elapsed %||% NA))
+    return(rec)
   }
   rec <- tryCatch(spec$extract(result, params),
                   error = function(e) fit_failed(paste("extract failed:", conditionMessage(e)), rank = rank))
@@ -157,7 +160,7 @@ param_rows <- function(params) {
 #' @param dataset_id Dataset id.
 #' @param db_path Path to the DB (for the artifact directory).
 #' @return `list(dataset_id, method, fits, params, metrics, artifacts, factors,
-#'   modules)`: data frames keyed by fit_key (docs: Database for the columns).
+#'   modules)`: data frames keyed by fit_key.
 ingest_method_fits <- function(fits, spec, method, dataset_id, db_path) {
   art_dir <- artifacts_dir(db_path, dataset_id)
   dir.create(art_dir, recursive = TRUE, showWarnings = FALSE)
@@ -305,7 +308,8 @@ selection_keys <- function(ingest, sel) {
 #' @param ingest An ingest_method_fits() result.
 #' @param selection The selection table, or `NULL`.
 #' @return Data frame (fit_key, name, value) with `pev_pca`, `prop_sparse`,
-#'   `index_of_sparseness` and `is_selected`, or `NULL`.
+#'   `index_of_sparseness`, `is_selected`, `hit_max_iter` and `at_scan_edge`,
+#'   or `NULL`.
 selection_metric_rows <- function(ingest, selection) {
   if (is.null(selection) || nrow(selection) == 0) return(NULL)
   keys <- vapply(seq_len(nrow(selection)), function(i) {
@@ -313,7 +317,8 @@ selection_metric_rows <- function(ingest, selection) {
   }, character(1))
   s <- selection[!is.na(keys), , drop = FALSE]; keys <- keys[!is.na(keys)]
   vals <- list(pev_pca = s$PEV_pca, prop_sparse = s$PS, index_of_sparseness = s$IS,
-               is_selected = as.numeric(s$selected))
+               is_selected = as.numeric(s$selected), hit_max_iter = as.numeric(s$hit_max_iter),
+               at_scan_edge = as.numeric(s$at_scan_edge))
   do.call(rbind, lapply(names(vals), function(n) data.frame(fit_key = keys, name = n, value = vals[[n]])))
 }
 

@@ -1,7 +1,6 @@
 # Machine-independent dataset paths. Dataset configs give data paths relative
 # to a data root: `SEPSIS_DATA_ROOT`, else `data_root` in config/pipeline.yml;
-# absolute paths are used as written. Read configs through read_dataset_yaml()
-# (docs: Data, "Data root").
+# absolute paths are used as written. Read configs through read_dataset_yaml().
 
 #' The data root on this machine
 #'

@@ -16,6 +16,9 @@ export LD_LIBRARY_PATH="$SPACK_ENV/view/lib:$SPACK_ENV/view/lib64${LD_LIBRARY_PA
 unset R_LIBS R_LIBS_USER R_LIBS_SITE
 ```
 
+`spack` here is the one on `PATH` (spack 1.1); `/ref/mblab/software/spack/bin/spack` is an old
+0.17 install that fails to activate the environment.
+
 `spack env activate` doesn't set `LD_LIBRARY_PATH`, and packages compiled against the
 environment's libraries need it. Unsetting `R_LIBS*` keeps other libraries off the path, so
 the project's renv library is the only one in use.
@@ -28,6 +31,10 @@ options(renv.install.timeout = 6 * 3600)
 renv::restore()
 ```
 
+- **The renv cache.** renv links packages from its cache (`~/.cache/R/renv`) when a matching
+  build is there, so a restore on a machine that has built them before takes minutes, not hours.
+- **Interrupted installs** leave `00LOCK-<package>` directories in the project library, and
+  installing that package then fails until they are removed.
 - **The timeout.** Everything builds from source against the spack libraries (roughly 300
   packages, hours of build time). renv's default deadline for a whole install is one hour,
   and when it's reached renv rolls back the entire batch. Finished builds stay in renv's

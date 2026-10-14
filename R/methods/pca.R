@@ -6,7 +6,7 @@
 # prcomp()'s `rank.`. Fits the matrix `mat`.
 #
 # The fit targets depend on this file's registry and fit function: editing
-# their code refits the method (comments don't count). Docs: Methods.
+# their code refits the method (comments don't count).
 
 #' Fit PCA at one rank
 #'
@@ -46,7 +46,6 @@ run_pca_seed_sweep_job <- function(rank) capture_fit(base = list(rank = rank, ms
 pca_registry <- list(
   needs_nonneg = FALSE,
   global_object = "mat",
-  jobname = "pca_grid",
   fn = run_pca_seed_sweep_job,
   pkgs = character(0),
   defaults = list(rank = 20),

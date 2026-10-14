@@ -39,6 +39,25 @@ matrix_diagnostics_row <- function(mat) {
     max_sample_cor = max(sample_cor, na.rm = TRUE))
 }
 
+#' A parquet file as a data frame of base R vectors
+#'
+#' Columns are copied out of arrow's memory and lose arrow's and vctrs'
+#' wrapper classes, so the saved object reads back without arrow loaded;
+#' every other class and attribute (factor levels, dates, integer64) stays.
+#'
+#' @param path Path to a parquet file.
+#' @return Data frame.
+read_parquet_plain <- function(path) {
+  df <- as.data.frame(arrow::read_parquet(path))
+  df[] <- lapply(df, function(x) {
+    x <- x[seq_along(x)]
+    cls <- class(x)[!grepl("^(arrow|vctrs)", class(x))]
+    if (length(cls) < length(class(x))) x <- structure(unclass(x), class = if (length(cls)) cls)
+    x
+  })
+  df
+}
+
 #' A dataset's sample metadata (the `sample_meta_<dataset>` target)
 #'
 #' @param meta The resolved dataset config.
@@ -47,9 +66,7 @@ matrix_diagnostics_row <- function(mat) {
 read_sample_metadata <- function(meta) {
   path <- meta$dataset$sample_metadata_path
   if (is.null(path) || !file.exists(path)) return(NULL)
-  df <- as.data.frame(arrow::read_parquet(path))
-  df[] <- lapply(df, function(x) x[seq_along(x)])
-  df
+  read_parquet_plain(path)
 }
 
 #' Cache sample and feature metadata next to the DB
@@ -73,8 +90,7 @@ write_metadata_files <- function(meta, sample_metadata, db_path) {
   # (file names are the dataset_artifacts kinds; see write_dataset_db())
   path <- ds$feature_metadata_path
   if (!is.null(path) && file.exists(path)) {
-    fm <- as.data.frame(arrow::read_parquet(path))
-    fm[] <- lapply(fm, function(x) x[seq_along(x)])
+    fm <- read_parquet_plain(path)
     out["feature_metadata"] <- file.path(art_dir, "feature_metadata.rds")
     saveRDS(fm, out[["feature_metadata"]])
   }

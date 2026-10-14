@@ -1,12 +1,12 @@
 # Connection to the stability DB (R/db/schema.sql + views.sql). The DB is a
 # derived output: open_stability_db() creates a new file from the schema and
 # refuses one built from a different schema version -- delete it and rebuild
-# with tar_make() (docs: Database). Artifacts live under
+# with tar_make(). Artifacts live under
 # stability_artifacts/<dataset_id>/ next to the DB, referenced by paths
 # relative to the DB's directory.
 
 #' Bump when schema.sql or views.sql changes.
-SCHEMA_VERSION <- 1L
+SCHEMA_VERSION <- 2L
 
 #' Split a schema file into statements
 #'

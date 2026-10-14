@@ -11,7 +11,6 @@
 # Each fit_<method>_<dataset> target runs on SLURM workers launched by
 # crew.cluster (one controller per method, config/pipeline.yml). The main
 # process (this one) must stay alive for the run: workers connect back to it.
-# See README.md's "Running the pipeline (targets)" section.
 
 library(targets)
 library(tarchetypes)
@@ -24,13 +23,15 @@ tar_source(c(
   "R/lib/data_paths.R",
   "R/lib/matrices.R",
   "R/lib/metadata.R",
+  "R/lib/design.R",
+  "R/lib/expression.R",
   "R/lib/method_registry.R",
   "R/db/connect.R",
   "R/lib/ingest",
   "R/ingest_jobs/fgsea_job.R",
   "R/ingest_jobs/wgcna_ora_job.R",
   "R/ingest_jobs/projectr_job.R",
-  "app/R/metadata_helpers.R",   # generic_association_scan() (WGCNA gene significance)
+  "R/lib/association.R",
   "R/targets"
 ))
 
@@ -43,6 +44,8 @@ METHOD_TABLE <- method_table(METHOD_MANIFEST)
 
 pipeline <- read_pipeline_config("config/pipeline.yml")
 data_root <- default_data_root()
+VARIANCE_DATASETS <- variance_datasets(pipeline)
+FAMILIES <- yaml::read_yaml("config/dataset_families.yml")
 
 tar_option_set(
   controller = build_controller_group(pipeline),
@@ -59,7 +62,12 @@ list(
   # MSigDB gene sets for enrichment, fetched once on the main process.
   tar_target(msigdb_pathways, fetch_msigdb_pathways(), deployment = "main"),
   lapply(pipeline$datasets, tar_dataset_fits,
-         manifest = METHOD_MANIFEST, pipeline = pipeline, data_root = data_root),
+         manifest = METHOD_MANIFEST, pipeline = pipeline, data_root = data_root,
+         variance_ids = VARIANCE_DATASETS, families = FAMILIES),
   # Projections and gene-space agreement across datasets.
-  tar_cross_dataset(pipeline, METHOD_MANIFEST, data_root)
+  tar_cross_dataset(pipeline, METHOD_MANIFEST, data_root),
+  # Variance partition and dream per dataset with a `design:` block
+  # (R/targets/variance.R); independent of the fits.
+  lapply(VARIANCE_DATASETS, tar_dataset_variance, pipeline = pipeline),
+  tar_variance_cross_dataset(VARIANCE_DATASETS)
 )

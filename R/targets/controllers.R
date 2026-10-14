@@ -55,7 +55,7 @@ UNCAPPED_WORKERS <- 50000L
 #' `<name>_backup` where a `backup:` block is given), combined with
 #' `crew_controller_group()`; targets pick one with
 #' `tar_resources_crew(controller = "<name>")`. A controller without `workers:`
-#' gets UNCAPPED_WORKERS (docs: Running the workflow, "SLURM resources").
+#' gets UNCAPPED_WORKERS.
 #'
 #' @param pipeline The parsed pipeline config.
 #' @param project_root Project directory (worker logs go to `logs/crew/`).

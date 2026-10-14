@@ -1,33 +1,15 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-#
-# TODO (blocking): no sample_metadata.parquet exists at all for this
-# dataset in SHIP-TREND/ (only
-# expression.parquet and feature_metadata.parquet).
-# dataset.sample_metadata_path is left UNSET below as a result -- the
-# pipeline still runs without it (factor discovery doesn't require
-# sample metadata), but the app's sample-level metadata-association
-# views will have nothing to show for this dataset until a
-# sample_metadata.parquet is added (or dataset.sample_metadata_path is
-# pointed at one). Also note: per the collection notes this is a
-# "healthy patients" reference cohort used for sepsistratifier (SRS)
-# inference, not itself a sepsis timecourse -- confirm it belongs in
-# this analysis at all.
-#
-# TODO: R/ship-trend_preprocessing.R does not exist yet -- needs to
-# pivot expression.parquet (IlluminaID/sample_id/value/accession -- note
-# the extra `accession` column not present in most other datasets'
-# expression files); no sample_metadata to join against.
-# read_dataset_metadata() will fail fast with a clear "does not exist"
-# error until it's written.
+# A healthy population reference cohort (991 samples), like dilgom and
+# hfgp-500fg. There is no sample metadata: the phenotype data is
+# access-restricted. The pipeline fits it without any (sample ids come from
+# the expression file), so it has no design: block and no sample-level
+# metadata views.
 
 dataset:
   id: SHIP-TREND
   description: >
-    Samples and features from "SHIP-TREND" (GSE36382). Array platform,
-    healthy-patient reference cohort (see scope TODO above) -- no sample
-    metadata available at all.
+    Samples and features from "SHIP-TREND" (GSE36382). Array platform
+    (Illumina HumanHT-12 v3, quantile-normalized log2), healthy population
+    reference cohort; no sample metadata.
   hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
 
   expression_path: SHIP-TREND/expression.parquet
@@ -39,11 +21,7 @@ dataset:
   symbol_col: SYMBOL
 
   preprocessing_script: R/preprocessing/ship-trend_preprocessing.R
-  # NOTE: no sample_metadata_path (see blocking TODO above) -> no
-  # sample-level metadata-association views in the app.
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

@@ -1,4 +1,4 @@
-# The stability DB (R/db/schema.sql, documented in docs/database.qmd) as a
+# The stability DB (R/db/schema.sql) as a
 # derived output of the targets store. Two writers, both deployment =
 # "main" so writes never overlap:
 #   write_dataset_db()       db_<dataset>: everything about one dataset,
@@ -98,10 +98,12 @@ rbind_parts <- function(methods, getter) {
 #' @param matrix_diagnostics matrix_diagnostics_row() output.
 #' @param wgcna wgcna_dataset_diagnostics() output, or `NULL`.
 #' @param drivers pattern_driver_rows() output.
+#' @param variance variance_inputs() output, or `NULL` (no design for the
+#'   dataset or its parent).
 #' @return `list(dataset_id, fits, written_at)`: fit counts by status.
 write_dataset_db <- function(db_path, schema, meta, dataset_files, methods, method_table,
                              enrichment = NULL, matrix_diagnostics = NULL, wgcna = NULL,
-                             drivers = NULL) {
+                             drivers = NULL, variance = NULL) {
   ds <- meta$dataset
   id <- ds$id
   now <- utc_now()
@@ -143,7 +145,7 @@ write_dataset_db <- function(db_path, schema, meta, dataset_files, methods, meth
     }
     q(sprintf("DELETE FROM fit_pairs WHERE fit_a IN %s OR fit_b IN %s", in_ds, in_ds), id, id)
     for (tab in c("dataset_artifacts", "matrix_diagnostics", "similarity_histograms", "wgcna_sft",
-                  "gene_significance", "icasso_clusters")) {
+                  "gene_significance", "icasso_clusters", VARIANCE_DATASET_TABLES)) {
       q(sprintf("DELETE FROM %s WHERE dataset_id = ?", tab), id)
     }
 
@@ -249,11 +251,7 @@ write_dataset_db <- function(db_path, schema, meta, dataset_files, methods, meth
       append_rows(con, "module_kme_histograms", by_fit(do.call(rbind, lapply(wf, `[[`, "histograms"))))
     }
 
-    # ---- representative-fit analyses ----
-    mk <- rbind_parts(methods, function(p, m) p$redundancy$pattern_markers)
-    if (!is.null(mk)) append_rows(con, "pattern_markers",
-                                  data.frame(factor_id = xid(mk$fit_key, mk$factor_index),
-                                             gene = mk$gene, score = mk$score))
+    # ---- representative-fit analyses (marker genes: the pattern_markers artifact) ----
     append_rows(con, "fit_redundancy", by_fit(rbind_parts(methods, function(p, m) p$redundancy$fit_redundancy)))
     if (!is.null(drivers) && nrow(drivers)) {
       append_rows(con, "pattern_drivers", cbind(
@@ -294,8 +292,26 @@ write_dataset_db <- function(db_path, schema, meta, dataset_files, methods, meth
         append_rows(con, "enrichment_results", cbind(
           data.frame(query_id = unname(rq[!is.na(rq)])),
           er[, c("term_id", "source", "term_name", "p_value", "intersection_size", "term_size",
-                 "nes", "es", "log2err", "is_main_pathway", "genes")]))
+                 "nes", "es", "log2err", "is_main_pathway")]))
       }
+    }
+
+    # ---- score-level variance partition ----
+    fvr <- factor_variance_rows(methods, id)
+    if (!is.null(fvr)) {
+      append_rows(con, "factor_variance_models", fvr$models)
+      r <- fvr$rows
+      known <- paste(r$fit_key, r$factor_index) %in% names(factor_ids)
+      r <- r[known, , drop = FALSE]
+      append_rows(con, "factor_variance", data.frame(
+        factor_id = xid(r$fit_key, r$factor_index), term = r$term, category = r$category,
+        fraction = r$fraction))
+    }
+
+    # ---- repeated measures: design, samples, variance partition ----
+    if (!is.null(variance)) {
+      rows <- variance_db_rows(variance, now)
+      for (tab in names(rows)) append_rows(con, tab, rows[[tab]])
     }
 
     # ---- dataset-level ----
@@ -322,6 +338,12 @@ write_dataset_db <- function(db_path, schema, meta, dataset_files, methods, meth
   list(dataset_id = id, fits = stats::setNames(counts$n, counts$status), written_at = now)
 }
 
+#' Dataset-level tables of the repeated-measures analysis, cleared on each write.
+VARIANCE_DATASET_TABLES <- c("dataset_design", "samples", "variance_summary", "variance_terms",
+                             "variance_categories", "variance_bins", "trait_variance",
+                             "composition_correlations", "de_contrasts", "factor_variance_models",
+                             "variance_time_genes")
+
 #' Write projections and gene-space agreement (the `db_cross_dataset` target)
 #'
 #' Runs after every `db_<dataset>`, so fits on both sides resolve; replaces
@@ -331,8 +353,11 @@ write_dataset_db <- function(db_path, schema, meta, dataset_files, methods, meth
 #' @param written The `db_<dataset>` values (a dependency only).
 #' @param projections Flat list of projection_rows() data frames.
 #' @param gene_space List of gene_space_rows() data frames.
+#' @param variance_explore combine_variance_explore() output, or `NULL` (its
+#'   `time_gene_recurrence` replaces that table).
 #' @return `list(n_projections, n_gene_space, orphans_removed, written_at)`.
-write_cross_dataset_db <- function(db_path, written, projections = list(), gene_space = list()) {
+write_cross_dataset_db <- function(db_path, written, projections = list(), gene_space = list(),
+                                   variance_explore = NULL) {
   con <- open_stability_db(db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
   fit_ids <- with(DBI::dbGetQuery(con, "SELECT fit_id, fit_key FROM fits"), stats::setNames(fit_id, fit_key))
@@ -341,6 +366,8 @@ write_cross_dataset_db <- function(db_path, written, projections = list(), gene_
   with_transaction(con, {
     DBI::dbExecute(con, "DELETE FROM projections")
     DBI::dbExecute(con, "DELETE FROM gene_space_agreement")
+    DBI::dbExecute(con, "DELETE FROM time_gene_recurrence")
+    append_rows(con, "time_gene_recurrence", variance_explore$time_gene_recurrence)
     if (!is.null(pr) && nrow(pr)) {
       append_rows(con, "projections", cbind(
         data.frame(source_fit_id = map_ids(pr$source_fit_key, fit_ids, "fit")),

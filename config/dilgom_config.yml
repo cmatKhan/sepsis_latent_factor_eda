@@ -1,7 +1,3 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-
 dataset:
   id: dilgom
   description: >
@@ -28,13 +24,17 @@ dataset:
   preprocessing_script: R/preprocessing/dilgom_preprocessing.R
   # NOTE: this is a cross-sectional cohort -- sample_metadata has no
   # timepoint column (age_band/sex are demographic covariates, not a
-  # repeated-measures time axis). age_band/sex will show up automatically
-  # in the app's generic sample-metadata association views (Spearman/
-  # Kruskal-Wallis) once this dataset is ingested -- no further config
-  # needed for that.
+  # repeated-measures time axis).
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# Cross-sectional; age_band has 5 levels, the contrast compares the oldest
+# with the youngest.
+# control_probes: not array control probes (the series matrix has none) but
+# probes the illumina annotation marks as matching no transcript, a
+# background stand-in for the composition check. Values are already
+# quantile-normalized at deposit; no normalization here.
+design: {platform: array, group: age_band, covariates: [sex], contrasts: {Age65_74_vs_25_34: "65-74 - 25-34"}, control_probes: {column: ProbeQuality, values: ["No match"]}}
+
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

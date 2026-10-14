@@ -7,17 +7,25 @@
 # fit's identity. `network = TRUE`: the config nests under
 # `methods.network.wgcna`. Fits the matrix `mat`.
 #
+# Stored per fit beyond the network: each gene's connectivity in the
+# network (total, within its module, outside it), the scale-free fit of
+# that connectivity at this power, and the goodSamplesGenes() result. The
+# topological overlap matrix (genes x genes) is not saved; it can be rebuilt
+# from `mat` and the fit's parameters.
+#
 # The fit targets depend on this file's registry and fit function: editing
-# their code refits the method (comments don't count). Docs: Methods.
+# their code refits the method (comments don't count).
 
 #' Build one WGCNA network
 #'
 #' @param power Soft-thresholding power.
 #' @param minModuleSize,mergeCutHeight,networkType,maxBlockSize,nThreads,...
 #'   Passed to WGCNA::blockwiseModules().
-#' @return `list(power, net, genes, samples, elapsed)`: `net` is
-#'   blockwiseModules()'s output (module colors, eigengenes, gene trees),
-#'   after the goodSamplesGenes() filter.
+#' @return `list(power, net, genes, samples, gsg, connectivity, scale_free,
+#'   elapsed)`: `net` is blockwiseModules()'s output (module colors,
+#'   eigengenes, gene trees) after the goodSamplesGenes() filter (`gsg`);
+#'   `connectivity` is intramodularConnectivity.fromExpr()'s per-gene kTotal,
+#'   kWithin, kOut, kDiff; `scale_free` is scaleFreeFitIndex() of kTotal.
 run_wgcna_param_job <- function(power, minModuleSize, mergeCutHeight, networkType,
                                  maxBlockSize = 50000, nThreads = 1, ...) capture_fit(base = list(power = power), {
   library(WGCNA)
@@ -37,14 +45,19 @@ run_wgcna_param_job <- function(power, minModuleSize, mergeCutHeight, networkTyp
     maxBlockSize = maxBlockSize, nThreads = nThreads, verbose = 0, ...
   )
 
-  list(power = power, net = net, genes = colnames(datExpr), samples = rownames(datExpr))
+  connectivity <- intramodularConnectivity.fromExpr(
+    datExpr, net$colors, networkType = networkType, power = power, scaleByMax = FALSE)
+  rownames(connectivity) <- colnames(datExpr)
+  scale_free <- scaleFreeFitIndex(connectivity$kTotal)
+
+  list(power = power, net = net, genes = colnames(datExpr), samples = rownames(datExpr),
+       gsg = gsg, connectivity = connectivity, scale_free = scale_free)
 })
 
 wgcna_registry <- list(
   needs_nonneg = FALSE,
   network = TRUE,
   global_object = "mat",
-  jobname = "wgcna_grid",
   fn = run_wgcna_param_job,
   pkgs = "WGCNA",
   defaults = list(power = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20),
@@ -72,7 +85,7 @@ wgcna_ingest <- list(
   extract = function(result, params) {
     net <- result$net
     if (is.null(net) || is.null(net$colors)) {
-      return(fit_failed("blockwiseModules returned no module colors", power = params$power))
+      return(fit_failed("blockwiseModules returned no module colors"))
     }
     cols <- net$colors
     genes <- if (!is.null(names(cols))) names(cols) else result$genes
@@ -89,10 +102,14 @@ wgcna_ingest <- list(
       dendro <- list(merge = hc$merge, height = hc$height, order = hc$order,
                      labels = as.character(genes[net$blockGenes[[1]]]))
     }
-    rec <- fit_record_from(scores = scores, diag = list(n_blocks = length(net$dendrograms)),
+    rec <- fit_record_from(scores = scores,
+                           diag = list(n_blocks = length(net$dendrograms), connectivity = result$connectivity,
+                                       scale_free = result$scale_free, gsg = result$gsg),
                            raw = net, dendrogram = dendro, modules = modules,
                            metrics = c(n_blocks = length(net$dendrograms),
-                                       n_unassigned = sum(modules$module == 0L)))
+                                       n_unassigned = sum(modules$module == 0L),
+                                       scale_free_r2 = result$scale_free$Rsquared.SFT %||% NA_real_,
+                                       mean_k = mean(result$connectivity$kTotal %||% NA_real_)))
     rec$n_factors <- length(ids)
     rec$factors <- data.frame(factor_index = ids, label = paste0("ME", ids),
                               n_genes = as.integer(table(modules$module)[as.character(ids)]),

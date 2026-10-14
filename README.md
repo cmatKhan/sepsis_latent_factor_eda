@@ -3,7 +3,9 @@
 Fits six latent-factor methods (PCA, NMF, CoGAPS, sPCA, ICA, WGCNA) to sepsis gene-expression
 datasets across seeds and rank/sparsity choices, measures how stable the factors are, enriches
 and projects them across datasets, and writes it all to a SQLite database that a Shiny app
-browses. One [targets](https://books.ropensci.org/targets/) pipeline runs everything, with the
+browses. For datasets with repeated samples per patient it also partitions expression variance
+into between-person, time and the rest (variancePartition, dream) and checks each dataset's
+samples (leukocyte composition, technical scale, recorded vs inferred sex). One [targets](https://books.ropensci.org/targets/) pipeline runs everything, with the
 heavy steps as SLURM jobs.
 
 **Full documentation:** the Quarto site in [`docs/`](docs/) -- `quarto preview docs` to browse it.
@@ -26,7 +28,7 @@ SPACK_ENV=/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1
 eval "$(spack env activate --sh "$SPACK_ENV")"
 export LD_LIBRARY_PATH="$SPACK_ENV/view/lib:$SPACK_ENV/view/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 unset R_LIBS R_LIBS_USER R_LIBS_SITE
-Rscript -e 'options(renv.install.timeout = 6 * 3600); renv::restore()'   # hours: builds from source
+Rscript -e 'options(renv.install.timeout = 6 * 3600); renv::restore()'   # hours from source; minutes from renv's cache
 ```
 
 CoGAPS needs a patched build for OpenMP, and projectR comes from a fork; both are covered in
@@ -36,7 +38,8 @@ CoGAPS needs a patched build for OpenMP, and projectR comes from a fork; both ar
 ## Add a dataset
 
 1. Write `config/<dataset>_config.yml` (copy `config/dataset_metadata.example.yml`): data paths,
-   how to build the matrix, each method's parameter grid. See [docs/data.qmd](docs/data.qmd).
+   how to build the matrix, optionally its study design (`design:`), each method's parameter
+   grid. See [docs/data.qmd](docs/data.qmd).
 2. Add its `dataset.id` to `datasets:` in `config/pipeline.yml`.
 
 ## Run
@@ -64,8 +67,8 @@ The database is at `db_path` in `config/pipeline.yml` (default
 shiny::runApp("app")
 ```
 
-The app has not been updated to the current database schema yet; see
-[docs/app.qmd](docs/app.qmd).
+The app reads schema 1 and has not been updated to schema 2 (the repeated-measures tables) yet;
+see [docs/app.qmd](docs/app.qmd).
 
 ## Documentation
 

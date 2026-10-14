@@ -1,7 +1,7 @@
 # Example dataset_metadata.yml.
 #
 # Describes ONE dataset run against ONE input matrix, resolved one of three
-# ways (first match wins -- see docs/data.qmd, "Building a matrix"):
+# ways (first match wins; load_input_matrix() in R/lib/matrices.R):
 #   1. dataset.matrix_path is set               -> read that RDS matrix as-is.
 #   2. dataset.preprocessing_script is set      -> run your script against
 #                                                   the raw parquet trio.
@@ -19,10 +19,8 @@
 # there's no built-in "multiple matrices in one config" concept.
 #
 # `methods:` holds each method's parameter grid. SLURM resources are not
-# per dataset: they live in config/pipeline.yml's `controllers:`. See
-# docs/data.qmd and docs/methods.qmd for the full field-by-field explanation,
-# including the tool-argument-name convention and worked examples for every
-# method.
+# per dataset: they live in config/pipeline.yml's `controllers:`. Method
+# parameter names are the fitting function's own argument names.
 
 dataset:
   id: sepsis_day0                                    # unique per matrix/run
@@ -75,21 +73,57 @@ dataset:
   # symbol_col: gene_name
 
   # Optional -- a column of sample_metadata_path identifying which SUBJECT
-  # a sample belongs to. Used by the app's trajectory-across-time feature
-  # to collapse per-sample metadata to one row per subject when matching a
-  # subject across sibling per-timepoint datasets (see
-  # app/R/metadata_helpers.R::subject_level_metadata()). (Originally also
-  # required, alongside a timepoint_col, by CP/Tucker tensor decomposition
-  # -- those methods were evaluated and removed 2026-09-29; see
-  # docs/methods.qmd ("Methods considered and dropped").)
+  # (person) a sample belongs to. Links a person's samples across sibling
+  # per-timepoint datasets, and keeps them together when fits resample
+  # (fit_subjects(), R/targets/run_method_fit.R). A design: block's
+  # `subject` takes precedence.
   # subject_id_col: subject_id
 
   # Mode 2: uncomment to run your own script instead of the default pivot.
-  # The script must write file.path(tmp_dir, "matrix.rds"); see docs/data.qmd,
-  # "Preprocessing-script contract" for the full contract (available
-  # variables). Any sample/feature filtering belongs in the script, not as
-  # a separate post-hoc id list.
+  # The script must write file.path(tmp_dir, "matrix.rds"); the variables
+  # it can use are set by run_preprocessing_script() (R/lib/matrices.R). Any
+  # sample/feature filtering belongs in the script, not as a separate
+  # post-hoc id list.
   # preprocessing_script: R/preprocessing/preprocess_sepsis_day0.R
+
+# Optional: the study design for variancePartition and dream
+# (R/lib/design.R, R/targets/variance.R). A dataset with this block gets the
+# design_/expr_/norm_/vp_/dream_/vp_summary_<dataset> targets. Columns are
+# sample-metadata columns and must be syntactic R names.
+#   platform:   array (log-scale values, one probe per symbol, no variance
+#               filter) or rnaseq (counts -> filterByExpr -> TMM -> voom
+#               weights)
+#   subject:    person id; omit for a cross-sectional dataset
+#   time:       timepoint column; time_order lists its levels chronologically
+#               (required with time)
+#   group:      disease arm / subphenotype; cells are group x time.
+#               group_at_first_time: true gives every sample its subject's
+#               first-timepoint group (for a status that changes over time)
+#   covariates: further variables in the variance model (categorical ones as
+#               random effects); numeric: the covariates fitted as numbers
+#   drop/keep:  {column: [values]} sample filters; set_na: {column: [values]}
+#               recoded to missing; recode: {column: {from: to}}. "NA", "" and NA are missing; samples
+#               missing any model variable are dropped and counted.
+#   contrasts:  cross-sectional only, {name: "levelA - levelB"}; default is
+#               every pairwise group comparison. Time courses test each
+#               timepoint against the first, within each group.
+#   vp_covariates: numeric covariates for the variance model only (e.g.
+#               technical QC metrics); also list them under numeric
+#   de_covariates: fixed-effect covariates added to the dream formula
+#   control_probes: technical reference probes for the composition check
+#               (R/targets/composition.R): {id_pattern: "<regex>"} on
+#               feature ids, or {column: <feature metadata column>,
+#               values: [...]}. Arrays only. Add covariate: true to use the
+#               controls' first principal component as a covariate
+#               (control_factor) in the variance and dream models.
+# design:
+#   platform: array
+#   subject: patient_id
+#   time: timepoint
+#   time_order: ["Day 1", "Day 3"]
+#   group: disease
+#   covariates: [sex, age]
+#   numeric: [age]
 
 methods:
   pca:
@@ -119,18 +153,21 @@ methods:
     # run: {}                  # nThreads defaults to the cogaps controller's cpus_per_task
 
   # sPCA (elasticnet::spca()) -- config keys are spca()'s own argument
-  # names (K, sparse, use.corr, lambda, max.iter, eps.conv), except that the
-  # sparsity search is driven by `para_coarse` (fractions of genes nonzero
-  # per component under sparse="varnum"): the pipeline fits K x para_coarse,
-  # then refines around each K's Index-of-Sparseness peak
-  # (Guerra-Urzola et al. 2021). `lambda` is a single value, not swept --
-  # it made no practical difference under varnum. Omit para_coarse/lambda
-  # to use R/methods/spca.R's defaults; see docs/methods.qmd, "sPCA: choosing the sparsity".
+  # names (K, sparse, use.corr, lambda, max.iter, eps.conv) plus the
+  # sparsity search (para = fraction of genes non-zero per component under
+  # sparse = "varnum"): a scan at one K (`K_scan`, default 5, must be one of
+  # K) over `para_scan` (default 0.2, 0.3, 0.4, 0.5), then every K at the
+  # scan's Index-of-Sparseness winner +/- `para_step` (default 0.05)
+  # (Guerra-Urzola et al. 2021; R/methods/spca.R). `lambda` is a single
+  # value, not swept -- it made no practical difference under varnum. Omit
+  # any of these to use the defaults.
   # Deterministic given (K, para) -- no seed.
   spca:
     K: [2,3,4,5,6,7,8,9,10,11,12]
     sparse: varnum
-    # para_coarse: [0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+    # K_scan: 5
+    # para_scan: [0.2, 0.3, 0.4, 0.5]
+    # para_step: 0.05
     # lambda: 0.000001
 
   # ICA (fastICA::fastICA()) -- config keys are fastICA()'s own argument

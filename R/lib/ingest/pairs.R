@@ -1,7 +1,6 @@
 # Pairwise stability between the fits of one method within a dataset (all
 # seeds and all ranks). Rather than every factor x factor cell, keeps the
-# Hungarian-matched pairs plus the context needed to judge them (docs:
-# Database, "Pair-stability tables"):
+# Hungarian-matched pairs plus the context needed to judge them:
 #   fit_pairs   one row per fit pair (WGCNA: + adjusted Rand index)
 #   matches     the matched factor pairs (`match` numbers them per call)
 #   scores      per match and metric: signed value, runner-up (largest

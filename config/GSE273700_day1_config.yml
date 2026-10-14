@@ -1,14 +1,9 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-#
 # Single-timepoint slice of GSE273700 (design: timecourse, see
 # sepsis_collection_description.agent). Built from the SAME raw parquet
 # trio as config/GSE273700_config.yml, filtered to
 # timepoint == "Day1" (52 samples) inside
-# R/preprocessing/gse273700_day1_preprocessing.R. See docs/data.qmd ("Dataset configs": one matrix per config)
-# (in R/lib/metadata.R's header) for why this is a separate config/matrix
-# rather than a flag on the parent -- one dataset_metadata.yml per matrix.
+# R/preprocessing/gse273700_day1_preprocessing.R.
+# One config per matrix, so each timepoint is its own dataset.
 
 dataset:
   id: GSE273700_DAY1
@@ -21,27 +16,14 @@ dataset:
   sample_metadata_path: GSE273700/sample_metadata.parquet
   feature_metadata_path: GSE273700/feature_metadata.parquet
   sample_id_col: sample_id
-  # NOTE: differs from config/GSE273700_config.yml's `feature_id_col: GeneID`
-  # -- verified directly against the parquet: there is no `GeneID` column
-  # in either expression.parquet or feature_metadata.parquet for this
-  # dataset (only `feature_id`, an Ensembl gene ID, which is also what
-  # R/preprocessing/gse273700_preprocessing.R actually uses as rownames).
-  # The base config's `GeneID`/its comment both appear to be stale,
-  # copy-pasted from GSE110487_config.yml -- flagged, not fixed here since
-  # it's outside this per-timepoint config's scope.
   feature_id_col: feature_id
   value_col: value
   ensembl_col: feature_id
   symbol_col: symbol
-  subject_id_col: patient_id   # for projectR trajectory views (app.R's Trajectory-across-time tab) -- same subject column as the parent full dataset's config, since this is just a timepoint-filtered subset of it
+  subject_id_col: patient_id   # same subject column as the parent config; links a person's samples across the timepoint subsets
 
   preprocessing_script: R/preprocessing/gse273700_day1_preprocessing.R
-  # No timepoint_col -- this is a single-timepoint matrix (no time
-  # dimension left). subject_id_col above is set anyway, for the app's
-  # trajectory-across-time feature.
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

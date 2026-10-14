@@ -1,5 +1,4 @@
-# Gene identifiers across datasets (docs: Data, "Gene identifiers across
-# datasets"):
+# Gene identifiers across datasets:
 #   - build_ensembl_map() / remap_to_ensembl(): version-stripped Ensembl gene
 #     ids, the identifier for all cross-dataset computation (enrichment,
 #     projectR). Symbols are ambiguous and renamed across annotation

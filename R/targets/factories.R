@@ -11,6 +11,24 @@
 #' @return The id with characters other than letters, digits and `_` replaced by `_`.
 target_key <- function(dataset_id) gsub("[^A-Za-z0-9_]", "_", dataset_id)
 
+#' Dataset id of every config file
+#'
+#' Read once per R session (the pipeline definition looks configs up
+#' hundreds of times); restart R after adding a config.
+#'
+#' @return Named character vector: config path per file, named by `dataset.id`.
+config_index <- local({
+  index <- NULL
+  function() {
+    if (is.null(index)) {
+      files <- Sys.glob("config/*_config.yml")
+      index <<- stats::setNames(files, vapply(files, function(f) yaml::read_yaml(f)$dataset$id %||% NA_character_,
+                                              character(1)))
+    }
+    index
+  }
+})
+
 #' Find a dataset's config file
 #'
 #' Config file names don't always match ids (`ANEMONES_day1_config.yml`
@@ -19,9 +37,8 @@ target_key <- function(dataset_id) gsub("[^A-Za-z0-9_]", "_", dataset_id)
 #' @param dataset_id Dataset id.
 #' @return Path to the one `config/*_config.yml` declaring it (errors if not exactly one).
 dataset_config_path <- function(dataset_id) {
-  files <- Sys.glob("config/*_config.yml")
-  ids <- vapply(files, function(f) yaml::read_yaml(f)$dataset$id %||% NA_character_, character(1))
-  hit <- files[!is.na(ids) & ids == dataset_id]
+  index <- config_index()
+  hit <- unname(index[!is.na(names(index)) & names(index) == dataset_id])
   if (length(hit) != 1) stop("expected exactly one config/*_config.yml with dataset.id '", dataset_id,
                              "', found ", length(hit))
   hit
@@ -71,8 +88,11 @@ dataset_input_files <- function(config_path, meta) {
 #' @param manifest discover_method_registries() output.
 #' @param pipeline The parsed pipeline config.
 #' @param data_root Data root directory.
+#' @param variance_ids variance_datasets() output.
+#' @param families config/dataset_families.yml, parsed.
 #' @return List of target objects.
-tar_dataset_fits <- function(dataset_id, manifest, pipeline, data_root) {
+tar_dataset_fits <- function(dataset_id, manifest, pipeline, data_root, variance_ids = character(0),
+                             families = list()) {
   config_path <- dataset_config_path(dataset_id)
   # Read once at definition time to decide which targets exist; the
   # meta_<key> target re-reads it at run time, so edits are tracked.
@@ -109,6 +129,18 @@ tar_dataset_fits <- function(dataset_id, manifest, pipeline, data_root) {
       name("mat"),
       substitute(load_input_matrix(META), list(META = as.symbol(name("meta")))),
       resources = targets::tar_resources(crew = targets::tar_resources_crew(controller = "prep"))
+    ),
+    targets::tar_target_raw(
+      name("sample_meta"),
+      substitute(read_sample_metadata(META), list(META = as.symbol(name("meta")))),
+      deployment = "main"
+    ),
+    targets::tar_target_raw(
+      name("subjects"),
+      substitute(fit_subjects(META, SM, MAT),
+                 list(META = as.symbol(name("meta")), SM = as.symbol(name("sample_meta")),
+                      MAT = as.symbol(name("mat")))),
+      deployment = "main"
     )
   )
 
@@ -134,8 +166,9 @@ tar_dataset_fits <- function(dataset_id, manifest, pipeline, data_root) {
       targets::tar_target_raw(
         fit_name,
         substitute(
-          run_method_fits(REGISTRY, GRID, MAT),
-          list(REGISTRY = registry_sym, GRID = as.symbol(grid_name), MAT = mat_sym)
+          run_method_fits(REGISTRY, GRID, MAT, SUBJECTS),
+          list(REGISTRY = registry_sym, GRID = as.symbol(grid_name), MAT = mat_sym,
+               SUBJECTS = as.symbol(name("subjects")))
         ),
         pattern = substitute(map(GRID), list(GRID = as.symbol(grid_name))),
         iteration = "list",
@@ -182,8 +215,9 @@ tar_dataset_fits <- function(dataset_id, manifest, pipeline, data_root) {
         targets::tar_target_raw(
           name("selection", method),
           substitute(
-            select_method_fits(REGISTRY, FITS, REFINE, PCA),
-            list(REGISTRY = registry_sym, FITS = as.symbol(name("fit", method)),
+            select_method_fits(REGISTRY, META, METHOD, CPUS, FITS, REFINE, PCA),
+            list(REGISTRY = registry_sym, META = as.symbol(name("meta")), METHOD = method, CPUS = cpus,
+                 FITS = as.symbol(name("fit", method)),
                  REFINE = as.symbol(name("fit", method, "refine")),
                  PCA = as.symbol(name("fit", "pca")))
           ),
@@ -192,7 +226,8 @@ tar_dataset_fits <- function(dataset_id, manifest, pipeline, data_root) {
       ))
     }
   }
-  c(targets, tar_dataset_ingest(dataset_id, methods, manifest, pipeline, name))
+  c(targets, tar_dataset_ingest(dataset_id, methods, manifest, pipeline, name,
+                                variance_parent(dataset_id, variance_ids, families)))
 }
 
 #' Ingestion targets for one dataset
@@ -207,14 +242,20 @@ tar_dataset_fits <- function(dataset_id, manifest, pipeline, data_root) {
 #' @param manifest discover_method_registries() output.
 #' @param pipeline The parsed pipeline config.
 #' @param name Function building this dataset's target names.
+#' @param vparent variance_parent() of the dataset: itself, its family's
+#'   parent, or `NULL` when no design applies.
 #' @return List of target objects.
-tar_dataset_ingest <- function(dataset_id, methods, manifest, pipeline, name) {
-  db_path <- pipeline$db_path %||% "results/targets/stability.sqlite"
+tar_dataset_ingest <- function(dataset_id, methods, manifest, pipeline, name, vparent = NULL) {
+  db_path <- pipeline$db_path %||% "results/stability.sqlite"
   on_ingest <- targets::tar_resources(crew = targets::tar_resources_crew(controller = "ingest"))
   on_fgsea <- targets::tar_resources(crew = targets::tar_resources_crew(controller = "fgsea"))
   fgsea_cpus <- pipeline$controllers$fgsea$cpus_per_task %||% 1L
   sym <- function(...) as.symbol(name(...))
   spec_sym <- function(m) as.symbol(paste0(m, "_ingest"))
+  own_design <- identical(vparent, dataset_id)
+  parent_sym <- function(prefix) as.symbol(paste(prefix, target_key(vparent), sep = "_"))
+  on_vp <- targets::tar_resources(crew = targets::tar_resources_crew(controller = "vp"))
+  vp_cpus <- as.integer(pipeline$controllers$vp$cpus_per_task %||% 1L)
   targets <- list()
   parts <- list()
   fgsea_parts <- list()
@@ -256,6 +297,18 @@ tar_dataset_ingest <- function(dataset_id, methods, manifest, pipeline, name) {
     part <- list(ingest = sym("ingest", method), pairs = sym("pairs", method),
                  representatives = sym("representatives", method),
                  selection = if (has_refine) sym("selection", method) else NULL)
+    # Score-level variance partition of every fit's factors, with the
+    # dataset's (or its parent's) design (R/targets/variance_explore.R).
+    if (!is.null(vparent)) {
+      targets <- c(targets, list(targets::tar_target_raw(
+        name("factor_vp", method),
+        substitute(factor_variance_partition(INGEST, DESIGN, SUBSET, DB, CPUS),
+                   list(INGEST = sym("ingest", method), DESIGN = parent_sym("design"),
+                        SUBSET = !own_design, DB = db_path, CPUS = vp_cpus)),
+        resources = on_vp
+      )))
+      part$factor_variance <- sym("factor_vp", method)
+    }
 
     if (isTRUE(spec$has_loadings)) {
       if (method != "pca") {   # PCA's components are orthogonal by construction
@@ -356,10 +409,35 @@ tar_dataset_ingest <- function(dataset_id, methods, manifest, pipeline, name) {
   loadings_methods <- Filter(function(m) isTRUE(manifest[[m]]$ingest$has_loadings), methods)
   rep_list <- as.call(c(quote(list), lapply(setNames(nm = loadings_methods), function(m) sym("representatives", m))))
   ing_list <- as.call(c(quote(list), lapply(setNames(nm = loadings_methods), function(m) sym("ingest", m))))
-  c(targets, list(
+  red_list <- as.call(c(quote(list), lapply(setNames(nm = setdiff(loadings_methods, "pca")),
+                                            function(m) sym("redundancy", m))))
+  # Repeated-measures inputs of the DB write: the dataset's own variance
+  # results, or (a per-timepoint subset) its parent's design and sample QC.
+  variance_call <- NULL
+  variance_targets <- list()
+  if (!is.null(vparent)) {
+    variance_call <- substitute(
+      variance_inputs(ID, PARENT, DESIGN, COMP, colnames(MAT), SUMMARY, EXPLORE),
+      list(ID = dataset_id, PARENT = vparent, DESIGN = parent_sym("design"), COMP = parent_sym("composition"),
+           MAT = sym("mat"), SUMMARY = if (own_design) sym("vp_summary") else NULL,
+           EXPLORE = if (own_design) sym("vp_explore") else NULL))
+    if (own_design) {
+      variance_targets <- list(targets::tar_target_raw(
+        name("variance_files"),
+        substitute(write_variance_artifacts(ID, DB, VP, DE, COMP, EXPLORE),
+                   list(ID = dataset_id, DB = db_path, VP = sym("vp"), DE = sym("de_tables"),
+                        COMP = sym("composition"), EXPLORE = sym("vp_explore"))),
+        format = "file",
+        resources = on_ingest
+      ))
+    }
+  }
+  c(targets, variance_targets, list(
     targets::tar_target_raw(
-      name("sample_meta"),
-      substitute(read_sample_metadata(META), list(META = sym("meta"))),
+      name("factor_gene_files"),
+      substitute(write_factor_gene_artifacts(ID, DB, ENRICH, REDS),
+                 list(ID = dataset_id, DB = db_path, ENRICH = sym("enrichment"), REDS = red_list)),
+      format = "file",
       deployment = "main"
     ),
     targets::tar_target_raw(
@@ -403,13 +481,14 @@ tar_dataset_ingest <- function(dataset_id, methods, manifest, pipeline, name) {
     targets::tar_target_raw(
       name("db"),
       substitute(
-        write_dataset_db(DB, db_schema, META, c(MF, MD), METHODS, METHOD_TABLE, ENRICH,
-                         MATDIAG, WGCNA, DRIVERS),
+        write_dataset_db(DB, db_schema, META, c(MF, MD, VF, FG), METHODS, METHOD_TABLE, ENRICH,
+                         MATDIAG, WGCNA, DRIVERS, VARIANCE),
         list(DB = db_path, META = sym("meta"), MF = sym("matrix_file"), MD = sym("metadata_files"),
+             VF = if (own_design) sym("variance_files") else NULL, FG = sym("factor_gene_files"),
              METHODS = as.call(c(quote(list), parts)), ENRICH = sym("enrichment"),
              MATDIAG = sym("matrix_diagnostics"),
              WGCNA = if ("wgcna" %in% methods) sym("wgcna_dataset_diag") else NULL,
-             DRIVERS = sym("drivers"))),
+             DRIVERS = sym("drivers"), VARIANCE = variance_call)),
       packages = c("DBI", "RSQLite"),
       deployment = "main"
     )
@@ -440,7 +519,7 @@ method_table <- function(manifest) {
 #' @param data_root Data root directory.
 #' @return List of target objects.
 tar_cross_dataset <- function(pipeline, manifest, data_root) {
-  db_path <- pipeline$db_path %||% "results/targets/stability.sqlite"
+  db_path <- pipeline$db_path %||% "results/stability.sqlite"
   ids <- unlist(pipeline$datasets)
   keys <- setNames(target_key(ids), ids)
   families <- yaml::read_yaml("config/dataset_families.yml")
@@ -514,10 +593,11 @@ tar_cross_dataset <- function(pipeline, manifest, data_root) {
   }
   c(targets, list(targets::tar_target_raw(
     "db_cross_dataset",
-    substitute(write_cross_dataset_db(DB, WRITTEN, unlist(P, recursive = FALSE), G),
+    substitute(write_cross_dataset_db(DB, WRITTEN, unlist(P, recursive = FALSE), G, VE),
                list(DB = db_path, WRITTEN = named_list("db"),
                     P = as.call(c(quote(list), projection_syms)),
-                    G = as.call(c(quote(list), gene_space_syms)))),
+                    G = as.call(c(quote(list), gene_space_syms)),
+                    VE = if (length(variance_datasets(pipeline))) quote(variance_explore) else NULL)),
     packages = c("DBI", "RSQLite"),
     deployment = "main"
   )))

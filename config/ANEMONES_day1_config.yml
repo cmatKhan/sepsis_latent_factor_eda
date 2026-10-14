@@ -1,14 +1,9 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-#
 # Single-timepoint slice of ANEMONES (design: timecourse, see
 # sepsis_collection_description.agent). Built from the SAME raw parquet
 # trio as config/ANEMONES_config.yml, filtered to
 # timepoint == "Day: 1" (194 samples) inside
-# R/preprocessing/anemones_day1_preprocessing.R. See docs/data.qmd ("Dataset configs": one matrix per config)
-# (in R/lib/metadata.R's header) for why this is a separate config/matrix
-# rather than a flag on the parent -- one dataset_metadata.yml per matrix.
+# R/preprocessing/anemones_day1_preprocessing.R.
+# One config per matrix, so each timepoint is its own dataset.
 
 dataset:
   id: ANEMONES_DAY1
@@ -25,15 +20,10 @@ dataset:
   value_col: value
   ensembl_col: ensembl_gene_id
   symbol_col: gene_symbol
-  subject_id_col: patient_id   # for projectR trajectory views (app.R's Trajectory-across-time tab) -- same subject column as the parent full dataset's config, since this is just a timepoint-filtered subset of it
+  subject_id_col: patient_id   # same subject column as the parent config; links a person's samples across the timepoint subsets
 
   preprocessing_script: R/preprocessing/anemones_day1_preprocessing.R
-  # No timepoint_col -- this is a single-timepoint matrix (no time
-  # dimension left). subject_id_col above is set anyway, for the app's
-  # trajectory-across-time feature.
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

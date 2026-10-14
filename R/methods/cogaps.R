@@ -8,7 +8,7 @@
 # Fits the non-negative shift `mat_nn`.
 #
 # The fit targets depend on this file's registry and fit function: editing
-# their code refits the method (comments don't count). Docs: Methods.
+# their code refits the method (comments don't count).
 
 #' Fit CoGAPS for one grid row
 #'
@@ -72,7 +72,6 @@ cogaps_build_grid <- function(p) {
 cogaps_registry <- list(
   needs_nonneg = TRUE,
   global_object = "mat_nn",
-  jobname = "cogaps_grid",
   fn = run_cogaps_seed_sweep_job,
   pkgs = "CoGAPS",
   defaults = list(

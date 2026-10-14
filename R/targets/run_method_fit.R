@@ -73,12 +73,16 @@ build_refine_grid <- function(registry, meta, method, cpus_per_task, batch_size,
 #' Selection table over both stages' fits
 #'
 #' @param registry A `<name>_registry` with `select_fits`.
+#' @param meta The dataset config.
+#' @param method Method name.
+#' @param cpus_per_task The method controller's CPUs per worker.
 #' @param fits,refine_fits The two stages' fit target values.
 #' @param pca_fits The dataset's PCA fit target value.
 #' @return The registry's selection table (sPCA: spca_select_fits()).
-select_method_fits <- function(registry, fits, refine_fits, pca_fits) {
+select_method_fits <- function(registry, meta, method, cpus_per_task, fits, refine_fits, pca_fits) {
+  resolved <- resolve_method_params(registry, meta, method, cpus_per_task)
   registry$select_fits(c(flatten_fits(fits), flatten_fits(refine_fits)),
-                       flatten_fits(pca_fits)[[1]]$result)
+                       flatten_fits(pca_fits)[[1]]$result, resolved)
 }
 
 #' Flatten a fit target's batches
@@ -91,20 +95,48 @@ flatten_fits <- function(x) unlist(x, recursive = FALSE)
 #' Columns build_method_grid() adds for batching -- not job-function args.
 GRID_BATCH_COLUMNS <- "tar_group"
 
+#' Subject of every matrix column (the `subjects_<dataset>` target)
+#'
+#' Resampling has to keep a person's samples together in repeated-measures
+#' data (ICA's bootstrap draws subjects, not samples), so fits see each
+#' column's subject. The subject column is the design's `subject`, else
+#' `dataset.subject_id_col`; without either, or without sample metadata,
+#' every sample is its own subject.
+#'
+#' @param meta The resolved dataset config.
+#' @param sample_meta read_sample_metadata() output, or `NULL`.
+#' @param mat The dataset's input matrix (columns are sample ids).
+#' @return Character vector of subject ids named by sample id, in the order of
+#'   `colnames(mat)`.
+fit_subjects <- function(meta, sample_meta, mat) {
+  samples <- colnames(mat)
+  col <- meta$design[["subject"]] %||% meta$dataset$subject_id_col
+  sid <- meta$dataset$sample_id_col %||% "sample_id"
+  if (is.null(col) || is.null(sample_meta)) return(stats::setNames(samples, samples))
+  subj <- as.character(sample_meta[[col]][match(samples, as.character(sample_meta[[sid]]))])
+  if (anyNA(subj)) {
+    stop(meta$dataset$id, ": ", sum(is.na(subj)), " matrix columns have no subject in the sample ",
+         "metadata column '", col, "'")
+  }
+  stats::setNames(subj, samples)
+}
+
 #' Fit every grid row in one batch (one dynamic branch)
 #'
 #' Fit functions read their matrix from a free variable named
-#' `registry$global_object` (`mat` or `mat_nn`); it's bound in a new enclosing
-#' environment for the call rather than assigned globally.
+#' `registry$global_object` (`mat` or `mat_nn`) and each column's subject from
+#' `subjects`; both are bound in a new enclosing environment for the call
+#' rather than assigned globally.
 #'
 #' @param registry A `<name>_registry`.
 #' @param batch The batch's grid rows.
 #' @param mat The input matrix.
+#' @param subjects fit_subjects() output for `mat`'s columns.
 #' @return One `list(params, result)` per row.
-run_method_fits <- function(registry, batch, mat) {
+run_method_fits <- function(registry, batch, mat, subjects) {
   fn <- registry$fn
   environment(fn) <- list2env(
-    stats::setNames(list(mat), registry$global_object),
+    c(stats::setNames(list(mat), registry$global_object), list(subjects = subjects)),
     parent = environment(fn)
   )
   params <- batch[, setdiff(names(batch), GRID_BATCH_COLUMNS), drop = FALSE]

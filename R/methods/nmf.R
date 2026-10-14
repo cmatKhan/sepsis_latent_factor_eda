@@ -5,7 +5,7 @@
 # build_grid(). Fits the non-negative shift `mat_nn`.
 #
 # The fit targets depend on this file's registry and fit function: editing
-# their code refits the method (comments don't count). Docs: Methods.
+# their code refits the method (comments don't count).
 
 #' Fit NMF for one (k, seed)
 #'
@@ -44,7 +44,6 @@ run_nmf_seed_sweep_job <- function(k, seed, max.iter = 10000, verbose = 0L, n.th
 nmf_registry <- list(
   needs_nonneg = TRUE,
   global_object = "mat_nn",
-  jobname = "nmf_grid",
   fn = run_nmf_seed_sweep_job,
   pkgs = "NNLM",
   defaults = list(k = 5:20, seed = c(42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210)),

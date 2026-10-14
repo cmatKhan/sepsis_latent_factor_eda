@@ -7,23 +7,29 @@
 # to n.comp + 5 principal components and ICA runs on those. Loadings in gene
 # space are `pc_rotation %*% t(A)`; scores are the sources `S`.
 #
-# ICASSO's second randomization axis: `bootstrap = TRUE` resamples sample
-# columns with replacement before fitting (its scores are dropped, since
-# resampled columns repeat sample ids). Kurtosis of each source is the
-# non-Gaussianity fastICA maximizes. Fits the matrix `mat`.
+# ICASSO's second randomization axis: `bootstrap = TRUE` resamples subjects
+# with replacement and takes all of each drawn subject's columns, so a
+# person's repeated samples stay together (resampling single samples would
+# leave most people in every replicate through their other samples and
+# overstate stability). `subjects` (fit_subjects(), one per column of `mat`)
+# is bound by run_method_fits(); in cross-sectional data every sample is its
+# own subject, which is the ordinary sample bootstrap. Bootstrap fits keep
+# their sources under the resampled sample ids but have no `scores`.
+# Kurtosis of each source is the non-Gaussianity fastICA maximizes.
 #
 # The fit targets depend on this file's registry and fit function: editing
-# their code refits the method (comments don't count). Docs: Methods.
+# their code refits the method (comments don't count).
 
 #' Fit ICA for one (n.comp, seed, bootstrap)
 #'
 #' @param n.comp Number of components.
 #' @param alpha,fun,alg.typ,maxit,tol,... Passed to fastICA::fastICA().
 #' @param seed Random seed (set.seed() before fitting and resampling).
-#' @param bootstrap Resample sample columns with replacement first.
+#' @param bootstrap Resample subjects (with all their columns) with replacement first.
 #' @return `list(rank, seed, bootstrap, mse, loadings, scores, kurtosis, W, K,
-#'   prewhiten_sdev, A, S, pc_rotation, pc_center, boot_idx, elapsed)`;
-#'   `scores` is `NULL` for bootstrap fits.
+#'   prewhiten_sdev, A, S, pc_rotation, pc_center, boot_idx, boot_subjects,
+#'   elapsed)`; `scores` is `NULL` for bootstrap fits, whose `S` rows are named
+#'   by the resampled sample ids (made unique).
 run_ica_seed_sweep_job <- function(n.comp, alpha = 1, seed, fun = "logcosh",
                                     alg.typ = "parallel", maxit = 200, tol = 1e-4,
                                     bootstrap = FALSE, ...) capture_fit(
@@ -33,8 +39,11 @@ run_ica_seed_sweep_job <- function(n.comp, alpha = 1, seed, fun = "logcosh",
 
   mat_use <- mat
   boot_idx <- NULL
+  boot_subjects <- NULL
   if (isTRUE(bootstrap)) {
-    boot_idx <- sample(ncol(mat), ncol(mat), replace = TRUE)
+    cols_by_subject <- split(seq_len(ncol(mat)), unname(subjects[colnames(mat)]))
+    boot_subjects <- sample(names(cols_by_subject), length(cols_by_subject), replace = TRUE)
+    boot_idx <- unlist(cols_by_subject[boot_subjects], use.names = FALSE)
     mat_use <- mat[, boot_idx, drop = FALSE]
   }
 
@@ -57,6 +66,7 @@ run_ica_seed_sweep_job <- function(n.comp, alpha = 1, seed, fun = "logcosh",
   kurtosis <- rep(NA_real_, ncol(fit$S))
   kurtosis[ok] <- colMeans(centered_S[, ok, drop = FALSE]^4) / sigma[ok]^4
 
+  rownames(fit$S) <- make.unique(colnames(mat_use))
   if (isTRUE(bootstrap)) {
     scores <- NULL
   } else {
@@ -88,13 +98,12 @@ run_ica_seed_sweep_job <- function(n.comp, alpha = 1, seed, fun = "logcosh",
        # prewhitening PCA's rotation/center (loadings = pc_rotation %*% t(A)),
        # and boot_idx (columns of mat resampled; NULL unless bootstrap).
        A = fit$A, S = fit$S, pc_rotation = pcfit$rotation, pc_center = pcfit$center,
-       boot_idx = boot_idx)
+       boot_idx = boot_idx, boot_subjects = boot_subjects)
 })
 
 ica_registry <- list(
   needs_nonneg = FALSE,
   global_object = "mat",
-  jobname = "ica_grid",
   fn = run_ica_seed_sweep_job,
   pkgs = "fastICA",
   defaults = list(n.comp = c(5, 7, 10, 15, 20), alpha = 1,
@@ -130,7 +139,7 @@ ica_ingest <- list(
       rank = params$n.comp, seed = params$seed, bootstrap = isTRUE(as.logical(params$bootstrap)),
       mse = result$mse, loadings = result$loadings, scores = result$scores,
       diag = result[intersect(c("W", "K", "A", "S", "prewhiten_sdev", "pc_rotation", "pc_center",
-                                "boot_idx", "kurtosis"), names(result))],
+                                "boot_idx", "boot_subjects", "kurtosis"), names(result))],
       metrics = c(orthonormality_residual = ortho, prewhiten_var_retained = retained),
       factor_kurtosis = kurt)
   }

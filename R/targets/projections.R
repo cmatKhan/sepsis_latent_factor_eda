@@ -20,14 +20,21 @@ dataset_matrix_file <- function(mat, dataset_id, db_path) {
   path
 }
 
+#' The family (or families) a dataset belongs to
+#'
+#' @param families config/dataset_families.yml, parsed.
+#' @param dataset_id Dataset id.
+#' @return Family names listing the dataset (normally one).
+family_of <- function(families, dataset_id) names(Filter(function(v) dataset_id %in% v, families))
+
 #' Whether two datasets are in the same family
 #'
 #' @param families config/dataset_families.yml, parsed.
 #' @param ds_a,ds_b Dataset ids.
 #' @return `TRUE` if both belong to the same single family.
 same_family <- function(families, ds_a, ds_b) {
-  fam_a <- names(Filter(function(v) ds_a %in% v, families))
-  fam_b <- names(Filter(function(v) ds_b %in% v, families))
+  fam_a <- family_of(families, ds_a)
+  fam_b <- family_of(families, ds_b)
   length(fam_a) == 1 && length(fam_b) == 1 && fam_a == fam_b
 }
 

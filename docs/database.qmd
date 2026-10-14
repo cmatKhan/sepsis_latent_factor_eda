@@ -26,9 +26,11 @@ hand and there are no migrations.
 `SCHEMA_VERSION`, delete the DB and its `stability_artifacts/`, and run `tar_make()`; only the
 ingestion and DB targets rerun.
 
-**What it holds** for the 30 datasets (2026-10-05): 7,990 fits, 3.6 GB. The largest tables are
-`match_scores` (8.9 M rows), `pattern_markers` (4.6 M), `gene_modules` (3.3 M), `factor_matches`
-(3.0 M) and `enrichment_results` (2.1 M; their gene lists are about 1.1 GB of the file).
+**What it holds.** The schema-1 build of 30 datasets (2026-10-05) had 7,990 fits in 3.6 GB; the
+largest tables were `match_scores` (8.9 M rows), `gene_modules` (3.3 M), `factor_matches` (3.0 M)
+and `enrichment_results` (2.1 M). Schema 2 moved the two bulkiest contents out of the tables:
+the enrichment gene lists (about 1.1 GB) and the pattern markers (4.6 M rows) are now per-dataset
+artifacts (`enrichment_genes`, `pattern_markers`).
 
 **Reading it.** Open read-only from R with
 `DBI::dbConnect(RSQLite::SQLite(), path, flags = RSQLite::SQLITE_RO)`, or `sqlite3 -readonly`.
@@ -108,18 +110,25 @@ which is what `dataset_metadata_sources` used to hold.
 | written_at | TEXT | NN |
 
 ### `dataset_artifacts`
-Paths, relative to the DB directory, of the files cached for a dataset: the analysed matrix and
-the materialized sample/feature metadata.
+Paths, relative to the DB directory, of the files cached for a dataset. `kind` is the file name
+without `.rds`.
 
-- **Rows from:** the `matrix_file_<key>` and `metadata_files_<key>` file targets
-  (`R/targets/projections.R::dataset_matrix_file()` and
-  `R/targets/diagnostics.R::write_metadata_files()`). `kind` is the file name without `.rds`.
+| kind | Contents | Written by |
+|---|---|---|
+| matrix | the analysed (factor-analysis) matrix | `matrix_file_<key>` (`R/targets/projections.R::dataset_matrix_file()`) |
+| sample_metadata, feature_metadata | the metadata as base-R data frames (read back without arrow) | `metadata_files_<key>` (`R/targets/diagnostics.R::write_metadata_files()`) |
+| variance_partition | per-gene variance fractions, absolute variances, fit flags (singular, collinearity), the gene table and `explore_variance()`'s per-gene summary (categories, repeatability, factor-analysis-gene flag) | `variance_files_<key>` (`R/targets/variance_db.R::write_variance_artifacts()`) |
+| de_results | every dream contrast and joint test as a full topTable (logFC, t, z.std, F, F.std, p-values) | `variance_files_<key>` |
+| composition | `analyze_composition()` whole: per-sample traits, markers, PCs, correlations, trait variance partition, sex check | `variance_files_<key>` |
+| enrichment_genes | each enrichment result's overlap or leading-edge genes (fit_key, factor_index, query_type, direction, term_id, genes as JSON) | `factor_gene_files_<key>` (`write_factor_gene_artifacts()`) |
+| pattern_markers | each representative fit's marker genes and scores (fit_key, factor_index, gene, score) | `factor_gene_files_<key>` |
+
 - **Written by:** `write_dataset_db()`.
 
 | Column | Type | Attributes |
 |---|---|---|
 | dataset_id | TEXT | PK (with kind); FK → datasets.dataset_id CASCADE |
-| kind | TEXT | PK (with dataset_id); CHECK IN ('matrix','sample_metadata','feature_metadata') |
+| kind | TEXT | PK (with dataset_id); CHECK IN the kinds above |
 | path | TEXT | NN |
 
 ### `matrix_diagnostics`
@@ -217,12 +226,15 @@ the parameters dropped by the current schema. Examples: sPCA `para`, `lambda`; W
 ### `fit_metrics`
 Method-specific scalar results for a fit:
 - every method: `fit_seconds` (fit wall time).
-- sPCA: `pev_sparse`, plus `pev_pca`, `prop_sparse`, `index_of_sparseness`, `is_selected` from
-  the Index-of-Sparseness table.
+- sPCA: `pev_sparse`, `iterations` (last value spca()'s trace printed, within 10), `converged`
+  (0 when `max.iter` was reached or the fit was stopped at `max_hours`), plus `pev_pca`,
+  `prop_sparse`, `index_of_sparseness`, `is_selected`, `hit_max_iter` and `at_scan_edge` from the
+  Index-of-Sparseness table.
 - NMF: `n_iteration`, `target_loss`, `average_epochs`, `run_seconds`.
 - CoGAPS: `mean_chisq`.
 - ICA: `orthonormality_residual` (‖W Wᵀ − I‖), `prewhiten_var_retained`.
-- WGCNA: `n_blocks` (1 when the network was built in one block), `n_unassigned`.
+- WGCNA: `n_blocks` (1 when the network was built in one block), `n_unassigned`,
+  `scale_free_r2` and `mean_k` (scale-free fit and mean connectivity at the fit's power).
 
 - **Rows from:** `ingest_<method>_<key>` (`<method>_ingest$extract()` `metrics`), plus
   `selection_spca_<key>` (`R/methods/spca.R::spca_select_fits()`) for the IS columns.
@@ -242,7 +254,7 @@ the nine `*_file` columns on `fits`.
 |---|---|---|
 | loadings | genes × factors matrix | all except WGCNA |
 | scores | samples × factors (WGCNA: eigengenes) | all |
-| diag | method diagnostics list (PCA `sdev`/`center`/`mse_by_rank`; sPCA `pev`/`var_all`/`n_nonzero`/`center` + the rest of `spca()`'s output; ICA `W`/`K`/`A`/`S`/prewhitening rotation/`boot_idx`; CoGAPS SD matrices; NMF traces) | per method |
+| diag | method diagnostics list (PCA `sdev`/`center`/`mse_by_rank`; sPCA `pev`/`var_all`/`n_nonzero`/`center`/`trace` + the rest of `spca()`'s output; ICA `W`/`K`/`A`/`S` (rows named by sample)/prewhitening rotation/`boot_idx`/`boot_subjects`; CoGAPS SD matrices; NMF traces; WGCNA per-gene `connectivity`, `scale_free`, `gsg`) | per method |
 | raw | full native result object | CoGAPS (`CogapsResult`), WGCNA (`blockwiseModules()` output) |
 | dendrogram | the gene tree the modules were cut from (`net$dendrograms[[1]]`; hclust pieces) | WGCNA (single block) |
 | redundancy | K × K within-fit cosine matrix | nmf, cogaps, spca, ica (representatives) |
@@ -548,7 +560,9 @@ type.
 | es | REAL | GSEA only |
 | log2err | REAL | GSEA only |
 | is_main_pathway | INTEGER | boolean; fgsea `collapsePathways` |
-| genes | TEXT | JSON array (overlap / leading-edge genes) |
+
+The overlap / leading-edge genes of each result are in the dataset's `enrichment_genes`
+artifact.
 
 ## Cross-dataset tables
 
@@ -621,19 +635,11 @@ results are in the file at `path`.
 | path | TEXT | NN |
 | computed_at | TEXT | NN |
 
-### `pattern_markers`
+### Pattern markers
 Marker genes per factor (patternMarkers-style scores), used to diagnose "too many patterns" (a
-factor with no markers).
-
-- **Rows from:** `redundancy_<method>_<key>` (`R/targets/ingest.R::compute_method_redundancy()`,
-  which calls `R/lib/ingest/redundancy.R`).
-- **Written by:** `write_dataset_db()`.
-
-| Column | Type | Attributes |
-|---|---|---|
-| factor_id | INTEGER | PK (with gene); FK → factors.factor_id CASCADE |
-| gene | TEXT | PK |
-| score | REAL | NN |
+factor with no markers), are the dataset's `pattern_markers` artifact
+(`R/targets/ingest.R::compute_method_redundancy()`, `R/lib/ingest/redundancy.R`); their count per
+fit is `fit_redundancy.n_factors_with_no_markers`.
 
 ### `fit_redundancy`
 Within-fit redundancy summary: off-diagonal cosine between a fit's own factors, and the number of
@@ -648,6 +654,105 @@ factors with no marker genes. The full K × K matrix is the fit's `redundancy` a
 | max_offdiag_cosine | REAL | |
 | median_offdiag_cosine | REAL | |
 | n_factors_with_no_markers | INTEGER | |
+
+## Repeated-measures tables
+
+Written for every dataset with a `design:` block and, from the parent's design, for its
+per-timepoint subsets (`R/targets/variance_db.R::variance_db_rows()`, called by
+`write_dataset_db()`). The computations are in `R/targets/variance.R`, `composition.R` and
+`variance_explore.R`; see Methods, "Repeated measures".
+
+### `dataset_design`
+The design behind a dataset's repeated-measures results.
+
+| Column | Type | Attributes |
+|---|---|---|
+| dataset_id | TEXT | PK; FK → datasets.dataset_id CASCADE |
+| parent_dataset_id | TEXT | NN; the dataset whose design applies (itself, or a subset's parent) |
+| is_subset | INTEGER | NN; boolean |
+| platform | TEXT | 'array' or 'rnaseq' |
+| subject_col, time_col, group_col | TEXT | sample-metadata columns |
+| time_order | TEXT | JSON array, chronological |
+| covariates, technical_covariates | TEXT | JSON arrays (technical: the variance-model-only covariates, e.g. `control_factor`) |
+| vp_formula, dream_formula | TEXT | the parent's model formulas |
+| n_samples, n_subjects, n_dropped | INTEGER | samples in the design, distinct subjects, samples dropped (parents only) |
+
+### `samples`
+One row per sample in the design: its design values and sample-level checks. Subset rows come from
+the parent's analysis (PCs and expression statistics are the parent's).
+
+| Column | Type | Attributes |
+|---|---|---|
+| dataset_id | TEXT | PK (with sample_id); FK → datasets.dataset_id CASCADE |
+| sample_id | TEXT | PK |
+| subject, timepoint, grp, cell | TEXT | design values (`cell` = group × time) |
+| expr_mean, expr_sd, expr_q10, expr_median, expr_q90 | REAL | the sample's expression distribution (model input scale) |
+| pc1, pc2, pc3 | REAL | sample scores on the expression PCs |
+| neutrophil_score, lymphocyte_score, nl_score | REAL | marker scores (z-scored within dataset); nl = neutrophil − lymphocyte |
+| control_mean | REAL | mean of the array's control probes (arrays) |
+| control_factor | REAL | the control probes' first PC, standardized (datasets with `control_probes: {covariate: true}`) |
+| log2_lib_size, norm_factor | REAL | RNA-seq library size and TMM factor |
+| chrY_score, xist | REAL | sex-gene expression |
+| inferred_sex, recorded_sex | TEXT | 'F'/'M' |
+
+### `variance_summary`
+One row per dataset with its own design: the headline repeated-measures numbers.
+
+- **Fit:** n_genes, n_genes_failed, n_factor_genes (genes the factor analysis uses), share_singular,
+  max_colinearity, dupcor_consensus (limma's genome-wide subject correlation).
+- **Gene-level shares:** between_median, time_median, residual_median, technical_median
+  (median over genes; between = subject + subject-level variables, time = time + group × time);
+  repeatability_median (between / (between + residual)); time_within_median (time / (time +
+  residual)); share_time_gt05/10/20 (genes with time above 5/10/20%).
+- **Variance-weighted shares:** `between_vw_*`, `time_vw_*`, `residual_vw_*` over all genes
+  (`_all`), the factor-analysis genes (`_factor_genes`) and the top 8,000 by variance (`_top`).
+- **Within-person change** (subjects sampled more than once; each later sample minus the
+  subject's first): n_subjects_repeated, n_changes, change_pc1_share (share of the change on its
+  first PC), change_pc1_cor_nl, median_r2_nl_all / _factor_genes and median_r2_technical_all /
+  _factor_genes (median R² of each gene's change against the change in composition or in the
+  technical covariates).
+- **Sample checks:** rho_pc1_nl, rho_sd_nl, rho_mean_nl (Spearman, against the
+  neutrophil-lymphocyte score), rho_sd_technical, rho_mean_technical (against control mean or
+  library size), n_control_probes, control_probes (which), control_factor_fraction,
+  sex_separation, sex_agreement, n_subjects_sex_discordant, nl_subject_fraction,
+  nl_time_fraction, nl_group_fraction.
+- **Run:** vp_seconds, dream_seconds, fitted_at.
+
+### `variance_terms`, `variance_categories`, `variance_bins`
+- **variance_terms** (dataset_id, term): each model term's category ('subject', 'subject-level',
+  'time', 'group x time', 'group', 'technical', 'covariate', 'residual', or 'derived' for the
+  between-subject and time totals) and its distribution over genes: n_genes, mean, q10, median,
+  q90, share_gt05, share_gt10.
+- **variance_categories** (dataset_id, category): present, mean, median, and variance-weighted
+  shares vw_all, vw_factor_genes, vw_top.
+- **variance_bins** (dataset_id, binning, bin): median between-subject (`between_subject`), time and residual fractions by
+  expression quartile (`binning = 'expression_quartile'`, Q1 = lowest) and by variance rank
+  (`'variance_rank'`).
+
+### `trait_variance`, `composition_correlations`
+- **trait_variance** (dataset_id, trait, term): the sample-level traits (expression mean/sd/q90,
+  PC1–3, marker scores, control mean, library size, TMM factor) through the dataset's variance
+  formula: fraction and category per term.
+- **composition_correlations** (dataset_id, x, y): Spearman rho and p-value between every pair of
+  those traits.
+
+### `de_contrasts`
+One row per dream contrast or joint test (dataset_id, contrast): kind ('pairwise' or 'omnibus'),
+readable (the levels compared, or the contrasts tested jointly), n_genes, n_fdr05. Full tables are
+the `de_results` artifact.
+
+### `factor_variance`, `factor_variance_models`
+- **factor_variance** (factor_id, term): every fitted factor's sample scores through the dataset's
+  variance formula (a subset: its parent's, without subject and time): category and fraction per
+  term. FK → factors.factor_id CASCADE. From `factor_vp_<method>_<key>`
+  (`R/targets/variance_explore.R::factor_variance_partition()`).
+- **factor_variance_models** (dataset_id, method): the formula used and the number of factors.
+
+### `variance_time_genes`, `time_gene_recurrence`
+- **variance_time_genes** (dataset_id, symbol): genes with time + group × time above 10% of their
+  variance, with their time (`time_all`) and between-subject (`between_subject`) fractions.
+- **time_gene_recurrence** (symbol): in how many datasets, and which, a gene is time-driven.
+  Written by `write_cross_dataset_db()` from `variance_explore`.
 
 ## Views (`R/db/views.sql`)
 

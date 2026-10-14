@@ -1,7 +1,3 @@
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of every section below (dataset/methods) and
-# docs/data.qmd for the config reference.
-
 dataset:
   id: CORTICUS
   description: >
@@ -26,8 +22,16 @@ dataset:
 
   preprocessing_script: R/preprocessing/corticus_preprocessing.R
 
-# See config/dataset_metadata.example.yml for the full field-by-field
-# explanation of the config schema.
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# "Post(24h)" sorts before "Pre", so time_order is required; age is stored as
+# text. treatment / responder / survive_28_days are left out (they can mediate
+# the time effect).
+# control_probes: not array control probes (the series matrix has none) but
+# probes the illumina annotation marks as matching no transcript, a
+# background stand-in for the composition check. Values are already
+# quantile-normalized at deposit; no normalization here.
+design: {platform: array, subject: patient_id, time: timepoint, time_order: [Pre, "Post(24h)"], covariates: [sex, age], numeric: [age], control_probes: {column: ProbeQuality, values: ["No match"]}}
+
 methods:
   pca:
     rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]

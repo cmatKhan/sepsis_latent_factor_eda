@@ -1,4 +1,4 @@
--- Stability DB schema. Documented table by table in R/db/SCHEMA.md.
+-- Stability DB schema.
 -- Created by open_stability_db() (R/db/connect.R) on a new database, which
 -- then stamps PRAGMA user_version with SCHEMA_VERSION. There are no
 -- migrations: the DB is rebuilt from the targets store.
@@ -25,7 +25,9 @@ CREATE TABLE datasets (
 ;;
 CREATE TABLE dataset_artifacts (
   dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
-  kind       TEXT NOT NULL CHECK (kind IN ('matrix', 'sample_metadata', 'feature_metadata')),
+  kind       TEXT NOT NULL CHECK (kind IN ('matrix', 'sample_metadata', 'feature_metadata',
+                                           'variance_partition', 'de_results', 'composition',
+                                           'enrichment_genes', 'pattern_markers')),
   path       TEXT NOT NULL,
   PRIMARY KEY (dataset_id, kind)
 )
@@ -289,7 +291,6 @@ CREATE TABLE enrichment_results (
   es                REAL,
   log2err           REAL,
   is_main_pathway   INTEGER CHECK (is_main_pathway IN (0, 1)),
-  genes             TEXT,
   PRIMARY KEY (query_id, term_id)
 )
 ;;
@@ -343,16 +344,210 @@ CREATE TABLE pattern_drivers (
   UNIQUE (factor_id, grouping_col, group1_level, group2_level, mode)
 )
 ;;
-CREATE TABLE pattern_markers (
-  factor_id INTEGER NOT NULL REFERENCES factors(factor_id) ON DELETE CASCADE,
-  gene      TEXT NOT NULL,
-  score     REAL NOT NULL,
-  PRIMARY KEY (factor_id, gene)
-)
-;;
 CREATE TABLE fit_redundancy (
   fit_id                    INTEGER PRIMARY KEY REFERENCES fits(fit_id) ON DELETE CASCADE,
   max_offdiag_cosine        REAL,
   median_offdiag_cosine     REAL,
   n_factors_with_no_markers INTEGER
+)
+;;
+
+-- ---- repeated measures: design, sample QC, variance partition ---------------
+-- Written for datasets with a `design:` block and, from the parent's design,
+-- for their per-timepoint subsets (R/targets/variance.R, variance_explore.R,
+-- composition.R).
+
+CREATE TABLE dataset_design (
+  dataset_id           TEXT PRIMARY KEY REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  parent_dataset_id    TEXT NOT NULL,
+  is_subset            INTEGER NOT NULL CHECK (is_subset IN (0, 1)),
+  platform             TEXT,
+  subject_col          TEXT,
+  time_col             TEXT,
+  time_order           TEXT,
+  group_col            TEXT,
+  covariates           TEXT,
+  technical_covariates TEXT,
+  vp_formula           TEXT,
+  dream_formula        TEXT,
+  n_samples            INTEGER,
+  n_subjects           INTEGER,
+  n_dropped            INTEGER
+)
+;;
+CREATE TABLE samples (
+  dataset_id       TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  sample_id        TEXT NOT NULL,
+  subject          TEXT,
+  timepoint        TEXT,
+  grp              TEXT,
+  cell             TEXT,
+  expr_mean        REAL,
+  expr_sd          REAL,
+  expr_q10         REAL,
+  expr_median      REAL,
+  expr_q90         REAL,
+  pc1              REAL,
+  pc2              REAL,
+  pc3              REAL,
+  neutrophil_score REAL,
+  lymphocyte_score REAL,
+  nl_score         REAL,
+  control_mean     REAL,
+  control_factor   REAL,
+  log2_lib_size    REAL,
+  norm_factor      REAL,
+  chrY_score       REAL,
+  xist             REAL,
+  inferred_sex     TEXT,
+  recorded_sex     TEXT,
+  PRIMARY KEY (dataset_id, sample_id)
+)
+;;
+CREATE TABLE variance_summary (
+  dataset_id                      TEXT PRIMARY KEY REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  n_genes                         INTEGER,
+  n_genes_failed                  INTEGER,
+  n_factor_genes                  INTEGER,
+  share_singular                  REAL,
+  max_colinearity                 REAL,
+  dupcor_consensus                REAL,
+  between_median                  REAL,
+  time_median                     REAL,
+  residual_median                 REAL,
+  technical_median                REAL,
+  repeatability_median            REAL,
+  time_within_median              REAL,
+  share_time_gt05                 REAL,
+  share_time_gt10                 REAL,
+  share_time_gt20                 REAL,
+  between_vw_all                  REAL,
+  time_vw_all                     REAL,
+  residual_vw_all                 REAL,
+  between_vw_factor_genes         REAL,
+  time_vw_factor_genes            REAL,
+  residual_vw_factor_genes        REAL,
+  between_vw_top                  REAL,
+  time_vw_top                     REAL,
+  residual_vw_top                 REAL,
+  n_subjects_repeated             INTEGER,
+  n_changes                       INTEGER,
+  change_pc1_share                REAL,
+  change_pc1_cor_nl               REAL,
+  median_r2_nl_all                REAL,
+  median_r2_nl_factor_genes       REAL,
+  median_r2_technical_all         REAL,
+  median_r2_technical_factor_genes REAL,
+  rho_pc1_nl                      REAL,
+  rho_sd_nl                       REAL,
+  rho_mean_nl                     REAL,
+  rho_sd_technical                REAL,
+  rho_mean_technical              REAL,
+  n_control_probes                INTEGER,
+  control_probes                  TEXT,
+  control_factor_fraction         REAL,
+  sex_separation                  REAL,
+  sex_agreement                   REAL,
+  n_subjects_sex_discordant       INTEGER,
+  nl_subject_fraction             REAL,
+  nl_time_fraction                REAL,
+  nl_group_fraction               REAL,
+  vp_seconds                      REAL,
+  dream_seconds                   REAL,
+  fitted_at                       TEXT NOT NULL
+)
+;;
+CREATE TABLE variance_terms (
+  dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  term       TEXT NOT NULL,
+  category   TEXT NOT NULL,
+  n_genes    INTEGER,
+  mean       REAL,
+  q10        REAL,
+  median     REAL,
+  q90        REAL,
+  share_gt05 REAL,
+  share_gt10 REAL,
+  PRIMARY KEY (dataset_id, term)
+)
+;;
+CREATE TABLE variance_categories (
+  dataset_id      TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  category        TEXT NOT NULL,
+  present         INTEGER NOT NULL CHECK (present IN (0, 1)),
+  mean            REAL,
+  median          REAL,
+  vw_all          REAL,
+  vw_factor_genes REAL,
+  vw_top          REAL,
+  PRIMARY KEY (dataset_id, category)
+)
+;;
+CREATE TABLE variance_bins (
+  dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  binning    TEXT NOT NULL CHECK (binning IN ('expression_quartile', 'variance_rank')),
+  bin        TEXT NOT NULL,
+  n_genes         INTEGER,
+  between_subject REAL,
+  time            REAL,
+  residual        REAL,
+  PRIMARY KEY (dataset_id, binning, bin)
+)
+;;
+CREATE TABLE trait_variance (
+  dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  trait      TEXT NOT NULL,
+  term       TEXT NOT NULL,
+  category   TEXT NOT NULL,
+  fraction   REAL,
+  PRIMARY KEY (dataset_id, trait, term)
+)
+;;
+CREATE TABLE composition_correlations (
+  dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  x          TEXT NOT NULL,
+  y          TEXT NOT NULL,
+  rho        REAL,
+  p_value    REAL,
+  PRIMARY KEY (dataset_id, x, y)
+)
+;;
+CREATE TABLE de_contrasts (
+  dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  contrast   TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('pairwise', 'omnibus')),
+  readable   TEXT,
+  n_genes    INTEGER,
+  n_fdr05    INTEGER,
+  PRIMARY KEY (dataset_id, contrast)
+)
+;;
+CREATE TABLE factor_variance_models (
+  dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  method     TEXT NOT NULL REFERENCES methods(method),
+  formula    TEXT NOT NULL,
+  n_factors  INTEGER,
+  PRIMARY KEY (dataset_id, method)
+)
+;;
+CREATE TABLE factor_variance (
+  factor_id INTEGER NOT NULL REFERENCES factors(factor_id) ON DELETE CASCADE,
+  term      TEXT NOT NULL,
+  category  TEXT NOT NULL,
+  fraction  REAL,
+  PRIMARY KEY (factor_id, term)
+)
+;;
+CREATE TABLE variance_time_genes (
+  dataset_id TEXT NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+  symbol          TEXT NOT NULL,
+  time_all        REAL,
+  between_subject REAL,
+  PRIMARY KEY (dataset_id, symbol)
+)
+;;
+CREATE TABLE time_gene_recurrence (
+  symbol     TEXT PRIMARY KEY,
+  n_datasets INTEGER NOT NULL,
+  datasets   TEXT NOT NULL
 )

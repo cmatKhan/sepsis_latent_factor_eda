@@ -1,8 +1,7 @@
 # Reading and validating dataset configs (config/<dataset>_config.yml).
 # A method runs when it appears under `methods:`; each method block holds
 # overrides of that method's registry `defaults`. Validation runs when
-# _targets.R is read, so a bad config fails before any job is submitted
-# (docs: Data, "Dataset configs").
+# _targets.R is read, so a bad config fails before any job is submitted.
 
 library(yaml)
 
@@ -27,8 +26,8 @@ read_dataset_metadata <- function(path, manifest = NULL, data_root = default_dat
 #' Checks that the matrix can be built (`matrix_path` or
 #' `preprocessing_script` exists, or `expression_path` is set), that at least
 #' one method is configured, that every configured method was discovered, and
-#' that no `methods:` key is a YAML boolean token read as `TRUE`/`FALSE`
-#' (docs: Data, "YAML keys that are booleans"). Errors on the first problem.
+#' that no `methods:` key is a YAML boolean token read as `TRUE`/`FALSE`.
+#' Errors on the first problem.
 #'
 #' @param meta A parsed config.
 #' @param manifest Method manifest, or `NULL` to skip the method checks.
@@ -54,8 +53,7 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
     if (is.null(meta$dataset$expression_path) || !file.exists(meta$dataset$expression_path)) {
       stop("None of dataset$matrix_path, dataset$preprocessing_script are set, so ",
            "dataset$expression_path must point to an existing long-format ",
-           "expression parquet file to pivot by default. See R/README.md's ",
-           "\"Preparing your input matrix\".")
+           "expression parquet file (feature, sample and value columns) to pivot by default.")
     }
   }
 
@@ -71,8 +69,7 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
   # e.g. a real argument name `n` would silently become the key `FALSE`,
   # which downstream becomes the column name "FALSE." (R's make.names()
   # escaping the reserved word) and breaks the tool call with "unused
-  # argument". Quote any such key in YAML (`"n": [...]`) -- see
-  # docs/data.qmd ("YAML keys that are booleans"). Applied recursively (e.g. CoGAPS's
+  # argument". Quote any such key in YAML (`"n": [...]`). Applied recursively (e.g. CoGAPS's
   # nested `params`/`distributed_params`/`run`), since there's no longer a
   # fixed wrapper depth to stop at.
   check_bool_key_typo_recursive <- function(block, label) {
@@ -81,7 +78,7 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
         stop(label, " has a key literally named `", nm, "` -- almost certainly an unquoted ",
              "YAML boolean-token key (y/n/yes/no/on/off/true/false, in any case) that got ",
              "coerced instead of staying a literal string. Quote it in the YAML, e.g. `\"n\": ",
-             "[...]` instead of `n: [...]`. See R/README.md's config reference.")
+             "[...]` instead of `n: [...]`.")
       }
       val <- block[[nm]]
       if (is.list(val) && !is.null(names(val))) check_bool_key_typo_recursive(val, paste0(label, ".", nm))
@@ -109,31 +106,8 @@ validate_dataset_metadata <- function(meta, manifest = NULL) {
     }
   }
 
-  # Tensor methods (CP/Tucker) used to need dataset:-level subject/
-  # timepoint columns here, driven by each method's registry
-  # (`requires_subject_timepoint`, see R/lib/method_registry.R) rather
-  # than a hardcoded name list -- this is why `manifest` is threaded
-  # through to this function at all. Removed along with CP/Tucker
-  # 2026-09-29 (see app.R's FACTORIZATION_METHODS header) -- no current
-  # method sets `requires_subject_timepoint`, so this loop is a no-op
-  # today, but left in place (rather than deleted) since it's generic,
-  # registry-driven infrastructure a future method could still use.
-  if (!is.null(manifest)) {
-    check_subject_timepoint <- function(nm) {
-      reg <- manifest[[nm]]$registry
-      if (is.null(reg) || !isTRUE(reg$requires_subject_timepoint)) return(invisible())
-      if (is.null(meta$dataset$subject_id_col) || is.null(meta$dataset$timepoint_col)) {
-        stop("methods.", nm, " is configured but dataset.subject_id_col and ",
-             "dataset.timepoint_col are not both set -- required to build the genes x ",
-             "subjects x timepoints tensor. See R/README.md's config reference.")
-      }
-      if (is.null(meta$dataset$sample_metadata_path)) {
-        stop("methods.", nm, " is configured but dataset.sample_metadata_path ",
-             "is not set -- required to look up each sample's subject/timepoint")
-      }
-    }
-    for (nm in setdiff(names(meta$methods), "network")) check_subject_timepoint(nm)
-  }
+  # The optional `design:` block (variancePartition / dream, R/lib/design.R).
+  if (!is.null(meta$design)) validate_design(meta$design)
 
   invisible(meta)
 }
