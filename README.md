@@ -30,7 +30,7 @@ git clone https://github.com/cmatKhan/sepsis_latent_factor_eda.git
 from in Rstudio or by navigating to the .Rproj file in the project 
 directory and clicking it.
 
-3. Install the environment. You need R 4.6.1 (the version recorded in
+3. Install the environment. **You need R 4.6.1** (the version recorded in
 `renv.lock`) and a toolchain that can build R packages from source (a
 C/C++/Fortran compiler, `make`, and the usual system libraries such as libcurl,
 openssl and libxml2). Then start R **in the project directory** (opening the
@@ -58,7 +58,7 @@ work on a laptop.
 
 ## Launching the app with public data
 
-To launch the app, you need the results of the targets pipeline. [A version 
+To launch the app, you need the results of the targets pipeline. A version 
 of this is available here](https://huggingface.co/datasets/cmatkhan/sepsis_latent_factors_db_data).
 Download that data and either mount it to a directory called `results` in your 
 project, or extract it. If you're using linux or mac, you probably already 
@@ -73,7 +73,7 @@ Then, mount the results.squash file to it:
 
 ```
 # if you have sudo privileges
-mount -t squashfs -o loop results_no_rose.squash results 
+sudo mount -t squashfs -o loop results_no_rose.squash results 
 
 # if you do not have sudo privileges, install squashfuse and then do
 squashfuse results_no_rose.squash results 
@@ -88,3 +88,6 @@ sudo umount results
 # if you used squashfuse
 fusermount -u results
 ```
+
+then, either open `app/app.R` and click "Run App" in rstudio, or from the 
+console enter `shiny::runApp("app")`
