@@ -1,0 +1,46 @@
+# Single-timepoint slice of ANEMONES (design: timecourse, see
+# sepsis_collection_description.agent). Built from the SAME raw parquet
+# trio as config/ANEMONES_config.yml, filtered to
+# timepoint == "Day: 2" (124 samples) inside
+# R/preprocessing/anemones_day2_preprocessing.R.
+# One config per matrix, so each timepoint is its own dataset.
+
+dataset:
+  id: ANEMONES_DAY2
+  description: >
+    All samples from single timepoint from ANEMONES (GSE236713), array platform, timecourse design -- timepoint == "Day: 2" (124 samples).
+
+  hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
+
+  expression_path: ANEMONES/expression.parquet
+  sample_metadata_path: ANEMONES/sample_metadata.parquet
+  feature_metadata_path: ANEMONES/feature_metadata.parquet
+  sample_id_col: sample_id
+  feature_id_col: feature_id
+  value_col: value
+  ensembl_col: ensembl_gene_id
+  symbol_col: gene_symbol
+  subject_id_col: patient_id   # same subject column as the parent config; links a person's samples across the timepoint subsets
+
+  preprocessing_script: R/preprocessing/anemones_day2_preprocessing.R
+
+methods:
+  pca:
+    rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+
+  spca:
+    K: [2,3,4,5,6,7,8,9,10,11,12]
+    sparse: varnum
+
+  ica:
+    n.comp: [5, 7, 10, 15, 20]
+    seed: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    # alpha: uses R/methods/ica.R's own default (1); must stay static -- see its header
+
+  network:
+    wgcna:
+      power: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]
+      minModuleSize: 30
+      mergeCutHeight: 0.25
+      networkType: signed
+

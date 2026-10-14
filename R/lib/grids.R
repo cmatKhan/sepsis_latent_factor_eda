@@ -1,30 +1,36 @@
-# Generic (method-agnostic) job-grid builders. Each returns a data.frame
-# suitable for slurm_apply()'s `params` argument -- one row per job. There's
-# no "basis" dimension here: one config = one matrix = one grid.
+# Merging a method's config overrides onto its registry `defaults`.
 
-#' param x seed grid -- the "seed-sweep" stability design (does the
-#' discovered factorization change across random seeds, at a given
-#' parameter value?).
-build_grid_seed_sweep <- function(param_values, seeds, param_name = "rank") {
-  grid <- expand.grid(param = param_values, seed = seeds, stringsAsFactors = FALSE)
-  names(grid)[names(grid) == "param"] <- param_name
-  grid
-}
+#' Null default
+#'
+#' `a` unless it is `NULL`, then `b` (base R's `%||%`, defined here for older R).
+#'
+#' @param a A value, possibly `NULL`.
+#' @param b The fallback.
+#' @return `a`, or `b` when `a` is `NULL`.
+`%||%` <- function(a, b) if (is.null(a)) b else a
 
-#' param [x extra_grid dims] grid -- the "masking-CV" stability design
-#' (which parameter value best reconstructs held-out entries?). `extra` is
-#' an optional named list of additional vectors to cross in (e.g. CoGAPS's
-#' alpha_range).
-build_grid_masking_cv <- function(param_values, param_name = "rank", extra = NULL) {
-  dims <- c(list(param = param_values), extra)
-  grid <- do.call(expand.grid, c(dims, stringsAsFactors = FALSE))
-  names(grid)[names(grid) == "param"] <- param_name
-  grid
-}
-
-#' Arbitrary parameter grid -- used by network methods (WGCNA's power_grid,
-#' wTO's n/delta grid), which don't have a masking-CV analogue. `param_grid`
-#' is a named list of vectors to cross.
-build_grid_param <- function(param_grid) {
-  do.call(expand.grid, c(param_grid, stringsAsFactors = FALSE))
+#' Merge config overrides onto a method's defaults
+#'
+#' Layers `override`'s entries onto `base` by name (plain `c()` would keep both
+#' copies of a duplicated name). Recurses one level into entries that are named
+#' lists in both, such as CoGAPS's `params` sub-block, so overriding one nested
+#' key (`params.nPatterns`) keeps the other nested defaults.
+#'
+#' @param base Named list of defaults (a registry's `defaults`), or `NULL`.
+#' @param override Named list of overrides (the dataset config's method block), or `NULL`.
+#' @return The merged named list.
+merge_named_list <- function(base, override) {
+  base <- base %||% list()
+  override <- override %||% list()
+  for (nm in names(override)) {
+    base_val <- base[[nm]]
+    override_val <- override[[nm]]
+    if (is.list(base_val) && !is.null(names(base_val)) &&
+        is.list(override_val) && !is.null(names(override_val))) {
+      base[[nm]] <- merge_named_list(base_val, override_val)
+    } else {
+      base[[nm]] <- override_val
+    }
+  }
+  base
 }

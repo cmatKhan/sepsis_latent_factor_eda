@@ -1,180 +1,47 @@
-# Parameterized queries for the stability explorer app. Every function
-# takes the DBI connection; the app reads whatever the DB currently
-# contains (see app.R for the STABILITY_DB path parameterization).
+# Queries against the stability DB (schema: R/db/schema.sql, docs/database.qmd).
+# The app only reads; every function takes the open connection first.
 
 METRICS <- c("cosine", "pearson", "spearman")
 
+# Methods in display order. WGCNA has modules, not loadings.
+METHOD_ORDER <- c("pca", "spca", "ica", "nmf", "cogaps", "wgcna")
+
 check_metric <- function(metric) {
-  match.arg(metric, METRICS)
+  if (!metric %in% METRICS) stop("metric must be one of: ", paste(METRICS, collapse = ", "))
+  metric
 }
+
+## ---- datasets and coverage ---------------------------------------------------
 
 list_datasets <- function(con) {
-  DBI::dbGetQuery(con, "SELECT dataset_id, description FROM datasets ORDER BY dataset_id")
+  DBI::dbGetQuery(con, "SELECT dataset_id FROM datasets ORDER BY dataset_id")$dataset_id
 }
 
-list_ingests <- function(con, dataset_id) {
+#' Methods with at least one ok fit for a dataset, in METHOD_ORDER.
+methods_for_dataset <- function(con, dataset_id) {
+  m <- DBI::dbGetQuery(con,
+    "SELECT DISTINCT method FROM fits WHERE dataset_id = ? AND status = 'ok'",
+    params = list(dataset_id))$method
+  METHOD_ORDER[METHOD_ORDER %in% m]
+}
+
+#' Fit counts per method for one dataset (v_ingest_summary).
+fit_coverage <- function(con, dataset_id) {
   DBI::dbGetQuery(con,
-    "SELECT jobname, family, method, n_results, ingested_at
-     FROM ingests WHERE dataset_id = ? ORDER BY method, family",
+    "SELECT method, family, n_fits, n_ok, n_failed, n_representative
+     FROM v_ingest_summary WHERE dataset_id = ?",
     params = list(dataset_id))
 }
 
-#' Per-method overview: fit counts by status + headline stability
-#' (mean matched same-rank similarity) per metric.
-method_overview <- function(con, dataset_id) {
-  counts <- DBI::dbGetQuery(con,
-    "SELECT method,
-            SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS n_ok,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS n_failed,
-            SUM(CASE WHEN status = 'missing' THEN 1 ELSE 0 END) AS n_missing
-     FROM fits WHERE dataset_id = ? GROUP BY method",
-    params = list(dataset_id))
-  stab <- DBI::dbGetQuery(con,
-    "SELECT ft.method,
-            AVG(fp.cosine) AS cosine, AVG(fp.pearson) AS pearson, AVG(fp.spearman) AS spearman
-     FROM factor_pairs fp JOIN fits ft ON ft.fit_id = fp.fit_a
-     WHERE fp.matched = 1 AND fp.same_rank = 1 AND ft.dataset_id = ?
-     GROUP BY ft.method",
-    params = list(dataset_id))
-  wgcna <- DBI::dbGetQuery(con,
-    "SELECT 'wgcna' AS method, AVG(wp.ari) AS ari
-     FROM wgcna_fit_pairs wp JOIN fits ft ON ft.fit_id = wp.fit_a
-     WHERE ft.dataset_id = ?",
-    params = list(dataset_id))
-  wto <- DBI::dbGetQuery(con,
-    "SELECT 'wto' AS method, AVG(wp.pearson) AS pearson, AVG(wp.spearman) AS spearman
-     FROM wto_fit_pairs wp JOIN fits ft ON ft.fit_id = wp.fit_a
-     WHERE ft.dataset_id = ?",
-    params = list(dataset_id))
-  list(counts = counts, stability = stab, wgcna = wgcna, wto = wto)
+dataset_val_sd <- function(con, dataset_id) {
+  v <- DBI::dbGetQuery(con, "SELECT val_sd FROM matrix_diagnostics WHERE dataset_id = ?",
+                       params = list(dataset_id))$val_sd
+  if (length(v) == 1 && !is.na(v)) v else NA_real_
 }
 
-#' Matched same-rank factor similarities with rank/seed info -- the Level-1
-#' "seed stability vs rank" data.
-seed_stability_by_rank <- function(con, dataset_id, method) {
-  DBI::dbGetQuery(con,
-    "SELECT fa.rank, fa.seed AS seed_a, fb.seed AS seed_b,
-            fp.factor_a, fp.factor_b, fp.cosine, fp.pearson, fp.spearman
-     FROM factor_pairs fp
-     JOIN fits fa ON fa.fit_id = fp.fit_a
-     JOIN fits fb ON fb.fit_id = fp.fit_b
-     WHERE fp.matched = 1 AND fp.same_rank = 1
-       AND fa.dataset_id = ? AND fa.method = ?",
-    params = list(dataset_id, method))
-}
+## ---- artifacts ---------------------------------------------------------------
 
-maskcv_curve <- function(con, dataset_id, method) {
-  DBI::dbGetQuery(con,
-    "SELECT rank, alpha, mse FROM maskcv_results
-     WHERE dataset_id = ? AND method = ? ORDER BY rank, alpha",
-    params = list(dataset_id, method))
-}
-
-#' Cross-rank persistence: mean matched similarity between every rank pair.
-crossrank_matrix <- function(con, dataset_id, method) {
-  DBI::dbGetQuery(con,
-    "SELECT fa.rank AS rank_a, fb.rank AS rank_b,
-            AVG(fp.cosine) AS cosine, AVG(fp.pearson) AS pearson, AVG(fp.spearman) AS spearman,
-            COUNT(*) AS n
-     FROM factor_pairs fp
-     JOIN fits fa ON fa.fit_id = fp.fit_a
-     JOIN fits fb ON fb.fit_id = fp.fit_b
-     WHERE fp.matched = 1 AND fp.same_rank = 0
-       AND fa.dataset_id = ? AND fa.method = ?
-     GROUP BY fa.rank, fb.rank",
-    params = list(dataset_id, method))
-}
-
-#' Seed x seed mean matched similarity at one rank (Level 2).
-seedpair_matrix <- function(con, dataset_id, method, rank) {
-  DBI::dbGetQuery(con,
-    "SELECT fa.seed AS seed_a, fb.seed AS seed_b,
-            AVG(fp.cosine) AS cosine, AVG(fp.pearson) AS pearson, AVG(fp.spearman) AS spearman
-     FROM factor_pairs fp
-     JOIN fits fa ON fa.fit_id = fp.fit_a
-     JOIN fits fb ON fb.fit_id = fp.fit_b
-     WHERE fp.matched = 1 AND fp.same_rank = 1
-       AND fa.dataset_id = ? AND fa.method = ? AND fa.rank = ?
-     GROUP BY fa.seed, fb.seed",
-    params = list(dataset_id, method, rank))
-}
-
-#' Distinct ranks with at least one ok seed_sweep fit for a method --
-#' used by PCA's reduced Level 1 rank-select (falls back to this when a
-#' method has no masking-CV family at all).
-distinct_ranks <- function(con, dataset_id, method) {
-  DBI::dbGetQuery(con,
-    "SELECT DISTINCT rank FROM fits
-     WHERE dataset_id = ? AND method = ? AND family = 'seed_sweep' AND status = 'ok'
-     ORDER BY rank",
-    params = list(dataset_id, method))$rank
-}
-
-fits_at_rank <- function(con, dataset_id, method, rank) {
-  DBI::dbGetQuery(con,
-    "SELECT fit_id, seed, mse, n_factors, loadings_file FROM fits
-     WHERE dataset_id = ? AND method = ? AND rank = ? AND status = 'ok'
-       AND family = 'seed_sweep'
-     ORDER BY seed",
-    params = list(dataset_id, method, rank))
-}
-
-#' Per-factor matched similarities for one fit vs all other same-rank fits
-#' (handles both storage directions of the pair).
-factor_stability_for_fit <- function(con, fit_id) {
-  DBI::dbGetQuery(con,
-    "SELECT fp.factor_a AS factor_index, fb.seed AS other_seed,
-            fp.cosine, fp.pearson, fp.spearman
-     FROM factor_pairs fp
-     JOIN fits fb ON fb.fit_id = fp.fit_b
-     WHERE fp.fit_a = ?1 AND fp.matched = 1 AND fp.same_rank = 1
-     UNION ALL
-     SELECT fp.factor_b AS factor_index, fa.seed AS other_seed,
-            fp.cosine, fp.pearson, fp.spearman
-     FROM factor_pairs fp
-     JOIN fits fa ON fa.fit_id = fp.fit_a
-     WHERE fp.fit_b = ?1 AND fp.matched = 1 AND fp.same_rank = 1",
-    params = list(fit_id))
-}
-
-#' All factor x factor similarities for one specific fit pair.
-factor_pair_heatmap_data <- function(con, fit_a, fit_b) {
-  d <- DBI::dbGetQuery(con,
-    "SELECT factor_a, factor_b, cosine, pearson, spearman, matched
-     FROM factor_pairs WHERE fit_a = ?1 AND fit_b = ?2
-     UNION ALL
-     SELECT factor_b AS factor_a, factor_a AS factor_b, cosine, pearson, spearman, matched
-     FROM factor_pairs WHERE fit_a = ?2 AND fit_b = ?1",
-    params = list(fit_a, fit_b))
-  d
-}
-
-#' This factor's Hungarian match in every other fit (all seeds + ranks).
-factor_matches_everywhere <- function(con, fit_id, factor_index) {
-  DBI::dbGetQuery(con,
-    "SELECT fb.fit_id AS other_fit, fb.rank AS other_rank, fb.seed AS other_seed,
-            fp.factor_b AS other_factor, fp.cosine, fp.pearson, fp.spearman
-     FROM factor_pairs fp JOIN fits fb ON fb.fit_id = fp.fit_b
-     WHERE fp.fit_a = ?1 AND fp.factor_a = ?2 AND fp.matched = 1
-     UNION ALL
-     SELECT fa.fit_id, fa.rank, fa.seed, fp.factor_a, fp.cosine, fp.pearson, fp.spearman
-     FROM factor_pairs fp JOIN fits fa ON fa.fit_id = fp.fit_a
-     WHERE fp.fit_b = ?1 AND fp.factor_b = ?2 AND fp.matched = 1",
-    params = list(fit_id, factor_index))
-}
-
-get_fit <- function(con, fit_id) {
-  DBI::dbGetQuery(con, "SELECT * FROM fits WHERE fit_id = ?", params = list(fit_id))
-}
-
-get_factor_id <- function(con, fit_id, factor_index) {
-  DBI::dbGetQuery(con,
-    "SELECT factor_id FROM factors WHERE fit_id = ? AND factor_index = ?",
-    params = list(fit_id, factor_index))$factor_id
-}
-
-#' loadings_file paths are stored relative to the DB file's directory
-#' (see R/lib/ingest/db.R) -- resolve via the option set at app startup.
+#' Artifact paths are stored relative to the DB file's directory.
 resolve_artifact <- function(path) {
   if (is.na(path) || !nzchar(path)) return(NA_character_)
   if (startsWith(path, "/")) return(path)
@@ -183,113 +50,343 @@ resolve_artifact <- function(path) {
   file.path(db_dir, path)
 }
 
-load_loadings <- function(con, fit_id) {
-  f <- get_fit(con, fit_id)
-  if (nrow(f) == 0 || is.na(f$loadings_file)) return(NULL)
-  path <- resolve_artifact(f$loadings_file)
+load_fit_artifact <- function(con, fit_id, kind) {
+  p <- DBI::dbGetQuery(con, "SELECT path FROM fit_artifacts WHERE fit_id = ? AND kind = ?",
+                       params = list(fit_id, kind))$path
+  if (length(p) != 1) return(NULL)
+  path <- resolve_artifact(p)
   if (!file.exists(path)) return(NULL)
   readRDS(path)
 }
 
-## ---- network methods ---------------------------------------------------------
-
-wgcna_fits <- function(con, dataset_id) {
-  DBI::dbGetQuery(con,
-    "SELECT fit_id, power, n_factors FROM fits
-     WHERE dataset_id = ? AND method = 'wgcna' AND status = 'ok' ORDER BY power",
-    params = list(dataset_id))
+#' A fit's loadings (genes x factors); NULL for WGCNA. `n` keeps the first n
+#' factors, which is how PCA's single max-rank fit is viewed at a smaller rank.
+load_loadings <- function(con, fit_id, n = NULL) {
+  L <- load_fit_artifact(con, fit_id, "loadings")
+  if (is.null(L) || is.null(n) || is.na(n)) return(L)
+  L[, seq_len(min(n, ncol(L))), drop = FALSE]
 }
 
-wgcna_ari_matrix <- function(con, dataset_id) {
-  DBI::dbGetQuery(con,
-    "SELECT fa.power AS power_a, fb.power AS power_b, wp.ari
-     FROM wgcna_fit_pairs wp
-     JOIN fits fa ON fa.fit_id = wp.fit_a
-     JOIN fits fb ON fb.fit_id = wp.fit_b
-     WHERE fa.dataset_id = ?",
-    params = list(dataset_id))
+#' A fit's sample scores (samples x factors; module eigengenes for WGCNA).
+load_scores <- function(con, fit_id, n = NULL) {
+  S <- load_fit_artifact(con, fit_id, "scores")
+  if (is.null(S) || is.null(n) || is.na(n)) return(S)
+  S[, seq_len(min(n, ncol(S))), drop = FALSE]
 }
 
-wgcna_module_sizes <- function(con, fit_id) {
-  DBI::dbGetQuery(con,
-    "SELECT module, COUNT(*) AS n_genes FROM wgcna_modules
-     WHERE fit_id = ? GROUP BY module ORDER BY module",
-    params = list(fit_id))
+## ---- Q1/Q2: hyperparameter curves and the optimal fit --------------------------
+
+CURVE_COLS <- c("method", "rank_label", "rank_key", "fit_id", "n_factors",
+                "in_sample_r2", "stability")
+
+empty_curve <- function() {
+  data.frame(method = character(0), rank_label = character(0), rank_key = numeric(0),
+             fit_id = integer(0), n_factors = integer(0), in_sample_r2 = numeric(0),
+             stability = numeric(0), stringsAsFactors = FALSE)
 }
 
-wgcna_module_jaccard <- function(con, fit_a, fit_b) {
-  DBI::dbGetQuery(con,
-    "SELECT module_a, module_b, jaccard, matched FROM wgcna_module_pairs
-     WHERE fit_a = ?1 AND fit_b = ?2
-     UNION ALL
-     SELECT module_b AS module_a, module_a AS module_b, jaccard, matched
-     FROM wgcna_module_pairs WHERE fit_a = ?2 AND fit_b = ?1",
-    params = list(fit_a, fit_b))
-}
+#' One method's quality/stability curve over its hyperparameter, one row per
+#' representative fit (`fits.representative = 1`). `rank_key` is the rank, or
+#' the soft-threshold power for WGCNA; `rank_label` names which. Columns:
+#'   in_sample_r2  1 - mse / val_sd^2 (PCA, NMF, CoGAPS, ICA); sPCA has no mse,
+#'                 so its sparse PEV; WGCNA has no reconstruction, so the mean
+#'                 member kME. Comparable within a method, not across methods.
+#'   stability     mean over factors of `factors.stability_<metric>` (median
+#'                 matched |similarity| across same-rank fit pairs); PCA's
+#'                 nested components are stable by construction (1); WGCNA uses
+#'                 the mean ARI against the other powers.
+#' An empty frame (not an error) when the method has no ok fits here.
+method_curve <- function(con, dataset_id, method, metric = "cosine", val_sd = NA_real_) {
+  stab_col <- paste0("stability_", check_metric(metric))
 
-wgcna_module_best_matches <- function(con, dataset_id, fit_id) {
-  DBI::dbGetQuery(con,
-    "SELECT p.module_a AS module, fb.power AS other_power, p.module_b AS other_module, p.jaccard
-     FROM wgcna_module_pairs p JOIN fits fb ON fb.fit_id = p.fit_b
-     WHERE p.fit_a = ?1 AND p.matched = 1
-     UNION ALL
-     SELECT p.module_b, fa.power, p.module_a, p.jaccard
-     FROM wgcna_module_pairs p JOIN fits fa ON fa.fit_id = p.fit_a
-     WHERE p.fit_b = ?1 AND p.matched = 1",
-    params = list(fit_id))
-}
-
-wto_fits <- function(con, dataset_id) {
-  DBI::dbGetQuery(con,
-    "SELECT fit_id, n_boot, seed, delta, loadings_file FROM fits
-     WHERE dataset_id = ? AND method = 'wto' AND status = 'ok' ORDER BY n_boot, seed",
-    params = list(dataset_id))
-}
-
-wto_pair_matrix <- function(con, dataset_id) {
-  DBI::dbGetQuery(con,
-    "SELECT fa.fit_id AS fit_a, fb.fit_id AS fit_b,
-            fa.n_boot AS n_a, fa.seed AS seed_a, fb.n_boot AS n_b, fb.seed AS seed_b,
-            wp.pearson, wp.spearman, wp.jaccard_sig
-     FROM wto_fit_pairs wp
-     JOIN fits fa ON fa.fit_id = wp.fit_a
-     JOIN fits fb ON fb.fit_id = wp.fit_b
-     WHERE fa.dataset_id = ?",
-    params = list(dataset_id))
-}
-
-## ---- enrichment cache ---------------------------------------------------------
-
-enrichment_cached <- function(con, factor_id, query_type, direction) {
-  hit <- DBI::dbGetQuery(con,
-    "SELECT COUNT(*) AS n FROM enrichment_queried
-     WHERE factor_id = ? AND query_type = ? AND direction = ?",
-    params = list(factor_id, query_type, direction))$n > 0
-  if (!hit) return(NULL)
-  DBI::dbGetQuery(con,
-    "SELECT source, term_id, term_name, p_value, intersection_size, term_size, query_size
-     FROM enrichment_cache
-     WHERE factor_id = ? AND query_type = ? AND direction = ?
-     ORDER BY p_value",
-    params = list(factor_id, query_type, direction))
-}
-
-enrichment_store <- function(con, factor_id, query_type, direction, gost_result) {
-  DBI::dbExecute(con,
-    "INSERT OR REPLACE INTO enrichment_queried (factor_id, query_type, direction, queried_at)
-     VALUES (?, ?, ?, datetime('now'))",
-    params = list(factor_id, query_type, direction))
-  if (!is.null(gost_result) && !is.null(gost_result$result) && nrow(gost_result$result) > 0) {
-    r <- gost_result$result
-    DBI::dbWriteTable(con, "enrichment_cache", data.frame(
-      factor_id = factor_id, query_type = query_type, direction = direction,
-      source = r$source, term_id = r$term_id, term_name = r$term_name,
-      p_value = r$p_value, intersection_size = r$intersection_size,
-      term_size = r$term_size,
-      query_size = if (!is.null(r$query_size)) r$query_size else NA_integer_,
-      genes = if (!is.null(r$intersection)) as.character(r$intersection) else NA_character_,
-      queried_at = as.character(Sys.time())
-    ), append = TRUE)
+  if (method == "pca") {
+    f <- DBI::dbGetQuery(con,
+      "SELECT fit_id, rank FROM fits WHERE dataset_id = ? AND method = 'pca' AND status = 'ok'
+       ORDER BY rank DESC LIMIT 1", params = list(dataset_id))
+    if (nrow(f) == 0) return(empty_curve())
+    d <- load_fit_artifact(con, f$fit_id, "diag")
+    if (is.null(d) || is.null(d$mse_by_rank)) return(empty_curve())
+    k <- seq_along(d$mse_by_rank)
+    return(data.frame(method = "pca", rank_label = paste("rank", k), rank_key = k, fit_id = f$fit_id,
+                      n_factors = k, in_sample_r2 = 1 - d$mse_by_rank / val_sd^2, stability = 1,
+                      stringsAsFactors = FALSE))
   }
-  invisible(NULL)
+
+  f <- DBI::dbGetQuery(con,
+    "SELECT fit_id, rank, power, mse, n_factors FROM v_fits
+     WHERE dataset_id = ? AND method = ? AND status = 'ok' AND representative = 1",
+    params = list(dataset_id, method))
+  if (nrow(f) == 0) return(empty_curve())
+  ids <- paste(f$fit_id, collapse = ",")
+
+  if (method == "wgcna") {
+    kme <- DBI::dbGetQuery(con, sprintf(
+      "SELECT fit_id, SUM(n * mean) / SUM(n) AS q FROM module_kme_summary
+       WHERE grp = 'member' AND module != 0 AND fit_id IN (%s) GROUP BY fit_id", ids))
+    ari <- DBI::dbGetQuery(con, sprintf(
+      "SELECT fit_a, fit_b, ari FROM fit_pairs WHERE fit_a IN (%s) AND fit_b IN (%s)", ids, ids))
+    ari_long <- rbind(data.frame(fit_id = ari$fit_a, ari = ari$ari), data.frame(fit_id = ari$fit_b, ari = ari$ari))
+    stab <- if (nrow(ari_long) > 0) aggregate(ari ~ fit_id, ari_long, mean) else data.frame(fit_id = integer(0), ari = numeric(0))
+    f <- f[order(f$power), ]
+    return(data.frame(method = "wgcna", rank_label = paste("power", f$power), rank_key = f$power,
+                      fit_id = f$fit_id, n_factors = f$n_factors,
+                      in_sample_r2 = kme$q[match(f$fit_id, kme$fit_id)],
+                      stability = stab$ari[match(f$fit_id, stab$fit_id)], stringsAsFactors = FALSE))
+  }
+
+  stab <- DBI::dbGetQuery(con, sprintf(
+    "SELECT fit_id, AVG(%s) AS s FROM factors WHERE fit_id IN (%s) GROUP BY fit_id", stab_col, ids))
+  if (method == "spca") {
+    q <- DBI::dbGetQuery(con, sprintf(
+      "SELECT fit_id, value FROM fit_metrics WHERE name = 'pev_sparse' AND fit_id IN (%s)", ids))
+    r2 <- q$value[match(f$fit_id, q$fit_id)]
+  } else {
+    # mse averaged over the seed sweep at this rank would need every fit; the
+    # representative is the lowest-mse seed, so this is the best-case quality.
+    r2 <- 1 - f$mse / val_sd^2
+  }
+  f <- cbind(f, r2 = r2, s = stab$s[match(f$fit_id, stab$fit_id)])
+  f <- f[order(f$rank), ]
+  data.frame(method = method, rank_label = paste("rank", f$rank), rank_key = f$rank, fit_id = f$fit_id,
+             n_factors = f$n_factors, in_sample_r2 = f$r2, stability = f$s, stringsAsFactors = FALSE)
+}
+
+#' Curves for every present method of one dataset, stacked.
+dataset_curves <- function(con, dataset_id, methods = methods_for_dataset(con, dataset_id),
+                           metric = "cosine") {
+  val_sd <- dataset_val_sd(con, dataset_id)
+  out <- lapply(methods, function(m) method_curve(con, dataset_id, m, metric, val_sd))
+  do.call(rbind, c(list(empty_curve()), out))
+}
+
+#' The optimal row of one method's curve.
+#'   "stable": among hyperparameters whose stability is at least `threshold`,
+#'             the one with the highest in-sample quality; if none qualifies,
+#'             the most stable one. Quality rises with rank, so this is the
+#'             largest rank that is still reproducible across seeds.
+#'   "max_r2": the highest in-sample quality, ignoring stability.
+#' Returns a one-row data.frame, or NULL for an empty curve.
+pick_optimal <- function(curve, rule = c("stable", "max_r2"), threshold = 0.9) {
+  rule <- match.arg(rule)
+  d <- curve[!is.na(curve$in_sample_r2), , drop = FALSE]
+  if (nrow(d) == 0) return(NULL)
+  if (rule == "max_r2") return(d[which.max(d$in_sample_r2), , drop = FALSE])
+  ok <- !is.na(d$stability) & d$stability >= threshold
+  if (any(ok)) return(d[ok, , drop = FALSE][which.max(d$in_sample_r2[ok]), , drop = FALSE])
+  if (all(is.na(d$stability))) return(d[which.max(d$in_sample_r2), , drop = FALSE])
+  d[which.max(d$stability), , drop = FALSE]
+}
+
+#' The optimal row for every method in `curves` (dataset_curves() output).
+optimal_fits <- function(curves, rule = "stable", threshold = 0.9) {
+  rows <- lapply(split(curves, curves$method), pick_optimal, rule = rule, threshold = threshold)
+  out <- do.call(rbind, Filter(Negate(is.null), rows))
+  if (is.null(out)) return(empty_curve())
+  rownames(out) <- NULL
+  out[order(match(out$method, METHOD_ORDER)), ]
+}
+
+#' Median out-of-sample R2 (projectR) of each method's optimal fit-family
+#' sources, split by within-/cross-dataset targets. Medians are over every
+#' projection whose source fit belongs to this dataset and method.
+oos_r2_by_method <- function(con, dataset_id) {
+  d <- DBI::dbGetQuery(con,
+    "SELECT f.method, p.projection_type, p.mean_r_squared
+     FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id
+     WHERE f.dataset_id = ?", params = list(dataset_id))
+  if (nrow(d) == 0) return(data.frame(method = character(0), oos_r2_within = numeric(0), oos_r2_cross = numeric(0)))
+  agg <- aggregate(mean_r_squared ~ method + projection_type, d, median)
+  methods <- unique(agg$method)
+  pick <- function(type) {
+    a <- agg[agg$projection_type == type, ]
+    a$mean_r_squared[match(methods, a$method)]
+  }
+  data.frame(method = methods, oos_r2_within = pick("within_dataset"), oos_r2_cross = pick("cross_dataset"))
+}
+
+## ---- Q4: cross-dataset similarity ----------------------------------------------
+
+#' Long dataset x dataset similarity for one method.
+#'   "r2":         median projectR out-of-sample R2 of source-dataset fits on
+#'                 the target dataset's samples.
+#'   "gene_space": mean |diagonal| of the loadings similarity between the two
+#'                 datasets' representative fits, on shared genes.
+#' Columns: source, target, value, n (projections or matched genes).
+cross_dataset_similarity <- function(con, method, kind = c("r2", "gene_space")) {
+  kind <- match.arg(kind)
+  if (kind == "r2") {
+    d <- DBI::dbGetQuery(con,
+      "SELECT f.dataset_id AS source, p.target_dataset_id AS target, p.mean_r_squared AS value
+       FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id
+       WHERE f.method = ? AND p.mean_r_squared IS NOT NULL", params = list(method))
+    if (nrow(d) == 0) return(data.frame(source = character(0), target = character(0), value = numeric(0), n = integer(0)))
+    agg <- aggregate(value ~ source + target, d, median)
+    agg$n <- as.integer(aggregate(value ~ source + target, d, length)$value)
+    return(agg)
+  }
+  d <- DBI::dbGetQuery(con,
+    "SELECT a.dataset_id AS source, b.dataset_id AS target, g.mean_abs_diagonal AS value,
+            g.n_genes_matched AS n
+     FROM gene_space_agreement g
+     JOIN fits a ON a.fit_id = g.source_fit_id JOIN fits b ON b.fit_id = g.target_fit_id
+     WHERE a.method = ?", params = list(method))
+  if (nrow(d) == 0) return(data.frame(source = character(0), target = character(0), value = numeric(0), n = integer(0)))
+  agg <- aggregate(value ~ source + target, d, mean)
+  agg$n <- aggregate(n ~ source + target, d, max)$n
+  agg
+}
+
+#' Methods that have any cross-dataset similarity of this kind.
+methods_with_cross_dataset <- function(con, kind = c("r2", "gene_space")) {
+  kind <- match.arg(kind)
+  sql <- if (kind == "r2") {
+    "SELECT DISTINCT f.method FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id"
+  } else {
+    "SELECT DISTINCT f.method FROM gene_space_agreement g JOIN fits f ON f.fit_id = g.source_fit_id"
+  }
+  m <- DBI::dbGetQuery(con, sql)$method
+  METHOD_ORDER[METHOD_ORDER %in% m]
+}
+
+#' Square, symmetrised dataset x dataset matrix from cross_dataset_similarity()
+#' (the two directions are averaged; missing pairs stay NA), with rows ordered
+#' by hierarchical clustering (NA treated as 0 for the ordering only).
+similarity_matrix <- function(long) {
+  if (nrow(long) == 0) return(NULL)
+  ds <- sort(unique(c(long$source, long$target)))
+  m <- matrix(NA_real_, length(ds), length(ds), dimnames = list(ds, ds))
+  m[cbind(match(long$source, ds), match(long$target, ds))] <- long$value
+  sym <- (m + t(m)) / 2
+  sym[is.na(sym)] <- pmax(m, t(m), na.rm = TRUE)[is.na(sym)]   # one direction only: keep it
+  diag(sym) <- NA
+  if (length(ds) > 2) {
+    z <- sym; z[is.na(z)] <- 0
+    sym <- sym[hclust(dist(z))$order, hclust(dist(z))$order]
+  }
+  sym
+}
+
+## ---- Explore fits: one method on one dataset ------------------------------------
+
+#' Every fit of a method on a dataset (ok or failed), with hyperparameters.
+method_fits <- function(con, dataset_id, method) {
+  DBI::dbGetQuery(con,
+    "SELECT fit_id, rank, seed, bootstrap, representative, mse, n_factors, status, power, para
+     FROM v_fits WHERE dataset_id = ? AND method = ?", params = list(dataset_id, method))
+}
+
+#' Matched |similarity| of every factor across same-rank fit pairs (the
+#' values `factors.stability_*` summarises). `kind` says whether the pair is
+#' two seeds or involves a bootstrap resample (ICA).
+same_rank_matches <- function(con, dataset_id, method, metric = "cosine") {
+  DBI::dbGetQuery(con,
+    "SELECT fa.rank AS rank, p.fit_pair_id, ABS(s.value) AS value,
+            CASE WHEN COALESCE(fa.bootstrap, 0) + COALESCE(fb.bootstrap, 0) > 0
+                 THEN 'with bootstrap' ELSE 'seeds only' END AS kind
+     FROM fit_pairs p
+     JOIN fits fa ON fa.fit_id = p.fit_a JOIN fits fb ON fb.fit_id = p.fit_b
+     JOIN factor_matches m ON m.fit_pair_id = p.fit_pair_id
+     JOIN match_scores s ON s.match_id = m.match_id AND s.metric = ?
+     WHERE fa.dataset_id = ? AND fa.method = ? AND p.same_rank = 1",
+    params = list(check_metric(metric), dataset_id, method))
+}
+
+#' Mean 95th percentile of the unmatched-cell |similarity| per rank: how large
+#' a match has to be to beat chance for that pair of fits.
+same_rank_null <- function(con, dataset_id, method, metric = "cosine") {
+  DBI::dbGetQuery(con,
+    "SELECT fa.rank AS rank, AVG(n.p95) AS p95
+     FROM fit_pairs p JOIN fits fa ON fa.fit_id = p.fit_a
+     JOIN fit_pair_null n ON n.fit_pair_id = p.fit_pair_id AND n.metric = ?
+     WHERE fa.dataset_id = ? AND fa.method = ? AND p.same_rank = 1 GROUP BY fa.rank",
+    params = list(check_metric(metric), dataset_id, method))
+}
+
+#' Seed x seed matrix of mean matched |similarity| at one rank (non-bootstrap fits).
+seed_pair_matrix <- function(con, dataset_id, method, rank, metric = "cosine") {
+  d <- DBI::dbGetQuery(con,
+    "SELECT fa.seed AS seed_a, fb.seed AS seed_b, AVG(ABS(s.value)) AS value
+     FROM fit_pairs p
+     JOIN fits fa ON fa.fit_id = p.fit_a JOIN fits fb ON fb.fit_id = p.fit_b
+     JOIN factor_matches m ON m.fit_pair_id = p.fit_pair_id
+     JOIN match_scores s ON s.match_id = m.match_id AND s.metric = ?
+     WHERE fa.dataset_id = ? AND fa.method = ? AND fa.rank = ? AND p.same_rank = 1
+       AND COALESCE(fa.bootstrap, 0) = 0 AND COALESCE(fb.bootstrap, 0) = 0
+     GROUP BY p.fit_pair_id",
+    params = list(check_metric(metric), dataset_id, method, rank))
+  if (nrow(d) == 0) return(NULL)
+  seeds <- as.character(sort(unique(c(d$seed_a, d$seed_b))))
+  m <- matrix(NA_real_, length(seeds), length(seeds), dimnames = list(seeds, seeds))
+  m[cbind(match(d$seed_a, seeds), match(d$seed_b, seeds))] <- d$value
+  m[cbind(match(d$seed_b, seeds), match(d$seed_a, seeds))] <- d$value
+  m
+}
+
+#' Per-factor stability of one fit.
+fit_factor_stability <- function(con, fit_id, metric = "cosine") {
+  col <- paste0("stability_", check_metric(metric))
+  DBI::dbGetQuery(con, sprintf(
+    "SELECT factor_index, label, %s AS stability, n_genes FROM factors WHERE fit_id = ? ORDER BY factor_index", col),
+    params = list(fit_id))
+}
+
+#' PCA's per-rank reconstruction error and cumulative variance explained,
+#' from the diag artifact of its single max-rank fit.
+pca_scree <- function(con, dataset_id) {
+  f <- DBI::dbGetQuery(con,
+    "SELECT fit_id FROM fits WHERE dataset_id = ? AND method = 'pca' AND status = 'ok' ORDER BY rank DESC LIMIT 1",
+    params = list(dataset_id))
+  if (nrow(f) == 0) return(NULL)
+  d <- load_fit_artifact(con, f$fit_id, "diag")
+  if (is.null(d)) return(NULL)
+  k <- seq_along(d$mse_by_rank)
+  data.frame(rank = k, mse = d$mse_by_rank, pev = (cumsum(d$sdev^2) / sum(d$sdev^2))[k])
+}
+
+#' sPCA's Index-of-Sparseness inputs for every fit: rank, para, PEV of the
+#' sparse and ordinary components, proportion sparse, IS, and whether chosen.
+spca_is_table <- function(con, dataset_id) {
+  d <- DBI::dbGetQuery(con,
+    "SELECT f.fit_id, f.rank, f.para, m.name, m.value FROM v_fits f
+     JOIN fit_metrics m ON m.fit_id = f.fit_id
+     WHERE f.dataset_id = ? AND f.method = 'spca' AND f.status = 'ok'
+       AND m.name IN ('pev_sparse', 'pev_pca', 'prop_sparse', 'index_of_sparseness', 'is_selected')",
+    params = list(dataset_id))
+  if (nrow(d) == 0) return(NULL)
+  w <- reshape(d, idvar = c("fit_id", "rank", "para"), timevar = "name", direction = "wide")
+  names(w) <- sub("^value\\.", "", names(w))
+  w
+}
+
+#' ICASSO cluster quality (Iq) per rank, one row per cluster.
+icasso_iq <- function(con, dataset_id) {
+  DBI::dbGetQuery(con,
+    "SELECT rank, cluster_id, iq, n_members FROM icasso_clusters WHERE dataset_id = ? ORDER BY rank, cluster_id",
+    params = list(dataset_id))
+}
+
+#' WGCNA: ARI between every pair of powers (symmetric matrix).
+wgcna_ari_matrix <- function(con, dataset_id) {
+  d <- DBI::dbGetQuery(con,
+    "SELECT ra.power AS power_a, rb.power AS power_b, p.ari
+     FROM fit_pairs p JOIN v_fits ra ON ra.fit_id = p.fit_a JOIN v_fits rb ON rb.fit_id = p.fit_b
+     WHERE ra.dataset_id = ? AND ra.method = 'wgcna'", params = list(dataset_id))
+  if (nrow(d) == 0) return(NULL)
+  pw <- as.character(sort(unique(c(d$power_a, d$power_b))))
+  m <- matrix(NA_real_, length(pw), length(pw), dimnames = list(pw, pw))
+  m[cbind(match(d$power_a, pw), match(d$power_b, pw))] <- d$ari
+  m[cbind(match(d$power_b, pw), match(d$power_a, pw))] <- d$ari
+  diag(m) <- 1
+  m
+}
+
+#' WGCNA per-power summary: scale-free fit, modules, unassigned genes.
+wgcna_power_summary <- function(con, dataset_id) {
+  DBI::dbGetQuery(con,
+    "SELECT f.power, f.n_factors AS n_modules, s.sft_r_sq, u.value AS n_unassigned
+     FROM v_fits f
+     LEFT JOIN wgcna_sft s ON s.dataset_id = f.dataset_id AND s.power = f.power
+     LEFT JOIN fit_metrics u ON u.fit_id = f.fit_id AND u.name = 'n_unassigned'
+     WHERE f.dataset_id = ? AND f.method = 'wgcna' AND f.status = 'ok' ORDER BY f.power",
+    params = list(dataset_id))
 }

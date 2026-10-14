@@ -1,110 +1,108 @@
-# PCA-as-baseline comparison helpers: used from NMF/CoGAPS's and WGCNA's
-# Level 2 "Compare to PCA" tab. Everything here is computed live from
-# already-ingested loadings_file/scores_file artifacts -- no schema/ingest
-# changes, matching the rest of this app's "read what's there" philosophy.
-#
-# Requires prepare_loadings()/pair_similarities() from
-# R/lib/ingest/similarity.R to be sourced first (see app.R).
+# Cross-method comparison of fits within one dataset: top-gene-set overlap
+# (Jaccard) and sample-space agreement. Loadings similarity itself lives in
+# R/lib/ingest/similarity.R (prepare_loadings(), hungarian_match_abs()).
 
-#' Best (min) masking-CV MSE at a given rank, across whatever grid that
-#' method's masking-CV sweeps (CoGAPS: min over alpha; PCA/NMF: the single
-#' value). NA if no masking-CV fit exists at that rank.
-maskcv_best_mse <- function(con, dataset_id, method, rank) {
-  d <- maskcv_curve(con, dataset_id, method)
-  d <- d[!is.na(d$rank) & d$rank == rank, ]
-  if (nrow(d) == 0 || all(is.na(d$mse))) return(NA_real_)
-  min(d$mse, na.rm = TRUE)
+#' Top `n` gene ids of one loading vector. `sign`: "both" = largest |loading|;
+#' "positive"/"negative" = largest / most negative values.
+top_genes <- function(loadings_vector, n, sign = c("both", "positive", "negative")) {
+  sign <- match.arg(sign)
+  v <- loadings_vector
+  ord <- switch(sign,
+    both     = order(abs(v), decreasing = TRUE),
+    positive = order(v, decreasing = TRUE),
+    negative = order(v, decreasing = FALSE))
+  names(v)[ord[seq_len(min(n, length(v)))]]
 }
 
-#' Like hungarian_match() (R/lib/ingest/similarity.R) but costed on
-#' |similarity| rather than raw similarity -- needed whenever a strongly
-#' NEGATIVE similarity is just as informative a match as a strongly
-#' positive one (e.g. a non-negative CoGAPS/NMF factor aligning with the
-#' negative tail of a signed PCA component). Plain hungarian_match() would
-#' systematically avoid such matches, since it maximizes raw (signed)
-#' similarity.
-hungarian_match_abs <- function(sim) {
-  transposed <- FALSE
-  if (nrow(sim) > ncol(sim)) { sim <- t(sim); transposed <- TRUE }
-  a_sim <- abs(sim)
-  cost <- max(a_sim) - a_sim
-  assignment <- clue::solve_LSAP(cost)
-  a <- seq_len(nrow(sim))
-  b <- as.integer(assignment)
-  if (transposed) cbind(a = b, b = a) else cbind(a = a, b = b)
+gene_sets_from_loadings <- function(L, n, sign = "both") {
+  sets <- lapply(seq_len(ncol(L)), function(j) top_genes(L[, j], n, sign))
+  names(sets) <- colnames(L) %||% paste0("factor_", seq_len(ncol(L)))
+  sets
 }
 
-#' Per-factor comparison of `fit_id` (method `method`, at `rank`) against
-#' the PCA fit at the SAME rank, in gene-loadings space. Returns NULL if no
-#' PCA fit exists at that rank. `component`/`pca_component` are 1-based
-#' factor indices; `cosine`/`pearson`/`spearman` are SIGNED (a negative
-#' value already tells you the match is to the opposite-signed side of the
-#' PCA component -- no separate pos/neg bookkeeping needed).
-compare_loadings_to_pca <- function(con, dataset_id, fit_id, rank) {
-  pca_fits <- fits_at_rank(con, dataset_id, "pca", rank)
-  if (nrow(pca_fits) == 0) return(NULL)
-  pca_fit_id <- pca_fits$fit_id[1]
-
-  L <- load_loadings(con, fit_id); if (is.null(L)) return(NULL)
-  Lp <- load_loadings(con, pca_fit_id); if (is.null(Lp)) return(NULL)
-
-  prep_a <- prepare_loadings(L)
-  prep_b <- prepare_loadings(Lp)
-  sims <- pair_similarities(prep_a, prep_b)
-  if (is.null(sims)) return(NULL)
-
-  match_idx <- hungarian_match_abs(sims$cosine)
-  best <- data.frame(
-    component = match_idx[, "a"],
-    pca_component = match_idx[, "b"],
-    cosine   = sims$cosine[match_idx],
-    pearson  = sims$pearson[match_idx],
-    spearman = sims$spearman[match_idx]
-  )
-  best <- best[order(best$component), ]
-  attr(best, "pca_fit_id") <- pca_fit_id
-  best
+#' WGCNA's analogue: one gene set per module (full membership; module 0, the
+#' unassigned genes, is excluded). Names are the module numbers.
+gene_sets_from_modules <- function(con, fit_id) {
+  d <- DBI::dbGetQuery(con, "SELECT gene, module FROM gene_modules WHERE fit_id = ? AND module != 0",
+                       params = list(fit_id))
+  if (nrow(d) == 0) return(list())
+  split(d$gene, d$module)
 }
 
-#' WGCNA-eigengenes-vs-PCA-scores analog of compare_loadings_to_pca(): plain
-#' Pearson/Spearman correlation on shared samples (correlation is already
-#' signed, so "negative side of a PC" shows up directly as a negative
-#' value -- no absolute-value bookkeeping needed for the similarity itself,
-#' only for finding each module's best match).
-compare_scores_to_pca <- function(con, other_fit_id, pca_fit_id) {
-  Lo <- load_scores(con, other_fit_id); if (is.null(Lo)) return(NULL)
-  Lp <- load_scores(con, pca_fit_id);   if (is.null(Lp)) return(NULL)
-  shared <- intersect(rownames(Lo), rownames(Lp))
-  if (length(shared) < 3) return(NULL)
-  Lo <- Lo[shared, , drop = FALSE]; Lp <- Lp[shared, , drop = FALSE]
-
-  cos_p <- suppressWarnings(cor(Lo, Lp, method = "pearson"))
-  cos_s <- suppressWarnings(cor(Lo, Lp, method = "spearman"))
-  match_idx <- hungarian_match_abs(cos_p)
-  best <- data.frame(
-    component = match_idx[, "a"],
-    pca_component = match_idx[, "b"],
-    pearson  = cos_p[match_idx],
-    spearman = cos_s[match_idx]
-  )
-  best[order(best$component), ]
+#' Gene sets for one fit: top-`n` loading genes per factor, or module
+#' membership for WGCNA. `n_factors` keeps the first n factors (PCA's nested
+#' fit at a smaller rank). NULL if the fit has nothing to compare.
+fit_gene_sets <- function(con, method, fit_id, n = 50, n_factors = NULL) {
+  if (method == "wgcna") {
+    s <- gene_sets_from_modules(con, fit_id)
+    return(if (length(s) == 0) NULL else s)
+  }
+  L <- load_loadings(con, fit_id, n_factors)
+  if (is.null(L)) return(NULL)
+  gene_sets_from_loadings(L, n)
 }
 
-#' Everything already cached (via Level 3) for one fit's factors -- per
-#' factor/direction/query_type, count of significant terms + the smallest
-#' p-value seen. Purely a live read of what's already been queried; never
-#' triggers new g:Profiler calls.
-cached_enrichment_summary <- function(con, fit_id) {
-  DBI::dbGetQuery(con,
-    "SELECT f.factor_index, q.query_type, q.direction,
-            COUNT(c.term_id) AS n_significant_terms,
-            MIN(c.p_value) AS min_p_value
-     FROM factors f
-     JOIN enrichment_queried q ON q.factor_id = f.factor_id
-     LEFT JOIN enrichment_cache c
-       ON c.factor_id = q.factor_id AND c.query_type = q.query_type AND c.direction = q.direction
-     WHERE f.fit_id = ?
-     GROUP BY f.factor_index, q.query_type, q.direction
-     ORDER BY f.factor_index",
-    params = list(fit_id))
+jaccard <- function(a, b) {
+  u <- union(a, b)
+  if (length(u) == 0) return(NA_real_)
+  length(intersect(a, b)) / length(u)
+}
+
+jaccard_matrix <- function(sets_a, sets_b) {
+  m <- matrix(NA_real_, length(sets_a), length(sets_b), dimnames = list(names(sets_a), names(sets_b)))
+  for (i in seq_along(sets_a)) for (j in seq_along(sets_b)) m[i, j] <- jaccard(sets_a[[i]], sets_b[[j]])
+  m
+}
+
+#' Gene-set agreement between two fits: Hungarian-match the factors on |Jaccard|
+#' and report the matched values. Returns list(matrix, matches, mean) where
+#' `matches` has a_label/b_label/jaccard rows, or NULL if either side is empty.
+gene_set_agreement <- function(sets_a, sets_b) {
+  if (is.null(sets_a) || is.null(sets_b)) return(NULL)
+  jm <- jaccard_matrix(sets_a, sets_b)
+  idx <- hungarian_match_abs(jm)
+  matches <- data.frame(a = rownames(jm)[idx[, "a"]], b = colnames(jm)[idx[, "b"]],
+                        jaccard = jm[idx], stringsAsFactors = FALSE)
+  list(matrix = jm, matches = matches[order(-matches$jaccard), ], mean = mean(matches$jaccard, na.rm = TRUE),
+       idx = idx)
+}
+
+#' Cluster each fit's samples (hierarchical, `k` clusters) and compare the two
+#' assignments on shared samples by Adjusted Rand Index. NULL if fewer than
+#' max(k, 3) samples are shared or either fit has no scores.
+cluster_and_ari <- function(con, fit_a, fit_b, n_a = NULL, n_b = NULL, k = 4) {
+  La <- load_scores(con, fit_a, n_a); Lb <- load_scores(con, fit_b, n_b)
+  if (is.null(La) || is.null(Lb)) return(NULL)
+  shared <- intersect(rownames(La), rownames(Lb))
+  if (length(shared) < max(k, 3)) return(NULL)
+  cl_a <- cutree(hclust(dist(La[shared, , drop = FALSE])), k = k)
+  cl_b <- cutree(hclust(dist(Lb[shared, , drop = FALSE])), k = k)
+  list(ari = mclust::adjustedRandIndex(cl_a, cl_b), n_shared = length(shared))
+}
+
+#' Method x method agreement for one dataset's optimal fits (`optimal` is
+#' optimal_fits() output). Returns list(methods, gene_jaccard, sample_ari,
+#' pairs) where the matrices are symmetric with diagonal 1 and `pairs` holds
+#' each pair's gene_set_agreement() for drill-down.
+method_pairwise_agreement <- function(con, optimal, top_n = 50) {
+  methods <- optimal$method
+  n <- length(methods)
+  gj <- sa <- matrix(NA_real_, n, n, dimnames = list(methods, methods))
+  diag(gj) <- 1; diag(sa) <- 1
+  pairs <- list()
+  sets <- lapply(seq_len(n), function(i) fit_gene_sets(con, methods[i], optimal$fit_id[i], top_n, optimal$n_factors[i]))
+  for (i in seq_len(n)) for (j in seq_len(n)) {
+    if (i >= j) next
+    ag <- gene_set_agreement(sets[[i]], sets[[j]])
+    if (!is.null(ag)) {
+      gj[i, j] <- gj[j, i] <- ag$mean
+      pairs[[paste(methods[i], methods[j], sep = "|")]] <- ag
+    }
+    ca <- tryCatch(cluster_and_ari(con, optimal$fit_id[i], optimal$fit_id[j],
+                                   if (methods[i] == "pca") optimal$n_factors[i],
+                                   if (methods[j] == "pca") optimal$n_factors[j]),
+                   error = function(e) NULL)
+    if (!is.null(ca)) sa[i, j] <- sa[j, i] <- ca$ari
+  }
+  list(methods = methods, gene_jaccard = gj, sample_ari = sa, pairs = pairs)
 }

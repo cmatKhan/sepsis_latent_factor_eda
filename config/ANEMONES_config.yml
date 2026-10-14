@@ -1,0 +1,62 @@
+dataset:
+  id: ANEMONES
+  description: >
+    All samples and features from ANEMONES (GSE236713). Array platform,
+    timecourse design (4 levels: Day 1, Day 2, Day 5, Day Discharge).
+  hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
+
+  expression_path: ANEMONES/expression.parquet
+  sample_metadata_path: ANEMONES/sample_metadata.parquet
+  feature_metadata_path: ANEMONES/feature_metadata.parquet
+  sample_id_col: sample_id
+  feature_id_col: feature_id
+  value_col: value
+  # Was "ensembl_id" -- renamed to "ensembl_tx_id" (transcript-level, NOT
+  # usable as the cross-dataset gene-level identifier) when
+  # "ensembl_gene_id" was added to feature_metadata.parquet. This base
+  # config was missed when the four day-specific ANEMONES configs were
+  # updated for the rename -- confirmed directly: with the stale value,
+  # build_ensembl_map() (R/lib/ingest/symbol_mapping.R) can't find
+  # "ensembl_id" at all anymore and returns NULL.
+  ensembl_col: ensembl_gene_id
+  symbol_col: gene_symbol
+
+  preprocessing_script: R/preprocessing/anemones_preprocessing.R
+
+  # The person id: `patient_id` repeats across ANEMONES's 4 timepoint levels
+  # (Day 1, Day 2, Day 5, Day Discharge). Links a person's samples across
+  # the timepoint subsets and groups them in resampling (fit_subjects()).
+  subject_id_col: patient_id
+
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# Controls (30) are sampled at Day 1 only; "Day: ..." levels sort
+# chronologically.
+# control_probes: the array's own positive controls (feature metadata
+# control_type = pos: 96 ERCC, 10 Agilent E1A spike-ins, corner and other
+# controls). The deposited values have no between-sample normalization and
+# the controls share the samples' overall shift (ERCC mean vs all-gene mean
+# r = 0.99), so their first principal component enters the variance and dream
+# models as a covariate (covariate: true; compute_control_factor()). Shifting
+# each sample by a control offset over-corrected (controls move ~2x as much as
+# genes; sex agreement fell 0.99 -> 0.94) -- 2026-10-13.
+design: {platform: array, subject: patient_id, time: timepoint, time_order: ["Day: 1", "Day: 2", "Day: 5", "Day: Discharge"], group: disease, covariates: [sex], control_probes: {column: control_type, values: [pos], covariate: true}}
+
+methods:
+  pca:
+    rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+
+  spca:
+    K: [2,3,4,5,6,7,8,9,10,11,12]
+    sparse: varnum
+
+  ica:
+    n.comp: [5, 7, 10, 15, 20]
+    seed: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    # alpha: uses R/methods/ica.R's own default (1); must stay static -- see its header
+
+  network:
+    wgcna:
+      power: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]
+      minModuleSize: 30
+      mergeCutHeight: 0.25
+      networkType: signed

@@ -1,0 +1,65 @@
+# TODO (scope): the collection notes describe hfgp-500fg as "healthy
+# individuals" -- a reference cohort, not a sepsis timecourse. Confirm
+# this genuinely belongs in a "sepsis timecourse factors" analysis before
+# spending cluster time on it; it has no timepoint/subject structure at
+# all (cross-sectional, one sample per person, only age/sex metadata).
+#
+# R/preprocessing/hfgp-500fg_preprocessing.R now exists -- DESeq2 VST +
+# hemoglobin-gene + low-count + variance filter, same pattern as
+# gse110487_preprocessing.R/gse273700_preprocessing.R (100 raw-count
+# samples, verified directly against the parquet trio). NOT yet
+# confirmed: whether a ribosomal-RNA filter like GSE110487's is also
+# needed here (that one was added after diagnosing a real dispersion-fit
+# problem specific to GSE110487's own data -- not assumed to apply here
+# without the same check). nmf/cogaps are deliberately still NOT added to
+# methods:/slurm: below despite VST now existing -- see the comment there.
+
+dataset:
+  id: hfgp-500fg
+  description: >
+    All samples and features from hfgp-500fg (GSE134080). RNA-seq,
+    healthy-individual reference cohort (see scope TODO above) --
+    cross-sectional, no timepoint/subject columns.
+  hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
+
+  expression_path: hfgp-500fg/expression.parquet
+  sample_metadata_path: hfgp-500fg/sample_metadata.parquet
+  feature_metadata_path: hfgp-500fg/feature_metadata.parquet
+  # NOTE: this dataset's own sample-identifying column, in BOTH
+  # expression.parquet and sample_metadata.parquet, is `geo_accession` --
+  # there is no column literally named `sample_id` at all (verified
+  # directly against both parquet files).
+  sample_id_col: geo_accession
+  feature_id_col: GeneID   # matches both expression.parquet and feature_metadata.parquet directly
+  value_col: value
+  ensembl_col: EnsemblGeneID
+  symbol_col: Symbol
+
+  preprocessing_script: R/preprocessing/hfgp-500fg_preprocessing.R
+  # NOTE: cross-sectional -- no timepoint/subject columns exist for this
+  # dataset at all.
+
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# Cross-sectional positive control: the top sex DE genes should be on
+# chromosome Y.
+design: {platform: rnaseq, group: sex, covariates: [age], numeric: [age]}
+
+methods:
+  pca:
+    rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+
+  spca:
+    K: [2,3,4,5,6,7,8,9,10,11,12]
+    sparse: varnum
+
+  ica:
+    n.comp: [5, 7, 10, 15, 20]
+    seed: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    # alpha: uses R/methods/ica.R's own default (1); must stay static -- see its header
+
+  network:
+    wgcna:
+      power: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]
+      minModuleSize: 30
+      mergeCutHeight: 0.25
+      networkType: signed

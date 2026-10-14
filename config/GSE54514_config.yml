@@ -1,0 +1,54 @@
+dataset:
+  id: GSE54514
+  description: >
+    All samples and features from GSE54514. Array platform, timecourse
+    design (5 `day` levels: 1-5; healthy controls sampled at day1/day5,
+    septic patients across the full range -- see notes below).
+  hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
+
+  expression_path: GSE54514/expression.parquet
+  sample_metadata_path: GSE54514/sample_metadata.parquet
+  feature_metadata_path: GSE54514/feature_metadata.parquet
+  sample_id_col: sample_id
+  feature_id_col: IlluminaID   # both expression.parquet and feature_metadata.parquet use IlluminaID directly -- no ambiguity here
+  value_col: value
+  ensembl_col: ENSEMBL
+  symbol_col: SYMBOL
+
+  preprocessing_script: R/preprocessing/gse54514_preprocessing.R
+
+  # The person id: `group_id` (e.g. "HC_1") repeats across that person's
+  # sampled days. Links a person's samples across the timepoint subsets and
+  # groups them in resampling (fit_subjects()). The expression-inferred sex
+  # check (composition_GSE54514) shows these annotations don't match the
+  # arrays (agreement 0.50, 2026-10-13).
+  subject_id_col: group_id
+
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# day is an integer 1-5, modelled as categorical; group_id is the person id
+# (HC_1, ...).
+# control_probes: not array control probes (the series matrix has none) but
+# probes the illumina annotation marks as matching no transcript, a
+# background stand-in for the composition check. Values are already
+# quantile-normalized at deposit; no normalization here.
+design: {platform: array, subject: group_id, time: day, time_order: [1, 2, 3, 4, 5], group: disease_status, covariates: [sex, age], numeric: [age], control_probes: {column: ProbeQuality, values: ["No match"]}}
+
+methods:
+  pca:
+    rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+
+  spca:
+    K: [2,3,4,5,6,7,8,9,10,11,12]
+    sparse: varnum
+
+  ica:
+    n.comp: [5, 7, 10, 15, 20]
+    seed: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    # alpha: uses R/methods/ica.R's own default (1); must stay static -- see its header
+
+  network:
+    wgcna:
+      power: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]
+      minModuleSize: 30
+      mergeCutHeight: 0.25
+      networkType: signed

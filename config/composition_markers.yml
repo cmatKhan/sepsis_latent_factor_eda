@@ -1,0 +1,9 @@
+# Marker genes for the per-sample leukocyte composition scores
+# (R/targets/composition.R). A score is the mean, over the markers present in
+# a dataset, of each marker's expression z-scored across that dataset's
+# samples; the neutrophil-lymphocyte score is neutrophil minus lymphocyte.
+# Scores are relative within a dataset, not comparable in absolute terms
+# across datasets. Canonical lineage markers chosen 2026-10-13; edit freely
+# (editing reruns only the composition targets and what reads them).
+neutrophil: [FCGR3B, CXCR1, CXCR2, CSF3R, FPR1, FPR2, MME, CMTM2, ALPL]
+lymphocyte: [CD3D, CD3E, CD3G, CD2, CD5, CD6, CD247, LCK, CD19, CD79A, CD79B, MS4A1, CD22]

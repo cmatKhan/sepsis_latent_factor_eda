@@ -1,0 +1,50 @@
+dataset:
+  id: GSE13904
+  description: >
+    All samples and features from GSE13904. Array platform, 2 timepoints
+    (day1 / day3).
+  hf_collection: "cmatkhan/Sepsis transcriptomics"       # documentation only
+
+  expression_path: GSE13904/expression.parquet
+  sample_metadata_path: GSE13904/sample_metadata.parquet
+  feature_metadata_path: GSE13904/feature_metadata.parquet
+  sample_id_col: sample_id
+  feature_id_col: feature_id   # feature_metadata.parquet has a literal `feature_id` column -- matches expression.parquet directly, no TODO here
+  value_col: value
+  ensembl_col: ensembl
+  symbol_col: symbol
+  # `patient_id` repeats per subject across the 2 timepoints (227 samples /
+  # 186 subjects; 41 have both timepoints, 145 have only one -- confirmed
+  # directly against sample_metadata.parquet). Registered so the app can
+  # join projectR's within-family projections (GSE13904 ->
+  # GSE13904_DAY1/DAY3) back to real subjects for trajectory views.
+  subject_id_col: patient_id
+
+  preprocessing_script: R/preprocessing/gse13904_preprocessing.R
+
+# Study design for the variance module (R/lib/design.R, R/targets/variance.R).
+# No sex/age columns. clinical_status changes within subject for 17 of the
+# 41 subjects sampled twice (e.g. Septic Shock -> SIRS resolved), so the arm
+# is each subject's day-1 status (group_at_first_time).
+# control_probes: Affymetrix hybridization spike-ins, the technical reference in the composition check.
+design: {platform: array, subject: patient_id, time: timepoint, time_order: [day1, day3], group: clinical_status, group_at_first_time: true, control_probes: {id_pattern: "^AFFX-(BioB|BioC|BioDn|CreX|r2-Ec-bio|r2-P1-cre)"}}
+
+methods:
+  pca:
+    rank: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+
+  spca:
+    K: [2,3,4,5,6,7,8,9,10,11,12]
+    sparse: varnum
+
+  ica:
+    n.comp: [5, 7, 10, 15, 20]
+    seed: [42, 123, 456, 7, 99, 2024, 8675309, 271828, 31415, 90210]
+    # alpha: uses R/methods/ica.R's own default (1); must stay static -- see its header
+
+  network:
+    wgcna:
+      power: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]
+      minModuleSize: 30
+      mergeCutHeight: 0.25
+      networkType: signed

@@ -1,5 +1,29 @@
 .Rproj.user
-results/
+results*/
 slurm_bundles/
 logs/
 data/
+datasets.txt
+.env
+Rplots.pdf
+**.squash
+session.txt
+
+# targets pipeline
+_targets/
+
+# Quarto docs site (docs/): build output and the generated reference page
+docs/_site/
+docs/.quarto/
+docs/reference.qmd
+
+# Local-only notes and obsolete dev scripts
+dev/
+
+# R session files
+.Rhistory
+.RData
+.Ruserdata
+
+# Quarto caches outside docs/
+.quarto/
