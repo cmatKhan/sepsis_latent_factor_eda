@@ -1,83 +1,95 @@
 # Sepsis latent-factor stability
 
-Fits six latent-factor methods (PCA, NMF, CoGAPS, sPCA, ICA, WGCNA) to sepsis gene-expression
-datasets across seeds and rank/sparsity choices, measures how stable the factors are, enriches
-and projects them across datasets, and writes it all to a SQLite database that a Shiny app
-browses. For datasets with repeated samples per patient it also partitions expression variance
-into between-person, time and the rest (variancePartition, dream) and checks each dataset's
-samples (leukocyte composition, technical scale, recorded vs inferred sex). One [targets](https://books.ropensci.org/targets/) pipeline runs everything, with the
-heavy steps as SLURM jobs.
+[![Docs](https://img.shields.io/badge/docs-gh--pages-blue)](https://cmatkhan.github.io/sepsis_latent_factor_eda/)
 
-**Full documentation:** the Quarto site in [`docs/`](docs/) -- `quarto preview docs` to browse it.
+This provides a [targets](https://books.ropensci.org/targets/) workflow 
+configured with [crew.cluster](https://wlandau.github.io/crew.cluster/) to 
+conduct variancePartition analysis, along with a number of latent factor
+decomposition methods, to examine repeat measure Sepsis datasets. It may 
+be extended with both new data, and new analysis methods. Results are 
+ingested into a database and visualized with a Shiny app.
 
-## Prerequisites
+## Installation
 
-- A SLURM cluster (HTCF here). The main process submits worker jobs and must stay running.
-- R 4.6 with system libraries: on HTCF, the spack environment
-  `/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1` (the one RStudio Server runs from).
-  Elsewhere, see [docs/setup.qmd](docs/setup.qmd).
-- The raw data (HuggingFace sepsis collection). On HTCF:
-  `/scratch/mblab/chasem/hf_sepsis_collection`.
+For more in depth setup instructions, especially for running the targets
+workflow on a SLURM cluster, see the
+[setup docs](https://cmatkhan.github.io/sepsis_latent_factor_eda/setup.html).  
 
-## Set up (once)
+The following are general setup instructions, especially suitable for running 
+the shiny app from previously generated data or local development.
 
-```sh
-git clone <this repo> && cd sepsis_latent_factor_eda
-# R from the spack environment (RStudio Server on HTCF already has it):
-SPACK_ENV=/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1
-eval "$(spack env activate --sh "$SPACK_ENV")"
-export LD_LIBRARY_PATH="$SPACK_ENV/view/lib:$SPACK_ENV/view/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-unset R_LIBS R_LIBS_USER R_LIBS_SITE
-Rscript -e 'options(renv.install.timeout = 6 * 3600); renv::restore()'   # hours from source; minutes from renv's cache
+This is a R project, not a package, with an environment managed by `renv`. It 
+is expected that you'll clone this repo and then work inside the project 
+as opposed to installing it as a package and calling it into some R session.
+
+1. clone the repo to your local
+
+```
+git clone https://github.com/cmatKhan/sepsis_latent_factor_eda.git
 ```
 
-CoGAPS needs a patched build for OpenMP, and projectR comes from a fork; both are covered in
-[docs/setup.qmd](docs/setup.qmd). Point `data_root` in `config/pipeline.yml` (or the
-`SEPSIS_DATA_ROOT` environment variable) at the data.
+2. Next, open the R project. There are multiple ways of doing this, either 
+from in Rstudio or by navigating to the .Rproj file in the project 
+directory and clicking it.
 
-## Add a dataset
-
-1. Write `config/<dataset>_config.yml` (copy `config/dataset_metadata.example.yml`): data paths,
-   how to build the matrix, optionally its study design (`design:`), each method's parameter
-   grid. See [docs/data.qmd](docs/data.qmd).
-2. Add its `dataset.id` to `datasets:` in `config/pipeline.yml`.
-
-## Run
-
-```sh
-sbatch run_pipeline.sbatch                                     # build everything outdated
-sbatch run_pipeline.sbatch 'tidyselect::starts_with("fit_")'   # fits only, no ingestion
-tail -f logs/targets_main_<jobid>.out
-```
-
-Or from an RStudio Server session on the cluster: `targets::tar_make()` (and
-`targets::tar_visnetwork()` to see what's outdated). Only what a change invalidates is rebuilt.
-See [docs/workflow.qmd](docs/workflow.qmd).
-
-## Results
-
-The database is at `db_path` in `config/pipeline.yml` (default
-`results/stability.sqlite`), with large artifacts under
-`results/stability_artifacts/`. Every table is described in
-[docs/database.qmd](docs/database.qmd).
-
-## Browse
+3. Install the environment. **You need R 4.6.1** (the version recorded in
+`renv.lock`) and a toolchain that can build R packages from source (a
+C/C++/Fortran compiler, `make`, and the usual system libraries such as libcurl,
+openssl and libxml2). Then start R **in the project directory** (opening the
+`.Rproj` does this). The first start downloads and installs renv itself and
+prints a message that the project library is empty; that is expected. In the 
+console, run:
 
 ```r
-shiny::runApp("app")
+options(renv.install.timeout = 6 * 3600)   # many packages build from source; the default is 1 hour
+renv::restore()                            # answer y when asked to proceed
 ```
 
-The app reads schema 1 and has not been updated to schema 2 (the repeated-measures tables) yet;
-see [docs/app.qmd](docs/app.qmd).
+`renv::restore()` installs every package at the version in `renv.lock` into the
+project's own library (`renv/library/`), leaving your other R libraries alone.
+Expect it to take a long time on a fresh machine (hours, since roughly 300
+packages build from source) and minutes where renv's cache already holds the
+builds. If it stops, run it again: finished builds are cached and it continues
+from there. When it finishes, check the result with `renv::status()`, which
+should report that the project is in a consistent state.
+Two packages need extra steps (CoGAPS is rebuilt with OpenMP; projectR comes
+from a fork branch that `restore()` fetches from GitHub). See
+[docs/setup.qmd](docs/setup.qmd). The Prerequisites and Set up sections below
+are the SLURM cluster (HTCF) route and are not needed to browse results or to
+work on a laptop.
 
-## Documentation
+## Launching the app with public data
 
-```sh
-quarto render docs     # builds docs/_site/ (Quarto ships with RStudio Server)
-quarto preview docs    # live preview
+To launch the app, you need the results of the targets pipeline. A version 
+of this is available here](https://huggingface.co/datasets/cmatkhan/sepsis_latent_factors_db_data).
+Download that data and either mount it to a directory called `results` in your 
+project, or extract it. If you're using linux or mac, you probably already 
+have [squash](https://github.com/plougher/squashfs-tools).
+If not, you'll need to install it.
+
+```
+# first, make a directory called results in the project
+mkdir results
+```
+Then, mount the results.squash file to it:
+
+```
+# if you have sudo privileges
+sudo mount -t squashfs -o loop results_no_rose.squash results 
+
+# if you do not have sudo privileges, install squashfuse and then do
+squashfuse results_no_rose.squash results 
 ```
 
-Pages: [setup](docs/setup.qmd), [data](docs/data.qmd), [methods](docs/methods.qmd),
-[database](docs/database.qmd), [running the workflow](docs/workflow.qmd),
-[launching the app](docs/app.qmd), and a function reference generated from the code's roxygen
-comments.
+When finished, stop the app and unmount
+
+```
+# if you have sudo privileges
+sudo umount results
+
+# if you used squashfuse
+fusermount -u results
+```
+
+then, either open `app/app.R` and click "Run App" in rstudio, or from the 
+console enter `shiny::runApp("app")`

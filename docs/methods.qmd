@@ -23,20 +23,6 @@ for its keys and `defaults`.
 | `ica` | `fastICA::fastICA()` | `n.comp` (swept), `seed` (swept), `bootstrap` (swept), `alpha` (one value) | across seeds and resamples |
 | `network.wgcna` | `WGCNA::blockwiseModules()` | `power` (swept), `minModuleSize`, `mergeCutHeight`, `networkType`, `maxBlockSize` | parameter grid |
 
-**Stability designs.** For NMF, CoGAPS and ICA the question is whether factors recur across
-random seeds (and, for ICA, bootstrap resamples of subjects). PCA, sPCA and WGCNA are deterministic given
-their parameters, so for them the question is how structure changes as the swept parameter
-grows. Every method is also compared across ranks.
-
-**CoGAPS's three sub-blocks** mirror its three call sites: `params` goes to `CogapsParams()`,
-`distributed_params` to `setDistributedParams()`, `run` to `CoGAPS()` itself. Some argument
-names exist on more than one of them, so put each under the function it belongs to. `nSets`
-and `nThreads` default to the cogaps controller's `cpus_per_task`.
-
-**Threads and identity.** Parameters that only set parallelism (NMF `n.threads`, CoGAPS
-`nSets`/`nThreads`, WGCNA `nThreads`) are listed in the method's `resource_params` and left
-out of a fit's identity (`fit_key`).
-
 ### PCA: one fit per dataset
 
 PCA components are nested -- the first *k* components of a rank-20 fit are the rank-*k*

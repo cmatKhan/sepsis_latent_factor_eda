@@ -6,6 +6,8 @@ project:
 
 website:
   title: "Sepsis latent-factor stability"
+  site-url: https://cmatkhan.github.io/sepsis_latent_factor_eda/
+  repo-url: https://github.com/cmatKhan/sepsis_latent_factor_eda
   navbar:
     left:
       - href: index.qmd
@@ -16,14 +18,18 @@ website:
         text: Data
       - href: methods.qmd
         text: Methods
-      - href: database.qmd
-        text: Database
       - href: workflow.qmd
         text: Running the workflow
+      - href: database.qmd
+        text: Database
       - href: app.qmd
         text: Launching the app
       - href: reference.qmd
         text: Function reference
+    right:
+      - icon: github
+        href: https://github.com/cmatKhan/sepsis_latent_factor_eda
+        aria-label: GitHub
 
 format:
   html:

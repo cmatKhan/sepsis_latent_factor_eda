@@ -3,11 +3,8 @@ title: "Launching the app"
 ---
 
 ::: {.callout-note}
-The app is built on schema 1 of the redesigned database. Schema 2 ([Database](database.qmd))
-adds the repeated-measures tables (`dataset_design`, `samples`, `variance_*`,
-`factor_variance`, ...) and moves the enrichment gene lists (`enrichment_results.genes`) and the
-`pattern_markers` table into per-dataset artifacts; the app doesn't read those yet. This page
-describes the app as it is.
+The first page reads the schema-2 repeated-measures tables. The other pages still read the
+schema-1 tables only; they don't yet use the schema-2 enrichment gene lists or pattern markers.
 :::
 
 ## Launching
@@ -43,42 +40,35 @@ The Compare page has one tab per question.
 | 3. Across methods | how similar are the optimal factors of different methods | computed live from each optimal fit's loadings (WGCNA: module membership) and scores |
 | 4. Across datasets | how similar are a method's factors across datasets | `projections` (sample space) and `gene_space_agreement` (gene space) |
 
-## Time structure
+## Overview and Variance by dataset
 
-The first page (before Compare) shows how much of each time-course dataset's variance is
-**between subjects**, an **average time effect** (the change every subject shares between
-timepoints), or **other within-subject** variation (change that differs between subjects, plus
-measurement noise; the two cannot be separated without technical replicates). It decides how much
-of what a factor can find is about change over time.
+The first two pages answer: how much of each dataset's variance is change over time, and how much is
+between patients? It reads the stored variancePartition results (`variance_summary`,
+`variance_categories`, `variance_terms`, `variance_bins`, the `variance_partition` artifact);
+nothing is computed when the page opens. Code: `app/R/mod_variance.R`, `app/R/variance_helpers.R`.
 
-- *All time-course datasets:* the split for each pooled dataset (ANEMONES, CORTICUS, GSE13904,
-  GSE54514, GSE95233, GSE110487, GSE273700), with subjects, samples, subjects measured more than
-  once and timepoints. The whisker is a 95% interval from resampling subjects (the time part is
-  shown without an interval because its interval is unreliable near zero).
-- *Across genes:* the distribution of each gene's between-subject share for the selected
-  dataset's family, once with every gene counted equally and once weighted by gene variance
-  (which is what the pooled value reflects).
-- *Factors of the selected fit* (choose a pooled dataset in the sidebar): the same split of each
-  factor's sample scores, which separates factors that describe stable differences between people
-  from factors with a within-subject component.
+- **Overview** (all datasets; the sidebar is hidden on this page). Stacked bars for every time-course dataset: between patients (patient plus
+  patient-level variables), time (time plus group x time), technical covariates, and residual
+  (within-person change that is not shared by time, plus noise). The gene-set menu chooses what
+  is averaged: the factor-analysis genes (default), all modelled genes, the top 8,000 by variance
+  (each weighted by gene variance), or the typical gene (median). The table beneath gives
+  repeatability (between / (between + residual)), time / (time + residual), the share of genes with
+  time above 10%, and flags (sex agreement below 0.9, mostly singular fits, failed genes).
+- **Variance by dataset** has evidence tabs that follow the sidebar dataset (a per-timepoint subset shows its parent):
+  *Design and model* (formulas, samples dropped, singular fits, differential
+  expression contrasts); *Genes* (shares by expression quartile and variance rank, per-term distributions,
+  the genes with the largest time effect); *Within-person change* (each person's
+  path over the first three expression PCs with the group mean per timepoint, so group-specific
+  trajectories are visible; the share of each person's change from their first sample that lies on one axis, and its correlation
+  with the composition change); *Sample checks* (recorded vs inferred sex, PC1 against the
+  neutrophil-lymphocyte score, how much of each sample-level trait is a person trait, trait
+  correlations).
 
-**Method.** A sample's timepoint is the sibling dataset whose matrix contains it
-(`config/dataset_families.yml`); subjects come from each dataset's `subject_id_col`. For each gene
-(or factor) the sums of squares are split sequentially into subject, then timepoint within subject,
-then the rest, and converted to variance components with the degrees of freedom each part uses:
-within = (SS_time + SS_resid)/(N - S); between = (SS_between/(S - 1) - within)/n0, where n0 is the
-average number of samples per subject; time = max(SS_time - (T - 1) x resid, 0)/N;
-resid = SS_resid/(N - S - (T - 1)). Raw sums-of-squares shares would overstate the between-subject
-part (with two samples per subject even pure noise puts about half of the sum of squares there).
-Pooled values are ratios of sums over genes, so high-variance genes count more. On simulated data
-with known components the estimates recover them (0.573 against a true 0.58), and with no subject
-effect the between-subject estimate is 0.004. The split is computed when the page is opened (about
-25 s the first time) and cached for the session.
-
-The pipeline now stores the model-based version of this split: per dataset and gene from
-variancePartition (`variance_summary`, `variance_terms`, `variance_categories`, the
-`variance_partition` artifact) and per factor (`factor_variance`); see Methods, "Repeated
-measures". Switching this page to the stored values is pending.
+**Missing data.** A method not yet run, a table from an older schema or an absent artifact file
+is noted where it would appear and logged once to the console (`app/R/notes.R`); it never stops
+the app. The database is opened read-only; if that fails (a WAL-mode file on a read-only file
+system) it is opened as an immutable snapshot and the app must be restarted after the file is
+replaced.
 
 ## Explore fits
 

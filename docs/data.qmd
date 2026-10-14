@@ -4,82 +4,66 @@ title: "Data"
 
 ## Data root
 
-Raw data lives in the HuggingFace sepsis collection (ROSE comes from dbGaP), copied to the
-cluster at `/scratch/mblab/chasem/hf_sepsis_collection`. Dataset configs give paths relative to that
-root; `R/lib/data_paths.R::resolve_data_paths()` joins them. The root is `data_root` in
-`config/pipeline.yml`, overridden by the `SEPSIS_DATA_ROOT` environment variable. Every
-reader of a dataset config goes through `read_dataset_yaml()`, so moving the data means
-changing one setting.
+Raw data, except for ROSE, lives in the
+[HuggingFace sepsis collection](https://huggingface.co/collections/cmatkhan/sepsis-transcriptomics) (ROSE comes from dbGaP).
+Download this collection to a local directory, eg `~/projects/sepsis_transcriptomics_collection`.
+The dataset configs give paths relative to that local root and is set by the 
+environmental variable `SEPSIS_DATA_ROOT` environmental variable.
 
 ## Dataset configs
 
-Each `config/<dataset>_config.yml` describes **one matrix**: where its data is, how to build
-it, and each method's parameter grid. Subsets analysed separately (e.g. one timepoint) are
-separate configs, each with its own `dataset.id`; there's no "several matrices in one
-config". `config/dataset_metadata.example.yml` is a fully commented template. Configs are
-read and validated by `read_dataset_metadata()` / `validate_dataset_metadata()`
-(`R/lib/metadata.R`).
+Each `config/<dataset>_config.yml` describes where its data is,
+how to build it, and each configured latent factor method's parameter grid.
+Subsets analysed separately (e.g. one timepoint) are separate configs, each
+with its own `dataset.id`; there's no "several matrices in one config".
+[config/dataset_metadata.example.yml](https://github.com/cmatKhan/sepsis_latent_factor_eda/blob/main/config/dataset_metadata.example.yml)
+is a fully commented template. Configs are read and validated by
+`read_dataset_metadata()` / `validate_dataset_metadata()` (`R/lib/metadata.R`).
 
-To add a dataset:
+### Adding a dataset
 
-1. Write `config/<dataset>_config.yml` (copy the example).
-2. Add its `dataset.id` to `datasets:` in `config/pipeline.yml`.
-3. Run the pipeline. Only the new dataset's targets are built.
+A dataset is three parquet files in one directory under the data root, a config,
+and a line in `config/pipeline.yml`. The files are named by the config's
+`*_path` keys (conventionally `<dataset>/expression.parquet`,
+`feature_metadata.parquet` and `sample_metadata.parquet`).
+Extra columns are ignored.
+
+| File | One row per | Columns the config names |
+|---|---|---|
+| `expression.parquet` | feature × sample (long format) | `feature_id_col`, `sample_id_col`, `value_col`. Defaults `feature_id`, `sample_id`, `value`; existing configs use `GeneID` or `IlluminaID` for the feature column. Counts for RNA-seq, log-scale values for arrays: the pipeline normalizes nothing by itself. |
+| `feature_metadata.parquet` | feature | `feature_id_col`: unique, and the same ids as the expression file's features. `ensembl_col`: Ensembl gene id (a `;`-separated list takes its first gene); every comparison across datasets goes through it. `symbol_col`: gene symbol; display only, except that arrays with a `design:` block are collapsed to one probe per symbol. |
+| `sample_metadata.parquet` | sample | `sample_id_col`: the same ids as the expression file's samples. Plus every column a `design:` block names (subject, time, group, covariates), and `subject_id_col` if you set it. |
+
+The sample metadata file is optional: without it (e.g. SHIP-TREND) the dataset gets
+factor fits but no design, variance or composition analysis.
+
+1. Put the three files under `<data root>/<dataset>/`.
+2. Write `config/<dataset>_config.yml`, starting from `config/dataset_metadata.example.yml`: the
+   three paths (relative to the data root), the column names above, a `methods:` block, usually
+   a `preprocessing_script` ([Building a matrix](#building-a-matrix)), and a `design:` block
+   if you want the repeated-measures analysis ([below](#the-design-block)).
+3. Add its `dataset.id` to `datasets:` in `config/pipeline.yml`.
+4. Run the pipeline. Only the new dataset's targets are built.
 
 File names needn't match ids (`ANEMONES_day1_config.yml` declares `ANEMONES_DAY1`); the
 pipeline finds a config by its declared `dataset.id`.
 
-The `dataset:` block:
-
-| Key | Meaning |
-|---|---|
-| `id` | unique dataset id, used in target and DB names |
-| `description` | free text |
-| `expression_path` | long-format expression parquet (feature id, sample id, value) |
-| `sample_metadata_path`, `feature_metadata_path` | sample and feature metadata parquets |
-| `sample_id_col`, `feature_id_col`, `value_col` | column names in those files |
-| `ensembl_col` | feature-metadata column holding Ensembl gene ids -- the cross-dataset identifier (below) |
-| `symbol_col` | optional; feature-metadata column of gene symbols, for display only |
-| `subject_id_col` | optional; sample-metadata column naming each sample's subject (person). Links a person's samples across a family's datasets and keeps them together when fits resample (`fit_subjects()`, `R/targets/run_method_fit.R`); a `design:` block's `subject` takes precedence |
-| `matrix_path` / `preprocessing_script` | how the matrix is built (below) |
-
-`feature_id_col` must match the column of `feature_metadata_path` whose values equal the
-matrix's row names.
-
-The `methods:` block holds each method's parameter grid; see [Methods](methods.qmd). A
-method runs for a dataset only if it appears there.
+Every key of the `dataset:`, `design:` and `methods:` blocks is documented in the comments of
+the example config; each method's keys are also in [Methods](methods.qmd). The notes below
+cover the parts that are easy to miss.
 
 ### The `design:` block
 
-Optional. A dataset with one gets the repeated-measures analysis (variance partition, dream,
-composition and sex checks; see [Methods](methods.qmd)). Read by `validate_design()` and
-`prepare_design()` (`R/lib/design.R`). Column names refer to the sample metadata and must be
-syntactic R names.
-
-| Field | Meaning |
-|---|---|
-| `platform` | `array` (log-scale values, one probe per symbol, no variance filter) or `rnaseq` (counts → `filterByExpr()` → TMM → voom weights) |
-| `subject` | person id; omit for a cross-sectional dataset |
-| `time`, `time_order` | timepoint column and its levels in chronological order (required with `time`) |
-| `group` | arm or subphenotype; cells are group × time |
-| `group_at_first_time` | `true`: every sample takes its subject's first-timepoint group (a status that changes over time, e.g. GSE13904's "SIRS resolved") |
-| `covariates` | further variables in the variance model; categorical ones are random effects |
-| `vp_covariates` | numeric covariates for the variance model only (e.g. ROSE's sequencing QC) |
-| `numeric` | which covariates are numeric (fixed effects, standardized) |
-| `de_covariates` | fixed-effect covariates added to the dream model |
-| `drop`, `keep` | `{column: [values]}` sample filters |
-| `set_na`, `recode` | `{column: [values]}` recoded to missing; `{column: {from: to}}` |
-| `contrasts` | cross-sectional only: `{name: "levelA - levelB"}`; default every group pair |
-| `control_probes` | the array's control probes for the composition check: `{id_pattern: "<regex>"}` or `{column: <feature-metadata column>, values: [...]}`; with `covariate: true` their first principal component enters the variance and dream models (`compute_control_factor()`, `R/lib/expression.R`) |
-
-`"NA"`, `""` and `NA` are missing; samples missing any model variable are dropped and
-counted. Per-timepoint subsets have no `design:` block: their factors are described with
-their parent's design (`variance_parent()`, `R/targets/variance.R`).
+Optional. A dataset with one gets the repeated-measures analysis ([Methods](methods.qmd)).
+`group_at_first_time: true` is for a group that changes over time (GSE13904's "SIRS
+resolved"): every sample takes its subject's first-timepoint group. Per-timepoint subsets
+have no `design:` block: their factors are described with their parent's design
+(`variance_parent()`, `R/targets/variance.R`).
 
 **Composition markers.** `config/composition_markers.yml` lists the neutrophil and
 lymphocyte marker genes behind the per-sample composition scores
-(`analyze_composition()`, `R/targets/composition.R`). Editing it reruns only the composition
-targets and what reads them.
+(`analyze_composition()`, `R/targets/composition.R`). Editing it reruns only the
+composition targets and what reads them.
 
 ### YAML keys that are booleans
 
