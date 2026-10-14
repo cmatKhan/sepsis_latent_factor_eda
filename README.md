@@ -77,6 +77,11 @@ quarto render docs     # builds docs/_site/ (Quarto ships with RStudio Server)
 quarto preview docs    # live preview
 ```
 
+The site is published at <https://cmatkhan.github.io/sepsis_latent_factor_eda/> by
+`.github/workflows/publish-docs.yml` on every push to `main` that touches `docs/` or `R/`
+(or run `quarto publish gh-pages docs` by hand; it needs R with roxygen2 for the function
+reference).
+
 Pages: [setup](docs/setup.qmd), [data](docs/data.qmd), [methods](docs/methods.qmd),
 [database](docs/database.qmd), [running the workflow](docs/workflow.qmd),
 [launching the app](docs/app.qmd), and a function reference generated from the code's roxygen
