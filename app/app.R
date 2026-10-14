@@ -1,8 +1,12 @@
 # Latent-factor stability explorer.
 #
-# Reads the stability DB the targets pipeline writes (R/targets/db_write.R,
-# docs/database.qmd), read-only. DB path: the STABILITY_DB environment
+# Reads the stability DB the targets pipeline writes (R/targets/db_write.R), read-only. DB path: the STABILITY_DB environment
 # variable, else `db_path` in config/pipeline.yml, relative to the project root.
+#
+# Pages: Overview and Variance by dataset (question 1, from the stored variancePartition results),
+# Compare, Explore fits, Inspect fit and Across datasets. Data that is missing
+# (a method not yet run, a table from an older schema) is noted on the page and in
+# the console log (R/notes.R), never an error.
 #
 # Layout: a sidebar holds the choices every page shares (dataset, methods,
 # similarity metric, how the "optimal" fit is picked); the main panel is the
@@ -21,14 +25,16 @@ library(RSQLite)
 library(ggplot2)
 library(DT)
 
+source(file.path("R", "notes.R"), local = TRUE)
 source(file.path("R", "db_helpers.R"), local = TRUE)
+source(file.path("R", "variance_helpers.R"), local = TRUE)
 source(file.path("R", "comparison_helpers.R"), local = TRUE)
 source(file.path("R", "mod_compare.R"), local = TRUE)
 source(file.path("R", "mod_explore.R"), local = TRUE)
 source(file.path("R", "data_helpers.R"), local = TRUE)
 source(file.path("R", "mod_inspect.R"), local = TRUE)
 source(file.path("R", "mod_extra.R"), local = TRUE)
-source(file.path("R", "mod_time.R"), local = TRUE)
+source(file.path("R", "mod_variance.R"), local = TRUE)
 # prepare_loadings() / hungarian_match_abs(): pure functions shared with ingestion
 source(file.path("..", "R", "lib", "ingest", "similarity.R"), local = TRUE)
 
@@ -39,7 +45,7 @@ if (!nzchar(db_path)) {
   db_path <- file.path(root, rel)
 }
 if (!file.exists(db_path)) stop("No stability DB at ", db_path, " -- set STABILITY_DB or run the targets pipeline first")
-con <- DBI::dbConnect(RSQLite::SQLite(), db_path, flags = RSQLite::SQLITE_RO)
+con <- connect_read_only(db_path)
 options(stability.db_dir = normalizePath(dirname(db_path)))
 onStop(function() DBI::dbDisconnect(con))
 
@@ -47,9 +53,12 @@ DATASETS <- list_datasets(con)
 
 
 ui <- page_navbar(
+  id = "page",
   title = "Latent-factor stability",
-  theme = bs_theme(bootswatch = "flatly"),
+  theme = bs_theme(bootswatch = "flatly", base_font_size = "1.05rem"),
+  header = tags$style(".dataTables_wrapper {font-size: 1rem;} table.dataTable td, table.dataTable th {padding: 8px 12px;}"),
   sidebar = sidebar(
+    id = "main_sidebar",
     width = 300,
     selectInput("dataset", "Dataset", choices = DATASETS),
     selectInput("fit_method", "Method", choices = NULL),
@@ -68,7 +77,8 @@ ui <- page_navbar(
           sliderInput("threshold", "Minimum stability", min = 0.5, max = 1, value = 0.9, step = 0.01)),
         helpText("Quality rises with rank, so the max-quality rule picks the largest rank.",
                  "The stable rule picks the largest rank whose factors still reproduce across seeds.")))),
-  nav_panel("Time structure", mod_time_ui("time")),
+  nav_panel("Overview", value = "overview", fillable = FALSE, mod_variance_overview_ui("overview")),
+  nav_panel("Variance by dataset", fillable = FALSE, mod_variance_ui("variance")),
   nav_panel("Compare",
     uiOutput("coverage"),
     navset_card_tab(
@@ -139,6 +149,7 @@ server <- function(input, output, session) {
     cov <- fit_coverage(con, input$dataset)
     miss <- setdiff(METHOD_ORDER, cov$method)
     if (length(miss) == 0) return(NULL)
+    note_missing(paste("fits for", paste(method_label(miss), collapse = ", ")), paste("dataset", input$dataset))
     p(class = "text-muted small", "No fits for this dataset: ", paste(method_label(miss), collapse = ", "))
   })
 
@@ -146,7 +157,10 @@ server <- function(input, output, session) {
   mod_best_method_server("best", state, con)
   mod_cross_method_server("xmethod", state, con)
   mod_cross_dataset_server("xdata", state, focus, con)
-  mod_time_server("time", state, focus, con)
+  mod_variance_overview_server("overview", con)
+  mod_variance_server("variance", state, con)
+  # the overview covers every dataset, so the sidebar is only offered on the other pages
+  observeEvent(input$page, bslib::toggle_sidebar("main_sidebar", open = input$page != "overview"))
   mod_explore_server("explore", state, focus, con)
   mod_factor_server("factor", state, focus, con)
   mod_enrichment_server("enrich", state, focus, con)

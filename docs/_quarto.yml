@@ -18,10 +18,10 @@ website:
         text: Data
       - href: methods.qmd
         text: Methods
-      - href: database.qmd
-        text: Database
       - href: workflow.qmd
         text: Running the workflow
+      - href: database.qmd
+        text: Database
       - href: app.qmd
         text: Launching the app
       - href: reference.qmd

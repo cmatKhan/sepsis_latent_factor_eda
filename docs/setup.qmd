@@ -2,108 +2,85 @@
 title: "Setup"
 ---
 
-## On HTCF (spack)
+## R and packages
 
-**R and system libraries** come from the spack environment
-`/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1`. It's the one `rstudio_spack.sbatch`
-launches RStudio Server from, so an RStudio session on the cluster already has it. Outside
-RStudio, activate it the way `run_pipeline.sbatch` does:
-
-```sh
-SPACK_ENV=/ref/mblab/software/chasem/spack_envs/rstudio-4.6.1
-eval "$(spack env activate --sh "$SPACK_ENV")"
-export LD_LIBRARY_PATH="$SPACK_ENV/view/lib:$SPACK_ENV/view/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-unset R_LIBS R_LIBS_USER R_LIBS_SITE
-```
-
-`spack` here is the one on `PATH` (spack 1.1); `/ref/mblab/software/spack/bin/spack` is an old
-0.17 install that fails to activate the environment.
-
-`spack env activate` doesn't set `LD_LIBRARY_PATH`, and packages compiled against the
-environment's libraries need it. Unsetting `R_LIBS*` keeps other libraries off the path, so
-the project's renv library is the only one in use.
+**R.** The project needs R 4.6.1 (the version in `renv.lock`) with a toolchain
+that can build R packages from source. If you are using a SLURM cluster, you 
+may have luck using spack for this. See
+[this example](https://github.com/BrentLab/htcf_spack_rstudio_server) of 
+setting up a R environment for rstudio server and R 4.6.1 via spack
 
 **R packages** come from the project's renv library (`renv.lock`). renv activates
-automatically from `.Rprofile` when R starts in the project directory. From a fresh clone:
+automatically from `.Rprofile` when R starts in the project directory. From a
+fresh clone:
 
 ```r
 options(renv.install.timeout = 6 * 3600)
 renv::restore()
 ```
+If this is a completely fresh installation with none of these packages already 
+installed, this can take hours. Additionally, note the following:
 
-- **The renv cache.** renv links packages from its cache (`~/.cache/R/renv`) when a matching
-  build is there, so a restore on a machine that has built them before takes minutes, not hours.
-- **Interrupted installs** leave `00LOCK-<package>` directories in the project library, and
-  installing that package then fails until they are removed.
-- **The timeout.** Everything builds from source against the spack libraries (roughly 300
-  packages, hours of build time). renv's default deadline for a whole install is one hour,
-  and when it's reached renv rolls back the entire batch. Finished builds stay in renv's
-  cache, so a re-run picks up where it stopped.
-- **`.Rprofile` turns off two renv start-up checks**, `synchronized.check` (a scan of every
-  project file, about a minute on `/scratch`) and the sandbox (about 40 s on `~/.cache` when
-  20 workers start at once). Together they took every worker's R start-up from 68 s to about
-  10 s. Run `renv::status()` by hand when you want the check.
+- **The renv cache.** renv links packages from its cache (`~/.cache/R/renv`)
+  when a matching
+  build is there, so a restore on a machine that has built them before takes
+  minutes, not hours.
+- **Interrupted installs** leave `00LOCK-<package>` directories in the project
+  library, and installing that package then fails until they are removed.
+- **The timeout.** Many packages build from source (roughly 300 on the cluster
+  this project was developed on, hours of build time). renv's default deadline
+  for a whole install is one hour, and when it's reached renv rolls back the
+  entire batch. Finished builds stay in renv's cache, so a re-run picks up
+  where it stopped.
+- **`.Rprofile` turns off two renv start-up checks**, `synchronized.check`
+  (a scan of every project file, about a minute on a network filesystem) and
+  the sandbox (about 40 s on a network filesystem when 20 workers start at
+  once). Together they took every worker's R start-up from 68 s to about 10 s.
+  Run `renv::status()` by hand when you want the check.
 
-### Two packages that need care
+### CoGAPS and ProjectR need to be installed from github
 
-**CoGAPS is installed from a patched local checkout, not a repository.** Its committed
-`configure` leaves the autoconf-archive OpenMP macros unexpanded
-([FertigLab/CoGAPS#150](https://github.com/FertigLab/CoGAPS/issues/150)), so built as-is it
-compiles single-threaded without saying so. The upstream fix
-([#151](https://github.com/FertigLab/CoGAPS/pull/151)) only changes their Dockerfile, so
-regenerate `configure` before installing:
+1. **CoGAPS is installed from a patched local checkout, not a repository.** Its
+  committed `configure` leaves the autoconf-archive OpenMP macros unexpanded
+  ([FertigLab/CoGAPS#150](https://github.com/FertigLab/CoGAPS/issues/150)), so
+  built as-is it compiles single-threaded without saying so. The upstream fix
+  ([#151](https://github.com/FertigLab/CoGAPS/pull/151)) only changes their
+  Dockerfile, so regenerate `configure` before installing:
 
 ```sh
 git clone https://github.com/FertigLab/CoGAPS.git logs/build/CoGAPS
 git -C logs/build/CoGAPS checkout f9075096   # master as installed (3.33.2), after #151
-export ACLOCAL_PATH="$(spack location -i autoconf-archive)/share/aclocal"
+export ACLOCAL_PATH=<the aclocal directory that holds autoconf-archive's macros>
 (cd logs/build/CoGAPS && autoreconf -fi)
 Rscript -e 'renv::install(normalizePath("logs/build/CoGAPS"))'
 Rscript -e 'library(CoGAPS); stopifnot(compiledWithOpenMPSupport())'
 ```
 
-Without spack, install `autoconf-archive` however the system provides it and point
-`ACLOCAL_PATH` at its `aclocal` directory.
+`autoreconf` needs `autoconf-archive`: install it with your system's package manager and point
+`ACLOCAL_PATH` at the `aclocal` directory that holds its macros.
 
-**projectR is the `feature-add_center_by_loadings` branch of
-[cmatKhan/projectR](https://github.com/cmatKhan/projectR/tree/feature-add_center_by_loadings).**
-It adds `center_by_loadings`, used to project PCA fits. renv records it as a GitHub remote,
-so `renv::restore()` installs it.
+2. **projectR is the `feature-add_center_by_loadings` branch** of
+[cmatKhan/projectR](https://github.com/cmatKhan/projectR/tree/feature-add_center_by_loadings).
+It adds `center_by_loadings`, used to project PCA fits. renv records it as a
+GitHub remote, so `renv::restore()` installs it.
 
 ## Raw data
 
 Dataset configs give data paths relative to a data root: `data_root` in
-`config/pipeline.yml` (`/scratch/mblab/chasem/hf_sepsis_collection` on HTCF), overridden by
-the `SEPSIS_DATA_ROOT` environment variable. See [Data](data.qmd).
+`config/pipeline.yml` (eg, `/scratch/mblab/chasem/hf_sepsis_collection`),
+overridden by the `SEPSIS_DATA_ROOT` environment variable. See [Data](data.qmd).
 
-## Running elsewhere (without spack, or another scheduler)
+## Developer notes
 
-Nothing in the pipeline depends on spack. Only two places put R on the path:
-`config/pipeline.yml` for the workers, and `run_pipeline.sbatch` for the main process. On
-another SLURM cluster:
+### Claude
 
-1. Get R 4.6 however the cluster provides it, e.g. `module load R/4.6.1`, and run
-   `renv::restore()` once in the project.
-2. In `config/pipeline.yml`, give the workers' setup lines in place of the spack
-   activation:
-   ```yaml
-   cluster:
-     setup_lines: ["module load R/4.6.1"]
-     partition: <your partition, or null>
-   ```
-3. In `run_pipeline.sbatch`, replace the spack activation lines with the same `module load`.
-4. Point `data_root` (or `SEPSIS_DATA_ROOT`) at that machine's copy of the data.
+Claude was used extensively to develop this project.
 
-This mirrors the `script_lines = "module load R"` example in crew.cluster's documentation.
-For SGE, PBS or LSF clusters, swap `crew_controller_slurm()`/`crew_options_slurm()` in
-`R/targets/controllers.R` for crew.cluster's `_sge`/`_pbs`/`_lsf` equivalents. To run on one
-machine, use `crew::crew_controller_local()`. crew.cluster labels itself
-Experimental/Maturing; targets and crew are mature.
+### Building these docs
 
-## Building these docs
-
-The site is a [Quarto](https://quarto.org) website in `docs/`. Quarto ships with RStudio
-Server (`.../rstudio-server/bin/quarto/bin/quarto`); elsewhere, install it from quarto.org.
+The site is a [Quarto](https://quarto.org) website in `docs/`. Quarto ships with
+RStudio Server (`.../rstudio-server/bin/quarto/bin/quarto`); elsewhere, install
+it from quarto.org.
 
 ```sh
 quarto render docs      # writes docs/_site/

@@ -158,6 +158,42 @@ should count. Compare the two on the next run.
 
 The current values and the measurements behind them are in `config/pipeline.yml`'s comments.
 
+## Running on a scheduler other than SLURM
+
+The pipeline has only run on SLURM (HTCF). The targets themselves don't depend on that: they
+only name a controller (`tar_resources_crew(controller = "prep")` in `R/targets/factories.R`),
+so the pipeline's logic is the same on any crew backend. Six things are tied to SLURM, and a
+port would change these:
+
+1. **Controller construction.** `build_controller_group()` (`R/targets/controllers.R`) is the
+   only place controllers are built, and it calls `crew.cluster::crew_controller_slurm()` with
+   `crew_options_slurm()`. The other [crew.cluster](https://wlandau.github.io/crew.cluster/)
+   schedulers (SGE, PBS, LSF) have their own controller and options functions, and
+   `crew::crew_controller_local()` runs everything on one machine (useful for tests).
+2. **The `controllers:` block.** Its fields map onto SLURM: `time_minutes` is the job's `--time`
+   (and sets the soft wall time, `seconds_wall`), `memory_gigabytes_required` and
+   `cpus_per_task` are the job's resources, and `partition` (under `cluster:`) is the SLURM
+   partition. Other schedulers name and limit these differently, and the comments in
+   `config/pipeline.yml` reason about SLURM's behaviour (jobs killed for exceeding memory,
+   per-user job limits).
+3. **The worker environment.** `worker_script_lines()` (`R/targets/controllers.R`) puts R on
+   each worker's PATH from the spack environment in the `cluster:` block, then changes into the
+   project directory so renv activates. `cluster.setup_lines` replaces the spack lines with
+   whatever provides R elsewhere.
+4. **Starting the run.** `run_pipeline.sbatch` is a SLURM script that runs the `tar_make()`
+   main process. Any way of keeping that process alive for the whole run works, because the
+   workers connect back to it.
+5. **Resource recording.** `job_resources()` (`R/targets/variance.R`) reads the job's cgroup
+   (v2) under `slurmstepd.scope`, using `SLURM_JOB_ID`. Outside SLURM, or without cgroup v2, it
+   returns no usable measurement; the `vp` tasks' `$resources` would be empty.
+6. **Names and comments.** The method registries' `resource_defaults()` take an argument called
+   `slurm_cfg` (only `cpus_per_task` is read from it), and comments and docs mention SLURM and
+   HTCF throughout.
+
+A port is therefore mostly a rewrite of `build_controller_group()` and the `controllers:`
+fields, plus items 3 to 5. The resource numbers in `config/pipeline.yml` were tuned on SLURM and
+would need tuning again.
+
 ## Logs and monitoring
 
 | What | Where |
