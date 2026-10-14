@@ -1,5 +1,7 @@
 # Sepsis latent-factor stability
 
+[![Docs](https://img.shields.io/badge/docs-gh--pages-blue)](https://cmatkhan.github.io/sepsis_latent_factor_eda/)
+
 This provides a [targets](https://books.ropensci.org/targets/) workflow 
 configured with [crew.cluster](https://wlandau.github.io/crew.cluster/) to 
 conduct variancePartition analysis, along with a number of latent factor
