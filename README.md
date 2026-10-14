@@ -61,7 +61,7 @@ work on a laptop.
 ## Launching the app with public data
 
 To launch the app, you need the results of the targets pipeline. A version 
-of this is available here](https://huggingface.co/datasets/cmatkhan/sepsis_latent_factors_db_data).
+of this is available [here](https://huggingface.co/datasets/cmatkhan/sepsis_latent_factors_db_data).
 Download that data and either mount it to a directory called `results` in your 
 project, or extract it. If you're using linux or mac, you probably already 
 have [squash](https://github.com/plougher/squashfs-tools).
