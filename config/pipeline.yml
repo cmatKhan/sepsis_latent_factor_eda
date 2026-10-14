@@ -49,7 +49,11 @@ datasets:
 
 # Methods configured in a dataset config but not built by the pipeline
 # (no targets are created for them), e.g. `skip_methods: [cogaps]`.
-skip_methods: []
+# Removing a method drops its targets' metadata at the next tar_make(), so
+# adding it back refits everything (the stored objects aren't reused).
+# 2026-10-14: sPCA skipped to get every dataset into the DB first; set back
+# to [] to fit it.
+skip_methods: [spca]
 
 # Root that the RELATIVE data paths in config/<ID>_config.yml resolve
 # against (R/lib/data_paths.R). The SEPSIS_DATA_ROOT environment variable
@@ -130,9 +134,9 @@ controllers:
       crashes_max: 2
   vp:
     # variancePartition and dream per dataset (R/targets/variance.R): one
-    # long task per worker, BiocParallel SnowParam over cpus_per_task.
-    # seff/sacct miss the Snow worker processes; each result records its
-    # job's cgroup peak memory and CPU seconds instead ($resources). Measured
+    # long task per worker, BiocParallel MulticoreParam (forked workers)
+    # over cpus_per_task. Each result records its job's cgroup peak memory
+    # and CPU seconds ($resources). Measured (with SnowParam workers)
     # 2026-10-13 (8 CPUs): peak 3.3-4.5 GB for vp/norm, 8.25 GB for
     # dream_ANEMONES (32k genes x 447 samples, 11 min); CPU efficiency
     # 0.4-0.9. 12 GB puts ANEMONES at ~70%.

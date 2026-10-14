@@ -204,7 +204,9 @@ explore_variance <- function(dataset_id, meta, design_obj, norm, vp, composition
     residual_vw_top = wsum(fcat[, "residual"], top))
 
   bin_summary <- function(bins, name) {
-    out <- do.call(rbind, lapply(split(seq_along(bins), bins), function(i) data.frame(
+    # drop = TRUE: a dataset with fewer genes than a rank bin's lower edge
+    # (dilgom: 6,737 < 8,000) leaves that bin empty.
+    out <- do.call(rbind, lapply(split(seq_along(bins), bins, drop = TRUE), function(i) data.frame(
       dataset_id = dataset_id, bin = as.character(bins[i[1]]), n_genes = length(i),
       between = stats::median(between[i]), time = stats::median(time_all[i]),
       residual = stats::median(fcat[i, "residual"]))))
@@ -289,7 +291,10 @@ score_design <- function(design_obj, samples, subset) {
   candidates <- c(spec[["subject"]], spec[["time"]], spec[["group"]], unlist(spec$covariates), unlist(spec$vp_covariates))
   keep <- Filter(varies, intersect(candidates, names(data)))
   terms <- vp_terms(spec)
-  terms$random <- terms$random[vapply(strsplit(terms$random, ":"), function(v) all(v %in% keep), logical(1))]
+  # as.character(): a subset whose parent design has only subject and time
+  # has no random terms left (NULL), and then no formula.
+  terms$random <- terms$random[vapply(strsplit(as.character(terms$random), ":"), function(v) all(v %in% keep),
+                                      logical(1))]
   terms$fixed <- intersect(terms$fixed, keep)
   for (v in setdiff(keep, numeric_vars)) data[[v]] <- droplevels(factor(data[[v]]))
   list(formula = terms_formula(terms), data = data, spec = spec)

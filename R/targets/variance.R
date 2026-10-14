@@ -10,8 +10,8 @@
 #'
 #' fitVarPartModel()'s `fxn`: the per-gene lmer fits are dropped (about 10 GB
 #' for 20k genes x 1000 samples, per the vignette). Every call is
-#' namespace-qualified because BiocParallel's Snow workers don't attach
-#' packages.
+#' namespace-qualified, so it runs in any BiocParallel worker whether or not
+#' the packages are attached there.
 #'
 #' @param fit One gene's fitted model (merMod, or lm with no random effect).
 #' @return List: `variances` (calcVarPart() absolute; the fractions are these
@@ -29,10 +29,14 @@ vp_record <- function(fit) {
 
 #' Parallel backend for one task
 #'
+#' Forked workers (MulticoreParam), not sockets: a SnowParam cluster talks
+#' over a local port that BiocParallel picks from the start time, so tasks
+#' starting together on one node collided ("port ... cannot be opened").
+#'
 #' @param cpus Worker processes (the controller's `cpus_per_task`).
-#' @return A BiocParallel SnowParam, or SerialParam for one CPU.
+#' @return A BiocParallel MulticoreParam, or SerialParam for one CPU.
 variance_bpparam <- function(cpus) {
-  if (cpus > 1) BiocParallel::SnowParam(workers = cpus, type = "SOCK", progressbar = FALSE)
+  if (cpus > 1) BiocParallel::MulticoreParam(workers = cpus, progressbar = FALSE)
   else BiocParallel::SerialParam()
 }
 
@@ -167,9 +171,9 @@ dream_tables <- function(dream) {
 
 #' Resources this SLURM job has used so far
 #'
-#' Read from the job's cgroup (v2), which, unlike `seff`/`sacct`, counts the
-#' BiocParallel Snow workers: they detach from the job's process tree, so
-#' SLURM's accounting misses them, but they stay in its cgroup. With
+#' Read from the job's cgroup (v2), which counts every process the task
+#' started, including its BiocParallel workers (`seff` missed the earlier
+#' socket-based workers, which left the job's process tree). With
 #' `tasks_max: 1` a worker job runs one task, so this is that task's use.
 #'
 #' @param cpus CPUs the task was given (for the efficiency ratio).

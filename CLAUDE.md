@@ -45,16 +45,19 @@ rather than relying on memory, and keep it current when behavior changes.
 
 ## Jobs and resources
 
-- **Log every job id** you submit (session scratchpad `jobs/main_jobs.txt`), with a note of what
+- **Log every job id** you submit (`logs/jobs/main_jobs.txt`, shared storage and git-ignored; not
+  the session scratchpad, which lives under `/tmp` and was wiped mid-session once), with a note of what
   it is.
 - Check usage with `seff <jobid>`, or for arrays
   `script -qc "stty cols 100; python /scratch/mblab/chasem/seff-array/seff-array.py <id>" /dev/null`
   (seff-array needs a TTY, and misparses ReqMem values like `512M`).
 - **Targets:** about 75% average memory and CPU use, never below 50%, erring high. Size memory
   for the largest dataset (SHIP-TREND, 8,000 genes x 991 samples), not EARLI.
-- **`seff` misses BiocParallel Snow workers** (they leave the job's process tree). The `vp`
-  controller's tasks record their job's cgroup peak memory and CPU seconds in `$resources`
-  (`job_resources()`); use those.
+- **The `vp` controller's tasks record their job's cgroup peak memory and CPU seconds** in
+  `$resources` (`job_resources()`). `seff` missed the earlier BiocParallel `SnowParam` workers
+  (they left the process tree); the workers are now forked (`MulticoreParam`, because
+  SnowParam's ports collided between tasks starting together on a node), so check whether
+  `seff` agrees with `$resources`.
 - **No worker caps just to limit submissions.** SLURM's scheduler and per-user limits (200
   running jobs) handle queuing. A `workers:` cap needs another reason, stated in a comment
   (pca/nmf/ica: tasks shorter than a worker's ~30 s start-up).

@@ -247,8 +247,8 @@ never touches a factor fit, so it can be rebuilt on its own.
 
 To rebuild only this module, run the selection in Running the workflow ("Running the
 pipeline"); `R/explore/variance_by_time.R` plots the stored summaries interactively. Model
-tasks run on the `vp` controller (BiocParallel `SnowParam` over its CPUs) and record their own
-peak memory and CPU time, which `seff` misses for Snow workers.
+tasks run on the `vp` controller (BiocParallel `MulticoreParam`, forked workers over its CPUs)
+and record their own peak memory and CPU time from the job's cgroup.
 
 ### Models
 

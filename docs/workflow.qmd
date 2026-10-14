@@ -104,8 +104,38 @@ runs tasks until it's idle or reaches its time limits.
   retries a task whose worker crashed `crashes_max` times -- typically killed for exceeding
   memory on the largest datasets -- on `<name>_backup` with more memory.
 - **One fit per worker for long fits.** sPCA and the `vp` controller (variancePartition and
-  dream, BiocParallel `SnowParam` over `cpus_per_task`) use `tasks_max: 1`, so no long task
+  dream, BiocParallel `MulticoreParam` over `cpus_per_task`) use `tasks_max: 1`, so no long task
   starts late in a worker's life.
+
+### Main-process memory
+
+The main process's memory scales with the number of tasks it has handed to crew and not yet
+collected, not with the data:
+
+- **Every ready task is pushed at once.** targets pushes a ready target to its controller unless
+  the controller is *saturated* (crew's `saturated()`: tasks pushed ≥ `workers`); a saturated
+  controller's targets wait in targets' own backlog as names. Without a `workers:` cap a
+  controller never saturates, so every ready task is pushed immediately, including the ones
+  waiting in SLURM's queue behind the 200-running-jobs limit.
+- **Each pushed task carries the globals.** The payload is the target plus every object and
+  function that `_targets.R` and `R/` define: about 5.3 MB serialized (2026-10-14), mostly source
+  references. `tar_source()` parses with `keep.source = TRUE`; without them it's 0.44 MB.
+- **It's held in the main process.** mirai's dispatcher is a thread in the main R process
+  (mirai ≥ 2.7), so each outstanding task costs about twice its payload, ~10.6 MB.
+
+The full run's opening burst (2026-10-14: about 1,400 tasks, mostly CoGAPS, WGCNA and sPCA, as
+every dataset's grids became ready together) took the main process to 14.75 GB within two
+minutes, and 16.8 GB after twenty. That burst crashed a run with `--mem=16G`; `run_pipeline.sbatch` requests more, and
+up to about 20 GB is acceptable on HTCF. The script also writes
+`logs/targets_main_<jobid>_mem.tsv` (the job's memory, each process's RSS and the number of
+worker jobs, every 30 s).
+
+If it becomes a problem, shrink the payload rather than cap workers (a cap below the cluster's
+running limit leaves capacity unused when one controller has the remaining work). The targets
+manual recommends putting a large project's functions in an R package: each task then ships
+only the package name, and workers load it. Sourcing `R/` without source references would also
+cut the payload about twelvefold; targets hashes functions without them, so neither change
+reruns anything.
 
 ### Tuning
 
@@ -119,10 +149,12 @@ memory for the largest dataset (SHIP-TREND: 8,000 genes × 991 samples), not EAR
    terminal; from a non-interactive shell wrap it:
    `script -qc "stty cols 100; python .../seff-array.py <id>" /dev/null`.
 
-**The `vp` controller is the exception:** `seff`/`sacct` miss the Snow worker processes (they
-leave the job's process tree), so `norm_`, `vp_` and `dream_` record their job's cgroup peak
-memory and CPU seconds in their result (`$resources`, `job_resources()` in
-`R/targets/variance.R`); `vp_summary_<key>` reports them.
+**The `vp` controller also records its own use:** `norm_`, `vp_` and `dream_` store their job's
+cgroup peak memory and CPU seconds in their result (`$resources`, `job_resources()` in
+`R/targets/variance.R`), and `vp_summary_<key>` reports them. That was needed when these tasks
+used socket (`SnowParam`) workers, which left the job's process tree so `seff` missed them;
+since 2026-10-14 they use forked (`MulticoreParam`) workers, which use no ports and which `seff`
+should count. Compare the two on the next run.
 
 The current values and the measurements behind them are in `config/pipeline.yml`'s comments.
 
@@ -131,6 +163,7 @@ The current values and the measurements behind them are in `config/pipeline.yml`
 | What | Where |
 |---|---|
 | main process | `logs/targets_main_<jobid>.out` |
+| main-process memory | `logs/targets_main_<jobid>_mem.tsv` (every 30 s) |
 | workers | `logs/crew/<controller>_<jobid>.out` |
 | per-target errors and warnings | `tar_meta(fields = c(error, warnings))` |
 | progress | `tar_progress_summary()`, `tar_poll()` |
