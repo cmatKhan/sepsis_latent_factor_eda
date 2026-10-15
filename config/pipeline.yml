@@ -49,11 +49,9 @@ datasets:
 
 # Methods configured in a dataset config but not built by the pipeline
 # (no targets are created for them), e.g. `skip_methods: [cogaps]`.
-# Removing a method drops its targets' metadata at the next tar_make(), so
-# adding it back refits everything (the stored objects aren't reused).
-# 2026-10-14: sPCA skipped to get every dataset into the DB first; set back
-# to [] to fit it.
-skip_methods: [spca]
+# Its completed targets stay in the store's metadata, so adding it back
+# reuses them (2026-10-14: 295 sPCA fits survived a run with sPCA skipped).
+skip_methods: []
 
 # Root that the RELATIVE data paths in config/<ID>_config.yml resolve
 # against (R/lib/data_paths.R). The SEPSIS_DATA_ROOT environment variable
