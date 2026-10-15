@@ -513,9 +513,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <tbody>
 <tr class="odd">
 <td><code>fgsea_</code> (enrichment, per representative fit)</td>
-<td>branch median 2 min, max 16 min; per dataset and method up to 84 min</td>
+<td>until 2026-10-15 (8 cores): branch median 2 min, max 16 min. Of one fit’s serial time, <code>collapsePathways()</code> (the <code>is_main_pathway</code> flag) is ~54% and <code>fgsea()</code> ~45%, GO:BP alone ~56%; ORA ~1%. Since 2026-10-15 every GSEA call runs in one parallel round and every ORA call in a second, one task per call, largest collections first (<code>run_fgsea_job()</code>): ~2× faster on 3 cores</td>
 <td>2.6-3.9 GB, flat in dataset size</td>
-<td>~2.5 of the 8 requested cores used</td>
+<td>was ~2.5 of 8 cores (four sequential rounds, fixed chunks); now requested 3</td>
 </tr>
 <tr class="even">
 <td><code>wgcna_ora_</code></td>
@@ -525,9 +525,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </tr>
 <tr class="odd">
 <td><code>projectr_</code> (per source × target dataset)</td>
-<td>branch median 2 min, p95 18 min, max 112 min; 193 CPU-h in total</td>
+<td>until 2026-10-15: branch median 2 min, max 112 min, 193 CPU-h in total, almost all of it converting the target matrix’s gene ids once per fit (150 s each onto MARS; projectR itself 0.4 s). Now the target is converted once per branch with a one-to-one map: expect seconds per branch</td>
 <td>1.2-2.1 GB</td>
-<td>scales with the number of target datasets (35² pairs) more than size</td>
+<td>was fits × target samples; now dominated by reading the target matrix</td>
 </tr>
 <tr class="even">
 <td><code>projection_scores_</code></td>

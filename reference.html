@@ -1661,8 +1661,8 @@ ul.task-list li input[type="checkbox"] {
 </section>
 <section id="build_ensembl_map" class="level4 unnumbered">
 <h4 class="unnumbered anchored" data-anchor-id="build_ensembl_map"><code>build_ensembl_map()</code></h4>
-<p><strong>A dataset’s feature id -&gt; Ensembl gene id map</strong></p>
-<p>Reads <code>dataset.ensembl_col</code> (default <code>"ensembl"</code>) from the feature metadata. A <code>;</code>-separated multi-gene entry (one probe, several genes) maps to its first gene – a simple, transparent choice; expanding one probe across every listed gene is the alternative.</p>
+<p><strong>A dataset’s feature id -&gt; Ensembl gene id map, one feature per gene</strong></p>
+<p>Reads <code>dataset.ensembl_col</code> (default <code>"ensembl"</code>) from the feature metadata. A <code>;</code>-separated multi-gene entry (one probe, several genes) maps to its first gene – a simple, transparent choice; expanding one probe across every listed gene is the alternative. The map is restricted to the rows of <code>mat</code>, and where several of them map to one gene only the one with the highest mean expression is kept (ties: the first in <code>mat</code>), so a gene is the same feature in the matrix, in every fit’s loadings and in every gene list.</p>
 <table class="caption-top table">
 <thead>
 <tr class="header">
@@ -1676,12 +1676,16 @@ ul.task-list li input[type="checkbox"] {
 <td>A resolved dataset config.</td>
 </tr>
 <tr class="even">
+<td><code>mat</code></td>
+<td>The dataset’s feature x sample matrix.</td>
+</tr>
+<tr class="odd">
 <td><code>fm</code></td>
 <td>Optional already-loaded feature-metadata data frame.</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Returns:</strong> Named character vector (names = feature ids), or <code>NULL</code> when the dataset has no such column or feature metadata – its row names are then used as they are.</p>
+<p><strong>Returns:</strong> Named character vector (names = feature ids, in <code>mat</code>’s order), or <code>NULL</code> when the dataset has no such column or feature metadata – its row names are then used as they are.</p>
 </section>
 <section id="build_symbol_map" class="level4 unnumbered">
 <h4 class="unnumbered anchored" data-anchor-id="build_symbol_map"><code>build_symbol_map()</code></h4>
@@ -1707,34 +1711,15 @@ ul.task-list li input[type="checkbox"] {
 </table>
 <p><strong>Returns:</strong> Named character vector (names = feature ids), or <code>NULL</code>.</p>
 </section>
-<section id="remap_ids" class="level4 unnumbered">
-<h4 class="unnumbered anchored" data-anchor-id="remap_ids"><code>.remap_ids()</code></h4>
-<p><strong>Remap a matrix’s row names through an id map</strong></p>
-<p>Several rows mapping to one id are collapsed, keeping the row with the largest |value| per column.</p>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Argument</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>mat</code></td>
-<td>Feature x sample (or feature x factor) matrix.</td>
-</tr>
-<tr class="even">
-<td><code>id_map</code></td>
-<td>Named character vector (names = current row names).</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Returns:</strong> The remapped matrix; <code>mat</code> unchanged when <code>id_map</code> is empty or matches nothing.</p>
-</section>
 <section id="remap_to_ensembl" class="level4 unnumbered">
 <h4 class="unnumbered anchored" data-anchor-id="remap_to_ensembl"><code>remap_to_ensembl()</code></h4>
 <p><strong>Remap row names to Ensembl gene ids</strong></p>
+<p>Rows without an Ensembl id are dropped; the rest are renamed and sorted by id. The map must be one-to-one (build_ensembl_map()), so no rows are merged.</p>
 <table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
 <thead>
 <tr class="header">
 <th>Argument</th>
@@ -1744,7 +1729,7 @@ ul.task-list li input[type="checkbox"] {
 <tbody>
 <tr class="odd">
 <td><code>mat</code></td>
-<td>Matrix with platform-native row names.</td>
+<td>Matrix with platform-native row names (features x samples, or features x factors).</td>
 </tr>
 <tr class="even">
 <td><code>ensembl_map</code></td>
@@ -1752,30 +1737,7 @@ ul.task-list li input[type="checkbox"] {
 </tr>
 </tbody>
 </table>
-<p><strong>Returns:</strong> The matrix with Ensembl gene id row names (see .remap_ids()).</p>
-</section>
-<section id="remap_to_symbol" class="level4 unnumbered">
-<h4 class="unnumbered anchored" data-anchor-id="remap_to_symbol"><code>remap_to_symbol()</code></h4>
-<p><strong>Remap row names to gene symbols (display only)</strong></p>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Argument</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>mat</code></td>
-<td>Matrix with platform-native row names.</td>
-</tr>
-<tr class="even">
-<td><code>symbol_map</code></td>
-<td>build_symbol_map() output.</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Returns:</strong> The matrix with gene-symbol row names (see .remap_ids()).</p>
+<p><strong>Returns:</strong> The matrix with Ensembl gene id row names; <code>mat</code> unchanged when the map is empty or matches nothing.</p>
 </section>
 </section>
 </section>
@@ -3703,6 +3665,7 @@ ul.task-list li input[type="checkbox"] {
 <section id="projection_rows" class="level4 unnumbered">
 <h4 class="unnumbered anchored" data-anchor-id="projection_rows"><code>projection_rows()</code></h4>
 <p><strong>Run one group of projections (one <code>projectr_&lt;dataset&gt;</code> branch)</strong></p>
+<p>Every row has the same target dataset, so its matrix is read and converted to Ensembl ids once for all of the source’s fits.</p>
 <table class="caption-top table">
 <thead>
 <tr class="header">
@@ -3756,20 +3719,24 @@ ul.task-list li input[type="checkbox"] {
 <td>Source dataset id.</td>
 </tr>
 <tr class="odd">
-<td><code>ensembl_maps</code></td>
-<td>Every dataset’s Ensembl map.</td>
+<td><code>target_ens</code></td>
+<td>The target dataset’s matrix, rows Ensembl ids.</td>
 </tr>
 <tr class="even">
+<td><code>source_ensembl_map</code></td>
+<td>The source dataset’s Ensembl map.</td>
+</tr>
+<tr class="odd">
 <td><code>source_matrix_file</code></td>
 <td>The source dataset’s matrix path.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>db_path</code></td>
 <td>Path to the DB.</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Returns:</strong> One <code>projections</code> row keyed by source fit_key, or <code>NULL</code> for a placeholder or a failed projection.</p>
+<p><strong>Returns:</strong> One <code>projections</code> row keyed by source fit_key, or <code>NULL</code> for a failed projection.</p>
 </section>
 <section id="projection_scores" class="level4 unnumbered">
 <h4 class="unnumbered anchored" data-anchor-id="projection_scores"><code>projection_scores()</code></h4>
@@ -5311,7 +5278,7 @@ ul.task-list li input[type="checkbox"] {
 <section id="run_fgsea_job" class="level4 unnumbered">
 <h4 class="unnumbered anchored" data-anchor-id="run_fgsea_job"><code>run_fgsea_job()</code></h4>
 <p><strong>Enrichment for one representative fit</strong></p>
-<p>Parallelized across factors and collections with BiocParallel (the many small fgsea()/fora() calls are the cost; each inner call runs serially to avoid nested forking).</p>
+<p>All GSEA calls (every factor x collection, Hallmark included) run as one BiocParallel round and all ORA calls (CoGAPS marker genes, each factor’s top genes) as a second, each call its own task with the largest collections first, so the workers stay busy until the end; each inner call runs serially to avoid nested forking.</p>
 <table class="caption-top table">
 <colgroup>
 <col style="width: 50%">
@@ -5362,7 +5329,7 @@ ul.task-list li input[type="checkbox"] {
 </tr>
 </tbody>
 </table>
-<p><strong>Returns:</strong> <code>list(dataset_id, method, fit_key, gsea, fora, local_gsea, local_ora)</code> of fgsea()/fora() results.</p>
+<p><strong>Returns:</strong> <code>list(dataset_id, method, fit_key, gsea, fora, local_gsea, local_ora)</code> of fgsea()/fora() results: <code>gsea</code> is Hallmark, <code>local_gsea</code> the other collections.</p>
 </section>
 </section>
 <section id="ringest_jobsprojectr_job.r" class="level3">
@@ -5370,7 +5337,7 @@ ul.task-list li input[type="checkbox"] {
 <section id="run_projectr_job" class="level4 unnumbered">
 <h4 class="unnumbered anchored" data-anchor-id="run_projectr_job"><code>run_projectr_job()</code></h4>
 <p><strong>Project one fit’s loadings onto another dataset’s matrix</strong></p>
-<p>Both sides are remapped to Ensembl ids first. A PCA fit is rebuilt as a <code>prcomp</code> object (rotation, the source matrix’s gene means as <code>center</code>, score SDs as <code>sdev</code>) and projected with the projectR fork’s <code>center_by_loadings = TRUE</code>; other methods use plain loadings.</p>
+<p>The loadings are converted to Ensembl ids with the source dataset’s map; the target arrives converted. A PCA fit is rebuilt as a <code>prcomp</code> object (rotation, the source matrix’s gene means as <code>center</code>, score SDs as <code>sdev</code>) and projected with the projectR fork’s <code>center_by_loadings = TRUE</code>; other methods use plain loadings.</p>
 <table class="caption-top table">
 <colgroup>
 <col style="width: 50%">
@@ -5404,8 +5371,8 @@ ul.task-list li input[type="checkbox"] {
 <td>The dataset projected onto.</td>
 </tr>
 <tr class="even">
-<td><code>target_matrix_file</code></td>
-<td>Absolute path to that dataset’s matrix.</td>
+<td><code>target_ens</code></td>
+<td>That dataset’s matrix, rows already Ensembl ids.</td>
 </tr>
 <tr class="odd">
 <td><code>projection_type</code></td>
@@ -5416,8 +5383,8 @@ ul.task-list li input[type="checkbox"] {
 <td>Whether projectR fits an intercept (cross-family only).</td>
 </tr>
 <tr class="odd">
-<td><code>source_ensembl_map,target_ensembl_map</code></td>
-<td>The two datasets’ Ensembl maps.</td>
+<td><code>source_ensembl_map</code></td>
+<td>The source dataset’s Ensembl map.</td>
 </tr>
 <tr class="even">
 <td><code>source_mat_file,source_scores_file</code></td>
