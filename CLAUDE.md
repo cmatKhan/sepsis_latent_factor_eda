@@ -122,6 +122,12 @@ Rules:
 - **Load a package before reading its S4 objects.** `dim()` on a variancePartition dream fit
   (`MArrayLM2`) read before the package's namespace is loaded returns `NULL`, and stays `NULL`
   for the session; give targets that read such objects `packages = "variancePartition"`.
+- **Skipping a method (`skip_methods:`) and running to the end deletes its artifact files**
+  (`db_cross_dataset`'s orphan cleanup: the DB no longer references them), but its `ingest_`
+  targets stay up to date, because ingestion writes artifacts as a side effect, not as file
+  targets. Before adding the method back, `tar_invalidate()` its `ingest_`, `pairs_`,
+  `representatives_`, `redundancy_`, `fgsea_jobs_`, `fgsea_` and `factor_vp_` targets for every
+  dataset that had been ingested (2026-10-14: hfgp-500fg's sPCA). Its fits survive.
 - **Don't store once-per-session messages in a target value.** A captured lme4 deprecation
   notice made design values depend on build order and reran everything downstream.
 
