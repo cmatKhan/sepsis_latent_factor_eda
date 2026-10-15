@@ -142,6 +142,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span class="menu-text">Data</span></a>
   </li>  
   <li class="nav-item">
+    <a class="nav-link" href="./datasets.html"> 
+<span class="menu-text">Datasets</span></a>
+  </li>  
+  <li class="nav-item">
     <a class="nav-link" href="./methods.html"> 
 <span class="menu-text">Methods</span></a>
   </li>  
@@ -270,6 +274,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li>Write <code>config/&lt;dataset&gt;_config.yml</code>, starting from <code>config/dataset_metadata.example.yml</code>: the three paths (relative to the data root), the column names above, a <code>methods:</code> block, usually a <code>preprocessing_script</code> (<a href="#building-a-matrix">Building a matrix</a>), and a <code>design:</code> block if you want the repeated-measures analysis (<a href="#the-design-block">below</a>).</li>
 <li>Add its <code>dataset.id</code> to <code>datasets:</code> in <code>config/pipeline.yml</code>.</li>
 <li>Run the pipeline. Only the new dataset’s targets are built.</li>
+<li>Optionally record it in <a href="./datasets.html">Datasets</a>: a section whose heading is the dataset id (anchor <code>{#&lt;lowercase id&gt;}</code>). The app’s Design and model tab links to that section for datasets whose config says <code>hf_collection: "cmatkhan/Sepsis transcriptomics"</code>; nothing in the pipeline reads it.</li>
 </ol>
 <p>File names needn’t match ids (<code>ANEMONES_day1_config.yml</code> declares <code>ANEMONES_DAY1</code>); the pipeline finds a config by its declared <code>dataset.id</code>.</p>
 <p>Every key of the <code>dataset:</code>, <code>design:</code> and <code>methods:</code> blocks is documented in the comments of the example config; each method’s keys are also in <a href="./methods.html">Methods</a>. The notes below cover the parts that are easy to miss.</p>

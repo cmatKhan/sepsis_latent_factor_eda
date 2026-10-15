@@ -107,6 +107,10 @@ ul.task-list li input[type="checkbox"] {
 <span class="menu-text">Data</span></a>
   </li>  
   <li class="nav-item">
+    <a class="nav-link" href="./datasets.html"> 
+<span class="menu-text">Datasets</span></a>
+  </li>  
+  <li class="nav-item">
     <a class="nav-link" href="./methods.html"> 
 <span class="menu-text">Methods</span></a>
   </li>  
@@ -1780,7 +1784,8 @@ ul.task-list li input[type="checkbox"] {
 <p>projectR projection of a source fit’s loadings onto another dataset’s matrix, either a related timepoint (<code>within_dataset</code>) or another cohort (<code>cross_dataset</code>).</p>
 <ul>
 <li>The projected matrix is in the file at <code>path</code>.</li>
-<li><strong>Rows from:</strong> <code>projectr_&lt;key&gt;</code>, one branch per (source dataset, target dataset) (<code>R/targets/projections.R::projection_rows()</code>, running <code>R/ingest_jobs/projectr_job.R</code>).</li>
+<li><strong>Rows from:</strong> <code>projectr_&lt;key&gt;</code>, one branch per (source dataset, target dataset) (<code>R/targets/projections.R::projection_rows()</code>, running <code>R/ingest_jobs/projectr_job.R</code>), joined at write time to <code>projection_scores_&lt;key&gt;</code> (<code>projection_scores()</code>), the centred scores.</li>
+<li><strong>Scores.</strong> projectR’s R² is taken against the raw expression, which the mean expression profile alone scores about 0.93 on (a cross-family projection also fits an intercept), so it is not stored; each projection’s per-sample values are in the file at <code>path</code>. The stored scores are centred: the target is centred by its gene means and sample offsets, the loadings columns are centred, no intercept is fitted, and the R² is pooled over the target (<code>transfer_r2</code>). <code>native_r2</code> is the most any basis of the same size could explain (the target’s own top principal components), <code>relative_r2 = transfer_r2 / native_r2</code> is the score to compare across methods and projection types, and <code>null_r2</code> is <code>transfer_r2</code> with the loadings’ genes shuffled (about 0). All loadings columns are used (<code>n_components</code>; PCA: its maximum rank).</li>
 </ul>
 <table class="caption-top table">
 <colgroup>
@@ -1832,16 +1837,6 @@ ul.task-list li input[type="checkbox"] {
 <td></td>
 </tr>
 <tr class="even">
-<td>mean_r_squared</td>
-<td>REAL</td>
-<td></td>
-</tr>
-<tr class="odd">
-<td>median_r_squared</td>
-<td>REAL</td>
-<td></td>
-</tr>
-<tr class="even">
 <td>mean_pval</td>
 <td>REAL</td>
 <td></td>
@@ -1860,6 +1855,16 @@ ul.task-list li input[type="checkbox"] {
 <td>median_pvar</td>
 <td>REAL</td>
 <td></td>
+</tr>
+<tr class="even">
+<td>n_components</td>
+<td>INTEGER</td>
+<td>loadings columns used by the centred scores</td>
+</tr>
+<tr class="odd">
+<td>transfer_r2, native_r2, relative_r2, null_r2</td>
+<td>REAL</td>
+<td>centred scores (see above); NULL when fewer than 50 genes match</td>
 </tr>
 <tr class="even">
 <td>path</td>

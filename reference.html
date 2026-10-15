@@ -107,6 +107,10 @@ ul.task-list li input[type="checkbox"] {
 <span class="menu-text">Data</span></a>
   </li>  
   <li class="nav-item">
+    <a class="nav-link" href="./datasets.html"> 
+<span class="menu-text">Datasets</span></a>
+  </li>  
+  <li class="nav-item">
     <a class="nav-link" href="./methods.html"> 
 <span class="menu-text">Methods</span></a>
   </li>  
@@ -2328,6 +2332,10 @@ ul.task-list li input[type="checkbox"] {
 <td><code>variance_explore</code></td>
 <td>combine_variance_explore() output, or <code>NULL</code> (its <code>time_gene_recurrence</code> replaces that table).</td>
 </tr>
+<tr class="even">
+<td><code>projection_scores</code></td>
+<td>List of projection_scores() data frames, joined to the projections by source fit and target dataset.</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code>list(n_projections, n_gene_space, orphans_removed, written_at)</code>.</p>
@@ -3762,6 +3770,38 @@ ul.task-list li input[type="checkbox"] {
 </tbody>
 </table>
 <p><strong>Returns:</strong> One <code>projections</code> row keyed by source fit_key, or <code>NULL</code> for a placeholder or a failed projection.</p>
+</section>
+<section id="projection_scores" class="level4 unnumbered">
+<h4 class="unnumbered anchored" data-anchor-id="projection_scores"><code>projection_scores()</code></h4>
+<p><strong>Centred transfer scores for one source dataset’s projections</strong></p>
+<p>projectR’s R^2 is taken against the raw expression, so the mean expression profile alone scores about 0.93 (and a cross-family projection fits an intercept that absorbs it). This score removes that: the target is centred by its gene means and its per-sample offsets, each loading column is centred, no intercept is fitted, and the R^2 is pooled over the target. It is reported beside the best any basis of the same size could do on that target (its own top principal components, <code>native_r2</code>), as <code>relative_r2 = transfer_r2 / native_r2</code>, and beside the same fit with the loadings’ genes shuffled (<code>null_r2</code>, near 0). Every loadings column is used (PCA: its maximum rank). Reads the loadings and matrix files of the job table, so it does not depend on the projectR results.</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Argument</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>jobs</code></td>
+<td>The source dataset’s whole <code>projectr_jobs_&lt;dataset&gt;</code> table.</td>
+</tr>
+<tr class="even">
+<td><code>source_id</code></td>
+<td>Source dataset id.</td>
+</tr>
+<tr class="odd">
+<td><code>ensembl_maps</code></td>
+<td>Every dataset’s Ensembl map.</td>
+</tr>
+<tr class="even">
+<td><code>min_genes</code></td>
+<td>Projections with fewer matched genes get no score.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Data frame (source_fit_key, target_dataset_id, n_components, transfer_r2, native_r2, relative_r2, null_r2), or <code>NULL</code> for a placeholder.</p>
 </section>
 <section id="optimal_fit_key" class="level4 unnumbered">
 <h4 class="unnumbered anchored" data-anchor-id="optimal_fit_key"><code>optimal_fit_key()</code></h4>

@@ -142,6 +142,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span class="menu-text">Data</span></a>
   </li>  
   <li class="nav-item">
+    <a class="nav-link" href="./datasets.html"> 
+<span class="menu-text">Datasets</span></a>
+  </li>  
+  <li class="nav-item">
     <a class="nav-link" href="./methods.html"> 
 <span class="menu-text">Methods</span></a>
   </li>  
@@ -268,7 +272,7 @@ Note
 <tr class="even">
 <td>2. Best method</td>
 <td>which method is best and most stable on this dataset</td>
-<td>the optimal fits, plus median projectR R² from <code>projections</code></td>
+<td>the optimal fits, plus the median relative transfer R² from <code>projections</code></td>
 </tr>
 <tr class="odd">
 <td>3. Across methods</td>
@@ -288,7 +292,7 @@ Note
 <p>The first two pages answer: how much of each dataset’s variance is change over time, and how much is between patients? It reads the stored variancePartition results (<code>variance_summary</code>, <code>variance_categories</code>, <code>variance_terms</code>, <code>variance_bins</code>, the <code>variance_partition</code> artifact); nothing is computed when the page opens. Code: <code>app/R/mod_variance.R</code>, <code>app/R/variance_helpers.R</code>.</p>
 <ul>
 <li><strong>Overview</strong> (all datasets; the sidebar is hidden on this page). Stacked bars for every time-course dataset: between patients (patient plus patient-level variables), time (time plus group x time), technical covariates, and residual (within-person change that is not shared by time, plus noise). The gene-set menu chooses what is averaged: the factor-analysis genes (default), all modelled genes, the top 8,000 by variance (each weighted by gene variance), or the typical gene (median). The table beneath gives repeatability (between / (between + residual)), time / (time + residual), the share of genes with time above 10%, and flags (sex agreement below 0.9, mostly singular fits, failed genes).</li>
-<li><strong>Variance by dataset</strong> has evidence tabs that follow the sidebar dataset (a per-timepoint subset shows its parent): <em>Design and model</em> (formulas, samples dropped, singular fits, differential expression contrasts); <em>Genes</em> (shares by expression quartile and variance rank, per-term distributions, the genes with the largest time effect); <em>Within-person change</em> (each person’s path over the first three expression PCs with the group mean per timepoint, so group-specific trajectories are visible; the share of each person’s change from their first sample that lies on one axis, and its correlation with the composition change); <em>Sample checks</em> (recorded vs inferred sex, PC1 against the neutrophil-lymphocyte score, how much of each sample-level trait is a person trait, trait correlations).</li>
+<li><strong>Variance by dataset</strong> has evidence tabs that follow the sidebar dataset (a per-timepoint subset shows its parent): <em>Design and model</em> (formulas, samples dropped, singular fits; what a <code>cell</code> is with the group x timepoint grid of samples; each term of the variance model with its category, share and meaning; the differential expression model and its contrasts; a link to the dataset’s entry in <a href="./datasets.html">Datasets</a> when its config’s <code>hf_collection</code> is the public collection); <em>Genes</em> (shares by expression quartile and variance rank, per-term distributions, the genes with the largest time effect); <em>Within-person change</em> (each person’s path over the first three expression PCs with the group mean per timepoint, so group-specific trajectories are visible; the share of each person’s change from their first sample that lies on one axis, and its correlation with the composition change); <em>Sample checks</em> (recorded vs inferred sex, PC1 against the neutrophil-lymphocyte score, how much of each sample-level trait is a person trait, trait correlations).</li>
 </ul>
 <p><strong>Missing data.</strong> A method not yet run, a table from an older schema or an absent artifact file is noted where it would appear and logged once to the console (<code>app/R/notes.R</code>); it never stops the app. The database is opened read-only; if that fails (a WAL-mode file on a read-only file system) it is opened as an immutable snapshot and the app must be restarted after the file is replaced.</p>
 </section>
@@ -410,7 +414,7 @@ Note
 </tr>
 <tr class="even">
 <td>Projection comparison</td>
-<td>for a target dataset: R² by method of every projection; sample-space alignment of two fits’ projected weights; gene-space alignment (Fit A’s loadings projected by least squares onto Fit B’s basis, as projectR does)</td>
+<td>for a target dataset: relative transfer R² by method of every projection; sample-space alignment of two fits’ projected weights; gene-space alignment (Fit A’s loadings projected by least squares onto Fit B’s basis, as projectR does)</td>
 <td><code>projections</code> and their artifacts, loadings</td>
 </tr>
 </tbody>

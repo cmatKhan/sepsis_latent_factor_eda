@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.10.19">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Datasets – Sepsis latent-factor stability</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<script src="site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap-55617497126496852ff9f5a59253c640.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="./index.html">
+    <span class="navbar-title">Sepsis latent-factor stability</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="./index.html"> 
+<span class="menu-text">Overview</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./setup.html"> 
+<span class="menu-text">Setup</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./data.html"> 
+<span class="menu-text">Data</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="./datasets.html" aria-current="page"> 
+<span class="menu-text">Datasets</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./methods.html"> 
+<span class="menu-text">Methods</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./workflow.html"> 
+<span class="menu-text">Running the workflow</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./database.html"> 
+<span class="menu-text">Database</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./app.html"> 
+<span class="menu-text">Launching the app</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./reference.html"> 
+<span class="menu-text">Function reference</span></a>
+  </li>  
+</ul>
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/cmatKhan/sepsis_latent_factor_eda"> <i class="bi bi-github" role="img" aria-label="GitHub">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#reading-the-models" id="toc-reading-the-models" class="nav-link active" data-scroll-target="#reading-the-models">Reading the models</a></li>
+  <li><a href="#anemones" id="toc-anemones" class="nav-link" data-scroll-target="#anemones">ANEMONES</a></li>
+  <li><a href="#corticus" id="toc-corticus" class="nav-link" data-scroll-target="#corticus">CORTICUS</a></li>
+  <li><a href="#earli" id="toc-earli" class="nav-link" data-scroll-target="#earli">EARLI</a></li>
+  <li><a href="#gse110487" id="toc-gse110487" class="nav-link" data-scroll-target="#gse110487">GSE110487</a></li>
+  <li><a href="#gse13904" id="toc-gse13904" class="nav-link" data-scroll-target="#gse13904">GSE13904</a></li>
+  <li><a href="#gse273700" id="toc-gse273700" class="nav-link" data-scroll-target="#gse273700">GSE273700</a></li>
+  <li><a href="#gse54514" id="toc-gse54514" class="nav-link" data-scroll-target="#gse54514">GSE54514</a></li>
+  <li><a href="#gse95233" id="toc-gse95233" class="nav-link" data-scroll-target="#gse95233">GSE95233</a></li>
+  <li><a href="#mars" id="toc-mars" class="nav-link" data-scroll-target="#mars">MARS</a></li>
+  <li><a href="#dilgom" id="toc-dilgom" class="nav-link" data-scroll-target="#dilgom">dilgom</a></li>
+  <li><a href="#hfgp-500fg" id="toc-hfgp-500fg" class="nav-link" data-scroll-target="#hfgp-500fg">hfgp-500fg</a></li>
+  <li><a href="#ship-trend" id="toc-ship-trend" class="nav-link" data-scroll-target="#ship-trend">SHIP-TREND</a></li>
+  <li><a href="#gains" id="toc-gains" class="nav-link" data-scroll-target="#gains">gains</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Datasets</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<p>One entry per dataset configured in <code>config/</code> (the public ones; the app links here from its Design and model tab, to the entry whose heading is the dataset id in lowercase). Each entry records what the dataset is, how it is modelled, and what to know before trusting it. The formulas and numbers come from the database (<code>dataset_design</code>, <code>variance_summary</code>); the reasons come from the config comments and the findings in <a href="./methods.html">Methods</a>. Per-timepoint subsets (for example <code>ANEMONES_DAY1</code>) have no design of their own: they use their parent’s, so they link to the parent’s entry.</p>
+<section id="reading-the-models" class="level2">
+<h2 class="anchored" data-anchor-id="reading-the-models">Reading the models</h2>
+<p>Every dataset with a <code>design:</code> block gets the same two models (<code>R/lib/design.R</code>, <code>R/targets/variance.R</code>).</p>
+<ul>
+<li><strong><code>cell</code>.</strong> One factor for group × timepoint (time alone, or group alone, when the dataset has only one of them). In the differential expression model the formula is <code>~0 + cell + ...</code>, so each coefficient is the mean expression of one cell and every question is a difference of cell means. This handles a group sampled at fewer timepoints than the others without special cases.</li>
+<li><strong>Variance model</strong> (variancePartition, ML). Asks how much of each gene’s variance each term explains; it tests nothing. Categorical variables are random effects, numeric covariates are fixed and standardized. <em>Between patients</em> is the patient term plus person-level variables (group, sex, age); <em>time</em> is time plus group × time; <em>residual</em> is change within a person that is not shared by time, plus noise. A variable with few levels gives a noisy variance estimate that is often exactly 0: read a 0 as “not distinguishable here”, not “no effect”.</li>
+<li><strong>Differential expression model</strong> (dream, REML). For a time course: each later timepoint against the first, within each group, plus a joint test per group, with a patient random intercept so that samples from one person are not treated as independent. A covariate that is constant within a person (sex) is absorbed by that term; it is not cancelled exactly when people contribute to different cells. Cross-sectional datasets compare groups pairwise.</li>
+<li><strong>Technical covariates</strong> (<code>vp_covariates</code>, or a control-probe <code>control_factor</code>) go into the variance model only.</li>
+</ul>
+<p>Shares quoted below are variance-weighted over the genes the factor methods see (about 8,000): between patients / time / residual.</p>
+</section>
+<section id="anemones" class="level2">
+<h2 class="anchored" data-anchor-id="anemones">ANEMONES</h2>
+<p>ANEMONES (GSE236713), array, 447 samples from 194 patients; subsets <code>ANEMONES_DAY1</code>, <code>_DAY2</code>, <code>_DAY5</code>, <code>_DISCHARGE</code>.</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Cells (samples / patients)</th>
+<th>Day 1</th>
+<th>Day 2</th>
+<th>Day 5</th>
+<th>Discharge</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Sepsis</td>
+<td>125 / 124</td>
+<td>93 / 93</td>
+<td>69 / 69</td>
+<td>37 / 37</td>
+</tr>
+<tr class="even">
+<td>SIRS</td>
+<td>39 / 38</td>
+<td>31 / 31</td>
+<td>15 / 15</td>
+<td>8 / 8</td>
+</tr>
+<tr class="odd">
+<td>Control</td>
+<td>30 / 30</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<p>The design is ragged: controls exist only at Day 1. A <code>disease * timepoint</code> model would contain interaction terms for Control at later days that have no data; the cell-means model has none and fits the same means where data exist. Control gets no time contrasts (one timepoint).</p>
+<ul>
+<li><strong>Variance model:</strong> <code>~(1|patient_id) + (1|timepoint) + (1|disease) + (1|disease:timepoint) + (1|sex) + control_factor</code>.</li>
+<li><strong>DE model:</strong> <code>~0 + cell + (1|patient_id) + control_factor</code>.</li>
+<li><strong><code>control_factor</code></strong> is the first principal component of the array’s positive control probes (96 ERCC, 10 Agilent E1A spike-ins and other controls; 72% of their variation). The deposited values have no between-sample normalization, and the sample-mean shift follows these controls (rho 0.92), not leukocyte composition. Shifting each sample by a control offset over-corrected (the controls move about twice as much as genes; sex agreement fell from 0.99 to 0.94), so the PC enters as a covariate instead.</li>
+<li><strong>Result:</strong> 34% between patients, 1.7% time, 31% residual, plus a technical share (the control factor). Time effects are real for individual genes (7,134 genes at FDR &lt; 5% for Sepsis, Discharge against Day 1) but small as a share of variance.</li>
+<li><strong>Quality:</strong> sex agreement 0.99; 4 subjects have discordant sex annotations and stay in.</li>
+</ul>
+</section>
+<section id="corticus" class="level2">
+<h2 class="anchored" data-anchor-id="corticus">CORTICUS</h2>
+<p>CORTICUS (GSE106878), array, 94 samples from 47 patients, each sampled at <code>Pre</code> and <code>Post(24h)</code>; subsets <code>CORTICUS_PRE</code>, <code>CORTICUS_POST24H</code>. No group.</p>
+<ul>
+<li><strong>Variance model:</strong> patient, timepoint, sex (random), age (fixed). <strong>DE:</strong> <code>~0 + cell + (1|patient_id)</code>, one contrast (Post against Pre).</li>
+<li><code>time_order</code> is required because <code>Post(24h)</code> sorts before <code>Pre</code>. Treatment, responder and 28-day survival are left out of the models because they can mediate the time effect.</li>
+<li>The array has no control probes; probes the annotation marks as matching no transcript stand in as a technical reference for the composition check.</li>
+<li><strong>Result:</strong> 56% between patients, 3.5% time, 40% residual. PC1 tracks the neutrophil-lymphocyte score (rho -0.60).</li>
+</ul>
+</section>
+<section id="earli" class="level2">
+<h2 class="anchored" data-anchor-id="earli">EARLI</h2>
+<p>EARLI, RNA-seq, 189 samples, cross-sectional (one per person). Groups: <code>lca_label</code> (Hyper- or Hypo-inflammatory subphenotype); covariates sex and age.</p>
+<ul>
+<li>No subject or time, so there is no between-patient term: the variance model is group, sex, age and residual, and the DE model compares the two subphenotypes.</li>
+<li><strong>Result:</strong> 94% residual. The subphenotype carries about 5% of the variance.</li>
+</ul>
+</section>
+<section id="gse110487" class="level2">
+<h2 class="anchored" data-anchor-id="gse110487">GSE110487</h2>
+<p>GSE110487, RNA-seq, 62 samples from 31 patients at <code>T1</code> and <code>T2</code>; subsets <code>GSE110487_T1</code>, <code>GSE110487_T2</code>. No group or covariates (the only other column, response to treatment, is left out).</p>
+<ul>
+<li><strong>Result:</strong> 43% between patients, 1.2% time, 56% residual. PC1 is strongly the neutrophil-lymphocyte axis (rho -0.83), and that score is 61% patient-level: leukocyte composition is largely a stable person trait here.</li>
+</ul>
+</section>
+<section id="gse13904" class="level2">
+<h2 class="anchored" data-anchor-id="gse13904">GSE13904</h2>
+<p>GSE13904, array, 227 samples from 186 patients at <code>day1</code> and <code>day3</code>; 41 patients have both, 145 only one. Subsets <code>GSE13904_DAY1</code>, <code>GSE13904_DAY3</code>.</p>
+<ul>
+<li><strong>Group:</strong> <code>clinical_status</code>, taken at each subject’s <strong>first</strong> timepoint (<code>group_at_first_time</code>), because a patient’s status changes within person for 17 of the 41 sampled twice (for example Septic Shock to SIRS resolved).</li>
+<li>No sex or age columns. Affymetrix hybridization spike-ins serve as the technical reference.</li>
+<li><strong>Result:</strong> 59% between patients, 1.8% time, 39% residual. 98% of the per-gene fits are singular (a variance component estimated at exactly 0), and 145 of the 186 patients have a single sample, so per-gene shares are noisier here than in datasets where everyone is sampled twice.</li>
+</ul>
+</section>
+<section id="gse273700" class="level2">
+<h2 class="anchored" data-anchor-id="gse273700">GSE273700</h2>
+<p>GSE273700, RNA-seq, 104 samples from 52 patients, each at <code>Day1</code> and <code>Day8</code>; subsets <code>GSE273700_DAY1</code>, <code>GSE273700_DAY8</code>. No group or covariates.</p>
+<ul>
+<li><strong>Result:</strong> 39% between patients, 2% time, 59% residual. PC1 is the neutrophil-lymphocyte axis (|rho| 0.90).</li>
+</ul>
+</section>
+<section id="gse54514" class="level2">
+<h2 class="anchored" data-anchor-id="gse54514">GSE54514</h2>
+<p>GSE54514, array, 163 samples; timepoint <code>day</code> 1-5 (modelled as categorical), person id <code>group_id</code> (for example <code>HC_1</code>); group <code>disease_status</code> (healthy, sepsis survivor, sepsis nonsurvivor); covariates sex and age. Healthy controls are sampled at day 1 and day 5 only; patients across the range. Subsets <code>GSE54514_DAY1</code> to <code>_DAY5</code>.</p>
+<ul>
+<li><strong>Data quality: this dataset’s sample annotations do not match its arrays.</strong> Sex inferred from chrY and XIST genes agrees with the recorded sex for only 50% of samples, and samples of one <code>group_id</code> disagree on sex in 35 of 54 subjects. It stays in the pipeline and the app, flagged, but its subject and time results are not interpretable as person-level results.</li>
+<li><strong>Result:</strong> 7% between patients, 10% time, 83% residual: the near-absence of a stable between-patient share is consistent with the “subjects” not being real individuals.</li>
+</ul>
+</section>
+<section id="gse95233" class="level2">
+<h2 class="anchored" data-anchor-id="gse95233">GSE95233</h2>
+<p>GSE95233, array, 102 samples from 51 patients at <code>D01</code>, <code>D02</code>, <code>D03</code> (22 healthy-control samples with a missing timepoint are dropped). Covariates sex and age; the recorded sex <code>H</code> (homme) is recoded to <code>M</code> (all four samples show the male XIST/chrY pattern). Subsets <code>GSE95233_D01</code>, <code>_D02</code>, <code>_D03</code>.</p>
+<ul>
+<li><strong>Result:</strong> 38% between patients, 4.2% time (the largest time share among the well-formed designs), 58% residual. Sex agreement 0.98 (one patient discordant).</li>
+</ul>
+</section>
+<section id="mars" class="level2">
+<h2 class="anchored" data-anchor-id="mars">MARS</h2>
+<p>MARS (GSE65682), array, 802 samples, cross-sectional. Group <code>healthy_control</code> (42 healthy against 760 patients); covariates sex and age. There is no subject or time column (the title identifiers are not repeated measures). No between-patient term; 75% residual.</p>
+</section>
+<section id="dilgom" class="level2">
+<h2 class="anchored" data-anchor-id="dilgom">dilgom</h2>
+<p>dilgom (E-TABM-1036), array, 518 samples, a healthy reference cohort, cross-sectional. Group <code>age_band</code> (five levels); covariate sex; one DE contrast (65-74 against 25-34). 97% residual.</p>
+</section>
+<section id="hfgp-500fg" class="level2">
+<h2 class="anchored" data-anchor-id="hfgp-500fg">hfgp-500fg</h2>
+<p>hfgp-500fg (GSE134080), RNA-seq, 100 samples, a healthy reference cohort, cross-sectional. Group sex, covariate age. It is a positive control: the top sex-differential genes should be on chromosome Y. Sex agreement 1.0. Whether a healthy cohort belongs in a sepsis analysis is an open scope question recorded in its config.</p>
+</section>
+<section id="ship-trend" class="level2">
+<h2 class="anchored" data-anchor-id="ship-trend">SHIP-TREND</h2>
+<p>SHIP-TREND (GSE36382), array, 991 healthy samples. Its phenotype data is access restricted, so there is no sample metadata: it gets factor fits but no design, variance or composition analysis. It is the largest dataset (8,000 genes × 991 samples) and sizes the controllers’ memory.</p>
+</section>
+<section id="gains" class="level2">
+<h2 class="anchored" data-anchor-id="gains">gains</h2>
+<p>gains: four pooled ArrayExpress accessions (E-MTAB-4421, 4451, 5273, 5274), array, no timepoint. <strong>Not in the pipeline</strong>: its preprocessing script is a stub until it is decided whether to pool the four accessions.</p>
+
+
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/cmatkhan\.github\.io\/sepsis_latent_factor_eda\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
