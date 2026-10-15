@@ -183,7 +183,7 @@ Rules:
 - **gains:** its preprocessing script is a stub; pooling the four accessions
   (E-MTAB-4421/4451/5273/5274) needs the user's decision. Adding it reruns every projection
   (a new projectR target dataset).
-- **Full re-run** pending (schema 2, new sPCA grid, subject bootstrap, MARS/SHIP-TREND/ROSE
-  subsets); afterwards tune the controllers from it (sPCA on the new grid, every method on
-  SHIP-TREND and MARS, `vp` from the cgroup records).
+- **Full re-run done** (2026-10-14/15): 35 datasets, 7,520 fits, schema 3, one-to-one Ensembl
+  maps. Remaining resource changes, the spack/path cleanup and parallel per-dataset DB writes
+  are in `TODO.md`.
 - Nothing from the targets rewrite is committed yet.
