@@ -63,7 +63,7 @@ for a name):
 | repeated measures (datasets with a `design:` block; `R/targets/variance.R`) | `design_<key>`, `expr_<key>`, `norm_<key>`, `vp_<key>`, `dream_<key>`, `de_tables_<key>` (every contrast's table; the only reader of the dream fit), `dupcor_<key>` (time courses), `controls_<key>` (arrays with `control_probes`), `control_factor_<key>` (with `control_probes: {covariate: true}`), `composition_<key>`, `vp_explore_<key>`, `vp_summary_<key>`, `vp_qc_<key>` (plots and tables in `results/variance/<dataset>/`), `variance_files_<key>` |
 | WGCNA | `wgcna_ora_jobs_`/`wgcna_ora_<key>`, `wgcna_fit_jobs_`/`wgcna_fit_diag_<key>`, `wgcna_dataset_diag_<key>` |
 | per dataset | `metadata_files_<key>`, `matrix_file_<key>`, `matrix_diagnostics_<key>`, `ensembl_map_<key>`, `enrichment_<key>`, `factor_gene_files_<key>`, `drivers_<key>`, `db_<key>` |
-| across datasets | `projectr_jobs_<key>`/`projectr_<key>`, `gene_space_<key>`, `db_cross_dataset`, `variance_explore`, plus `msigdb_pathways`, `db_schema`, `ensembl_maps`, `matrix_files`, `dataset_families`, `composition_markers` |
+| across datasets | `projectr_jobs_<key>`/`projectr_<key>`, `projection_scores_<key>`, `gene_space_<key>`, `db_cross_dataset`, `variance_explore`, plus `msigdb_pathways`, `db_schema`, `ensembl_maps`, `matrix_files`, `dataset_families`, `composition_markers` |
 
 ## What reruns when
 

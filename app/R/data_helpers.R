@@ -356,7 +356,7 @@ projection_targets <- function(con, dataset_id) {
 #' method/rank/seed and whether it is the representative fit.
 projections_for_pair <- function(con, dataset_id, target) {
   DBI::dbGetQuery(con,
-    "SELECT p.source_fit_id, f.method, f.rank, f.seed, f.representative, p.projection_type, p.mean_r_squared, p.path
+    "SELECT p.source_fit_id, f.method, f.rank, f.seed, f.representative, p.projection_type, p.relative_r2, p.path
      FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id
      WHERE f.dataset_id = ? AND p.target_dataset_id = ?", params = list(dataset_id, target))
 }

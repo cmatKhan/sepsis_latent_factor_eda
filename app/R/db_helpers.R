@@ -195,20 +195,20 @@ optimal_fits <- function(curves, rule = "stable", threshold = 0.9) {
   out[order(match(out$method, METHOD_ORDER)), ]
 }
 
-#' Median out-of-sample R2 (projectR) of each method's optimal fit-family
-#' sources, split by within-/cross-dataset targets. Medians are over every
+#' Median out-of-sample score (relative transfer R2, see projection_scores()) of each
+#' method's fits, split by within-/cross-dataset targets. Medians are over every
 #' projection whose source fit belongs to this dataset and method.
 oos_r2_by_method <- function(con, dataset_id) {
   d <- DBI::dbGetQuery(con,
-    "SELECT f.method, p.projection_type, p.mean_r_squared
+    "SELECT f.method, p.projection_type, p.relative_r2
      FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id
      WHERE f.dataset_id = ?", params = list(dataset_id))
   if (nrow(d) == 0) return(data.frame(method = character(0), oos_r2_within = numeric(0), oos_r2_cross = numeric(0)))
-  agg <- aggregate(mean_r_squared ~ method + projection_type, d, median)
+  agg <- aggregate(relative_r2 ~ method + projection_type, d, median)
   methods <- unique(agg$method)
   pick <- function(type) {
     a <- agg[agg$projection_type == type, ]
-    a$mean_r_squared[match(methods, a$method)]
+    a$relative_r2[match(methods, a$method)]
   }
   data.frame(method = methods, oos_r2_within = pick("within_dataset"), oos_r2_cross = pick("cross_dataset"))
 }
@@ -216,8 +216,8 @@ oos_r2_by_method <- function(con, dataset_id) {
 ## ---- Q4: cross-dataset similarity ----------------------------------------------
 
 #' Long dataset x dataset similarity for one method.
-#'   "r2":         median projectR out-of-sample R2 of source-dataset fits on
-#'                 the target dataset's samples.
+#'   "r2":         median relative transfer R2 (projection_scores()) of source-dataset
+#'                 fits on the target dataset's samples.
 #'   "gene_space": mean |diagonal| of the loadings similarity between the two
 #'                 datasets' representative fits, on shared genes.
 #' Columns: source, target, value, n (projections or matched genes).
@@ -225,9 +225,9 @@ cross_dataset_similarity <- function(con, method, kind = c("r2", "gene_space")) 
   kind <- match.arg(kind)
   if (kind == "r2") {
     d <- DBI::dbGetQuery(con,
-      "SELECT f.dataset_id AS source, p.target_dataset_id AS target, p.mean_r_squared AS value
+      "SELECT f.dataset_id AS source, p.target_dataset_id AS target, p.relative_r2 AS value
        FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id
-       WHERE f.method = ? AND p.mean_r_squared IS NOT NULL", params = list(method))
+       WHERE f.method = ? AND p.relative_r2 IS NOT NULL", params = list(method))
     if (nrow(d) == 0) return(data.frame(source = character(0), target = character(0), value = numeric(0), n = integer(0)))
     agg <- aggregate(value ~ source + target, d, median)
     agg$n <- as.integer(aggregate(value ~ source + target, d, length)$value)

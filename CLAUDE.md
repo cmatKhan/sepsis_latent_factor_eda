@@ -103,6 +103,10 @@ Rules:
   (about an hour).
 - Schema 2 (2026-10-13): repeated-measures tables, enrichment gene lists and pattern markers as
   artifacts. The earlier (schema 1) results are on the user's local machine, not the cluster.
+- Schema 3 (2026-10-14): `projections` gains centred scores (`transfer_r2`, `native_r2`,
+  `relative_r2`, `null_r2`, `n_components`; `projection_scores()`, `projection_scores_<dataset>`
+  targets). projectR's own R² (inflated by the mean profile) is no longer stored; the app reads
+  `relative_r2`.
 
 ## targets lessons from the rewrite
 

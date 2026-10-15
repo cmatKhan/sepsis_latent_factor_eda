@@ -122,10 +122,73 @@ projection_row <- function(job, source_id, ensembl_maps, source_matrix_file, db_
     source_fit_key = job$source_fit_key, target_dataset_id = job$target_dataset_id,
     projection_type = job$projection_type, include_intercept = as.integer(isTRUE(job$include_intercept)),
     n_genes_matched = x$n_genes_matched, n_samples = ncol(res$projection),
-    mean_r_squared = summ(res$r_squared, mean), median_r_squared = summ(res$r_squared, stats::median),
     mean_pval = summ(res$pval, mean), median_pval = summ(res$pval, stats::median),
     mean_pvar = summ(res$pvar, mean), median_pvar = summ(res$pvar, stats::median),
     path = artifact_rel(source_id, fname))
+}
+
+#' Centred transfer scores for one source dataset's projections
+#'
+#' projectR's R^2 is taken against the raw expression, so the mean expression
+#' profile alone scores about 0.93 (and a cross-family projection fits an
+#' intercept that absorbs it). This score removes that: the target is centred by
+#' its gene means and its per-sample offsets, each loading column is centred, no
+#' intercept is fitted, and the R^2 is pooled over the target. It is reported
+#' beside the best any basis of the same size could do on that target (its own
+#' top principal components, `native_r2`), as `relative_r2 = transfer_r2 /
+#' native_r2`, and beside the same fit with the loadings' genes shuffled
+#' (`null_r2`, near 0). Every loadings column is used (PCA: its maximum rank).
+#' Reads the loadings and matrix files of the job table, so it does not depend on
+#' the projectR results.
+#'
+#' @param jobs The source dataset's whole `projectr_jobs_<dataset>` table.
+#' @param source_id Source dataset id.
+#' @param ensembl_maps Every dataset's Ensembl map.
+#' @param min_genes Projections with fewer matched genes get no score.
+#' @return Data frame (source_fit_key, target_dataset_id, n_components,
+#'   transfer_r2, native_r2, relative_r2, null_r2), or `NULL` for a placeholder.
+projection_scores <- function(jobs, source_id, ensembl_maps, min_genes = 50) {
+  jobs <- jobs[vapply(jobs$source_fit_key, has_job, logical(1)), , drop = FALSE]
+  if (nrow(jobs) == 0) return(NULL)
+  ridge_fit <- function(D, X) {
+    G <- crossprod(D)
+    solve(G + diag(1e-8 * mean(diag(G)), ncol(D)), crossprod(D, X))
+  }
+  double_center <- function(X) {
+    Xc <- X - rowMeans(X)
+    sweep(Xc, 2, colMeans(Xc))
+  }
+  rows <- list()
+  loadings <- list()
+  for (f in unique(jobs$loadings_file)) {
+    loadings[[f]] <- remap_to_ensembl(as.matrix(readRDS(f)), ensembl_maps[[source_id]])
+  }
+  for (target_id in unique(jobs$target_dataset_id)) {
+    tj <- jobs[jobs$target_dataset_id == target_id, , drop = FALSE]
+    target <- remap_to_ensembl(as.matrix(readRDS(tj$target_matrix_file[1])), ensembl_maps[[target_id]])
+    native <- list()
+    for (i in seq_len(nrow(tj))) {
+      L <- loadings[[tj$loadings_file[i]]]
+      genes <- intersect(rownames(L), rownames(target))
+      if (length(genes) < min_genes) next
+      id <- rlang::hash(genes)
+      X <- double_center(target[genes, , drop = FALSE])
+      if (is.null(native[[id]])) {
+        ev <- eigen(if (ncol(X) <= nrow(X)) crossprod(X) else tcrossprod(X), symmetric = TRUE, only.values = TRUE)$values
+        native[[id]] <- cumsum(pmax(ev, 0)) / sum(pmax(ev, 0))
+      }
+      K <- min(ncol(L), length(native[[id]]))
+      L <- sweep(L[genes, seq_len(K), drop = FALSE], 2, colMeans(L[genes, seq_len(K), drop = FALSE]))
+      score <- function(Lc) 1 - sum((X - Lc %*% ridge_fit(Lc, X))^2) / sum(X^2)
+      set.seed(1000L + i)
+      transfer <- score(L)
+      rows[[length(rows) + 1]] <- data.frame(
+        source_fit_key = tj$source_fit_key[i], target_dataset_id = target_id, n_components = K,
+        transfer_r2 = transfer, native_r2 = native[[id]][K], relative_r2 = transfer / native[[id]][K],
+        null_r2 = score(L[sample(nrow(L)), , drop = FALSE]))
+    }
+  }
+  do.call(rbind, rows)
 }
 
 #' A method's "optimal" fit for gene-space comparison

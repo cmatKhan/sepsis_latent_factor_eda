@@ -355,14 +355,23 @@ VARIANCE_DATASET_TABLES <- c("dataset_design", "samples", "variance_summary", "v
 #' @param gene_space List of gene_space_rows() data frames.
 #' @param variance_explore combine_variance_explore() output, or `NULL` (its
 #'   `time_gene_recurrence` replaces that table).
+#' @param projection_scores List of projection_scores() data frames, joined to
+#'   the projections by source fit and target dataset.
 #' @return `list(n_projections, n_gene_space, orphans_removed, written_at)`.
 write_cross_dataset_db <- function(db_path, written, projections = list(), gene_space = list(),
-                                   variance_explore = NULL) {
+                                   variance_explore = NULL, projection_scores = list()) {
   con <- open_stability_db(db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
   fit_ids <- with(DBI::dbGetQuery(con, "SELECT fit_id, fit_key FROM fits"), stats::setNames(fit_id, fit_key))
   pr <- do.call(rbind, Filter(Negate(is.null), projections))
   gs <- do.call(rbind, Filter(Negate(is.null), gene_space))
+  sc <- do.call(rbind, Filter(Negate(is.null), projection_scores))
+  if (!is.null(pr) && nrow(pr)) {
+    score_cols <- c("n_components", "transfer_r2", "native_r2", "relative_r2", "null_r2")
+    hit <- if (is.null(sc)) NA_integer_ else match(paste(pr$source_fit_key, pr$target_dataset_id),
+                                                  paste(sc$source_fit_key, sc$target_dataset_id))
+    for (col in score_cols) pr[[col]] <- if (is.null(sc)) NA else sc[[col]][hit]
+  }
   with_transaction(con, {
     DBI::dbExecute(con, "DELETE FROM projections")
     DBI::dbExecute(con, "DELETE FROM gene_space_agreement")
