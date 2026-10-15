@@ -136,8 +136,16 @@ Each dataset's matrix keeps its platform's own feature ids (Illumina/Affymetrix 
 Entrez ids, versioned Ensembl ids). Anything that compares datasets or gene sets -- enrichment
 and projectR -- first remaps row names to **version-stripped Ensembl gene ids**
 (`ENSG00000001234.2` → `ENSG00000001234`) with `build_ensembl_map()`/`remap_to_ensembl()`
-(`R/lib/ingest/symbol_mapping.R`), using `dataset.ensembl_col`. Several probes mapping to one
-gene are collapsed; a `;`-separated multi-gene entry takes its first gene.
+(`R/lib/ingest/symbol_mapping.R`), using `dataset.ensembl_col`; a `;`-separated multi-gene
+entry takes its first gene. The map (`ensembl_map_<dataset>`) is built once per dataset from
+its feature metadata and its matrix, and is one-to-one: where several of the matrix's probes map
+to one gene, only the one with the highest mean expression across the dataset's samples is
+kept. A gene is then the same probe in the matrix, in every fit's loadings and in every gene
+list, and converting is a rename. (Before 2026-10-15 duplicates were collapsed separately in
+each matrix, taking each column's largest |value|, which could mix probes across samples and
+across factors; 684 of the 35 matrices' 257,544 rows were in such groups, mostly ANEMONES and
+GSE95233.) ANEMONES maps poorly: only about 4,200 of its 8,000 rows have an Ensembl id, so the
+rest take no part in cross-dataset comparisons.
 
 Gene **symbols** (`build_symbol_map()`, `dataset.symbol_col`) are for display only, never for
 matching: symbols are ambiguous and renamed across annotation releases.

@@ -81,6 +81,9 @@ projectr_jobs <- function(source_id, parts, matrix_files, families, db_path) {
 
 #' Run one group of projections (one `projectr_<dataset>` branch)
 #'
+#' Every row has the same target dataset, so its matrix is read and converted
+#' to Ensembl ids once for all of the source's fits.
+#'
 #' @param jobs The group's job rows.
 #' @param source_id Source dataset id.
 #' @param ensembl_maps Every dataset's Ensembl map.
@@ -88,8 +91,13 @@ projectr_jobs <- function(source_id, parts, matrix_files, families, db_path) {
 #' @param db_path Path to the DB.
 #' @return `projections` rows (projection_row()), or `NULL`.
 projection_rows <- function(jobs, source_id, ensembl_maps, source_matrix_file, db_path) {
+  jobs <- jobs[vapply(jobs$source_fit_key, has_job, logical(1)), , drop = FALSE]
+  if (nrow(jobs) == 0) return(NULL)
+  target_id <- jobs$target_dataset_id[1]
+  target_ens <- remap_to_ensembl(as.matrix(readRDS(jobs$target_matrix_file[1])), ensembl_maps[[target_id]])
   rows <- lapply(seq_len(nrow(jobs)), function(i) {
-    projection_row(jobs[i, , drop = FALSE], source_id, ensembl_maps, source_matrix_file, db_path)
+    projection_row(jobs[i, , drop = FALSE], source_id, target_ens, ensembl_maps[[source_id]],
+                   source_matrix_file, db_path)
   })
   do.call(rbind, rows)
 }
@@ -100,18 +108,16 @@ projection_rows <- function(jobs, source_id, ensembl_maps, source_matrix_file, d
 #'
 #' @param job One job row.
 #' @param source_id Source dataset id.
-#' @param ensembl_maps Every dataset's Ensembl map.
+#' @param target_ens The target dataset's matrix, rows Ensembl ids.
+#' @param source_ensembl_map The source dataset's Ensembl map.
 #' @param source_matrix_file The source dataset's matrix path.
 #' @param db_path Path to the DB.
 #' @return One `projections` row keyed by source fit_key, or `NULL` for a
-#'   placeholder or a failed projection.
-projection_row <- function(job, source_id, ensembl_maps, source_matrix_file, db_path) {
-  if (!has_job(job$source_fit_key)) return(NULL)
+#'   failed projection.
+projection_row <- function(job, source_id, target_ens, source_ensembl_map, source_matrix_file, db_path) {
   x <- run_projectr_job(job$source_fit_key, job$source_method, source_id, job$loadings_file,
-                        job$target_dataset_id, job$target_matrix_file,
-                        job$projection_type, job$include_intercept,
-                        ensembl_maps[[source_id]], ensembl_maps[[job$target_dataset_id]],
-                        source_mat_file = source_matrix_file,
+                        job$target_dataset_id, target_ens, job$projection_type, job$include_intercept,
+                        source_ensembl_map, source_mat_file = source_matrix_file,
                         source_scores_file = if (is.na(job$scores_file)) NULL else job$scores_file)
   if (is.null(x$result) || is.null(x$result$projection)) return(NULL)
   res <- x$result

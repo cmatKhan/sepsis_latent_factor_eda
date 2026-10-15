@@ -179,9 +179,9 @@ is about two 8-hour stages (scan, then refine) for the slowest dataset, not the 
 
 | Step | Time | Memory | Notes |
 |---|---|---|---|
-| `fgsea_` (enrichment, per representative fit) | branch median 2 min, max 16 min; per dataset and method up to 84 min | 2.6-3.9 GB, flat in dataset size | ~2.5 of the 8 requested cores used |
+| `fgsea_` (enrichment, per representative fit) | until 2026-10-15 (8 cores): branch median 2 min, max 16 min. Of one fit's serial time, `collapsePathways()` (the `is_main_pathway` flag) is ~54% and `fgsea()` ~45%, GO:BP alone ~56%; ORA ~1%. Since 2026-10-15 every GSEA call runs in one parallel round and every ORA call in a second, one task per call, largest collections first (`run_fgsea_job()`): ~2× faster on 3 cores | 2.6-3.9 GB, flat in dataset size | was ~2.5 of 8 cores (four sequential rounds, fixed chunks); now requested 3 |
 | `wgcna_ora_` | ~0.1-3 min | 0.3-3.7 GB | |
-| `projectr_` (per source × target dataset) | branch median 2 min, p95 18 min, max 112 min; 193 CPU-h in total | 1.2-2.1 GB | scales with the number of target datasets (35² pairs) more than size |
+| `projectr_` (per source × target dataset) | until 2026-10-15: branch median 2 min, max 112 min, 193 CPU-h in total, almost all of it converting the target matrix's gene ids once per fit (150 s each onto MARS; projectR itself 0.4 s). Now the target is converted once per branch with a one-to-one map: expect seconds per branch | 1.2-2.1 GB | was fits × target samples; now dominated by reading the target matrix |
 | `projection_scores_` | ~12 min per source dataset | | |
 | `drivers_` (pattern drivers) | median 3 min, up to 65 min | within the `ingest` request | |
 | `ingest_`, `pairs_`, `redundancy_`, `factor_vp_` | seconds to 2 min | ≤ 2.3 GB | |

@@ -148,15 +148,18 @@ controllers:
       crashes_max: 2
   fgsea:
     # Enrichment per representative fit (R/ingest_jobs/fgsea_job.R) and
-    # module ORA per WGCNA fit; BiocParallel uses cpus_per_task. Not yet
-    # tuned under targets.
-    memory_gigabytes_required: 32
-    cpus_per_task: 8
+    # module ORA per WGCNA fit; BiocParallel uses cpus_per_task (passed into
+    # the fgsea commands, so changing it reruns every fgsea_ target).
+    # 2026-10-14/15 full runs, 8 CPUs / 32 GB: peak 3.9 GB whatever the
+    # dataset size, ~2.5 cores used (a fit has too few factor x source items
+    # to keep 8 workers busy); branch median 2 min, max 16 min.
+    memory_gigabytes_required: 6
+    cpus_per_task: 3
     time_minutes: 720
     tasks_max: 1
     crashes_max: 1
     backup:
-      memory_gigabytes_required: 64
+      memory_gigabytes_required: 12
       crashes_max: 2
   projectr:
     # One branch per (source dataset, target dataset): every representative

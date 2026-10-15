@@ -3,9 +3,10 @@
 #     ids, the identifier for all cross-dataset computation (enrichment,
 #     projectR). Symbols are ambiguous and renamed across annotation
 #     releases; Ensembl ids aren't.
-#   - build_symbol_map() / remap_to_symbol(): gene symbols, for display only.
-# Maps are built once per dataset (the ensembl_map_<dataset> target) from
-# its feature metadata.
+#   - build_symbol_map(): gene symbols, for display only.
+# The Ensembl map is built once per dataset (the ensembl_map_<dataset>
+# target) from its feature metadata and its matrix, and is one-to-one: each
+# gene is one feature of that dataset, so converting is a rename.
 
 #' Strip an Ensembl id's version suffix
 #'
@@ -14,19 +15,24 @@
 #' @return `x` without version suffixes.
 strip_ensembl_version <- function(x) sub("\\.[0-9]+$", "", x)
 
-#' A dataset's feature id -> Ensembl gene id map
+#' A dataset's feature id -> Ensembl gene id map, one feature per gene
 #'
 #' Reads `dataset.ensembl_col` (default `"ensembl"`) from the feature
 #' metadata. A `;`-separated multi-gene entry (one probe, several genes) maps to
 #' its first gene -- a simple, transparent choice; expanding one probe across
-#' every listed gene is the alternative.
+#' every listed gene is the alternative. The map is restricted to the rows of
+#' `mat`, and where several of them map to one gene only the one with the
+#' highest mean expression is kept (ties: the first in `mat`), so a gene is
+#' the same feature in the matrix, in every fit's loadings and in every gene
+#' list.
 #'
 #' @param dataset_yaml A resolved dataset config.
+#' @param mat The dataset's feature x sample matrix.
 #' @param fm Optional already-loaded feature-metadata data frame.
-#' @return Named character vector (names = feature ids), or `NULL` when the
-#'   dataset has no such column or feature metadata -- its row names are then
-#'   used as they are.
-build_ensembl_map <- function(dataset_yaml, fm = NULL) {
+#' @return Named character vector (names = feature ids, in `mat`'s order), or
+#'   `NULL` when the dataset has no such column or feature metadata -- its row
+#'   names are then used as they are.
+build_ensembl_map <- function(dataset_yaml, mat, fm = NULL) {
   ds <- dataset_yaml$dataset
   if (is.null(fm)) {
     if (is.null(ds$feature_metadata_path) || !file.exists(ds$feature_metadata_path)) return(NULL)
@@ -43,7 +49,12 @@ build_ensembl_map <- function(dataset_yaml, fm = NULL) {
   }, character(1))
 
   map <- setNames(strip_ensembl_version(first_id), as.character(fm[[id_col]]))
-  map[!is.na(map) & nzchar(map)]
+  map <- map[!is.na(map) & nzchar(map)]
+  feats <- intersect(rownames(mat), names(map))
+  ens <- map[feats]
+  ord <- order(ens, -rowMeans(mat[feats, , drop = FALSE]), seq_along(feats))
+  keep <- feats[ord][!duplicated(ens[ord])]
+  map[keep[order(match(keep, rownames(mat)))]]
 }
 
 #' A dataset's feature id -> gene symbol map (display only)
@@ -78,36 +89,27 @@ build_symbol_map <- function(dataset_yaml, fm = NULL) {
   map[!is.na(map) & nzchar(map)]
 }
 
-#' Remap a matrix's row names through an id map
-#'
-#' Several rows mapping to one id are collapsed, keeping the row with the
-#' largest |value| per column.
-#'
-#' @param mat Feature x sample (or feature x factor) matrix.
-#' @param id_map Named character vector (names = current row names).
-#' @return The remapped matrix; `mat` unchanged when `id_map` is empty or
-#'   matches nothing.
-.remap_ids <- function(mat, id_map) {
-  if (is.null(id_map) || length(id_map) == 0) return(mat)
-  ids <- id_map[rownames(mat)]
-  keep <- !is.na(ids) & nzchar(ids)
-  if (sum(keep) == 0) return(mat)
-  m <- mat[keep, , drop = FALSE]
-  ids <- ids[keep]
-  collapsed <- apply(m, 2, function(col) tapply(col, ids, function(x) x[which.max(abs(x))]))
-  as.matrix(collapsed)
-}
-
 #' Remap row names to Ensembl gene ids
 #'
-#' @param mat Matrix with platform-native row names.
-#' @param ensembl_map build_ensembl_map() output.
-#' @return The matrix with Ensembl gene id row names (see .remap_ids()).
-remap_to_ensembl <- function(mat, ensembl_map) .remap_ids(mat, ensembl_map)
-
-#' Remap row names to gene symbols (display only)
+#' Rows without an Ensembl id are dropped; the rest are renamed and sorted by
+#' id. The map must be one-to-one (build_ensembl_map()), so no rows are
+#' merged.
 #'
-#' @param mat Matrix with platform-native row names.
-#' @param symbol_map build_symbol_map() output.
-#' @return The matrix with gene-symbol row names (see .remap_ids()).
-remap_to_symbol <- function(mat, symbol_map) .remap_ids(mat, symbol_map)
+#' @param mat Matrix with platform-native row names (features x samples, or
+#'   features x factors).
+#' @param ensembl_map build_ensembl_map() output.
+#' @return The matrix with Ensembl gene id row names; `mat` unchanged when the
+#'   map is empty or matches nothing.
+remap_to_ensembl <- function(mat, ensembl_map) {
+  if (length(ensembl_map) == 0) return(mat)
+  ids <- ensembl_map[rownames(mat)]
+  keep <- !is.na(ids)
+  if (!any(keep)) return(mat)
+  if (anyDuplicated(ids[keep])) {
+    stop("remap_to_ensembl(): the map sends several rows to one gene; build it with ",
+         "build_ensembl_map() from this dataset's matrix", call. = FALSE)
+  }
+  out <- mat[keep, , drop = FALSE]
+  rownames(out) <- ids[keep]
+  out[order(rownames(out)), , drop = FALSE]
+}

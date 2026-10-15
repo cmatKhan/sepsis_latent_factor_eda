@@ -46,7 +46,6 @@
 
    | Controller | Now | Observed peak | Change to | What changing it reruns |
    |---|---|---|---|---|
-   | `fgsea` | 32 GB, 8 CPUs | 3.9 GB; ~2.5 cores used (31% of 8) | 6 GB, 3 CPUs | memory: nothing. CPUs: every `fgsea_` target and what follows (enrichment, `db_`), because `cpus_per_task` is passed into the fgsea commands (`fgsea_cpus`, `R/targets/factories.R`); no fits |
    | `cogaps` | 18 GB | 10.3 GB | 14 GB | nothing (do **not** change `cpus_per_task`: it is CoGAPS's nSets and changes the grid, refitting CoGAPS) |
    | `wgcna` | 6 GB | 2.8 GB (bounded: the gene × gene matrices at the 8,000-gene cap) | 4 GB | nothing |
    | `ingest` | 8 GB | 2.3 GB | 3 GB | nothing |
@@ -58,6 +57,48 @@
 
    Memory, `time_minutes` and `workers` are not hashed by targets; `batch_size` and
    `cpus_per_task` are (they reach the grids and some commands), so leave those alone unless
-   the rerun is intended. Run `targets::tar_outdated()` after the edit and confirm only what the
-   table says (nothing, or the fgsea chain) is outdated. Update the measurement comments in
+   the rerun is intended. Run `targets::tar_outdated()` after the edit and confirm nothing is
+   outdated. (fgsea was already changed to 6 GB / 3 CPUs on 2026-10-15.) Update the measurement comments in
    `pipeline.yml` (several still quote EARLI-only numbers from 2026-10-02/04) at the same time.
+
+3. **Write each dataset's DB rows to its own file, in parallel, and merge them at the end.**
+   The DB writes are now the slowest part of a rebuild. On 2026-10-15 the 35 `db_<dataset>`
+   writes took about 75 min in total: 45 s to 4.5 min each (RNA-seq datasets, with five methods,
+   take longest), one at a time, because every write is one transaction on the same 2.3 GB
+   SQLite file over the network filesystem. They also run in the main process
+   (`deployment = "main"`), so while one runs the main loop launches no workers: fgsea finished
+   at 14:34, but the run spent the next hour on bookkeeping and DB writes.
+
+   **Proposal**
+   - `db_<dataset>` (`write_dataset_db()`, `R/targets/db_write.R`) writes a complete
+     single-dataset SQLite file with the same schema, `results/db_parts/<dataset>.sqlite`, on a
+     worker (the `ingest` controller), building it on node-local disk (`$TMPDIR`) and copying it
+     into place. It becomes a file target, so targets notices if a part is deleted.
+   - A new `db_merge` target builds `results/stability.sqlite` from scratch: `ATTACH` each part
+     and `INSERT INTO main.<table> SELECT * FROM part.<table>`, table by table in foreign-key
+     order, in one transaction, on node-local disk, then moves the file into place.
+     `db_cross_dataset` then runs on the merged DB as today (projections, gene-space agreement,
+     time-gene recurrence, orphan-artifact cleanup).
+   - **Row ids must not collide.** Every table keys rows by integer ids (`fit_id`, `factor_id`,
+     `query_id`, `projection_id`, `driver_id`, …; 47 foreign-key references), so each part
+     would number from 1. Recommended: give each dataset a fixed id block, e.g.
+     `dataset_number × 10^9` + local id, with `dataset_number` assigned once and kept stable
+     (stored in `datasets`, not taken from the order of `pipeline.yml`, so adding a dataset
+     changes no existing ids). The alternative, remapping ids during the merge by joining on
+     natural keys (`fit_key`, then factor index, …), is more code and slower.
+   - The per-dataset `DELETE ... WHERE dataset_id = ?` logic (`write_dataset_db()`) goes away:
+     a part is always written whole.
+
+   **Expected effect:** the 35 writes run in parallel (a few minutes in total instead of
+   ~75 min), the main loop is never blocked, a failed dataset affects only its own part, and the
+   merge of ~2.3 GB on local disk should take a few minutes. Rebuilding one dataset reruns its
+   part and the merge.
+
+   **Costs:** the merge rewrites the whole DB whenever any part changes (minutes); the parts
+   take about as much disk again as the DB; `SCHEMA_VERSION` must be checked on every part; the
+   id scheme is a schema change (bump `SCHEMA_VERSION`, delete only the `.sqlite`, rerun: only
+   the DB targets rerun). Reruns nothing upstream of `db_` (no fits, ingestion or enrichment).
+
+   **Check before relying on it:** a merged DB equals today's DB table by table (row counts and
+   contents, ignoring id values), `PRAGMA foreign_key_check` is empty, and the app opens it.
+

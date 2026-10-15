@@ -42,9 +42,11 @@ main_pathways_for <- function(res, pathways, ranks) {
 
 #' Enrichment for one representative fit
 #'
-#' Parallelized across factors and collections with BiocParallel (the many
-#' small fgsea()/fora() calls are the cost; each inner call runs serially to
-#' avoid nested forking).
+#' All GSEA calls (every factor x collection, Hallmark included) run as one
+#' BiocParallel round and all ORA calls (CoGAPS marker genes, each factor's top
+#' genes) as a second, each call its own task with the largest collections
+#' first, so the workers stay busy until the end; each inner call runs
+#' serially to avoid nested forking.
 #'
 #' @param dataset_id Dataset id (for log lines).
 #' @param method Method name.
@@ -57,14 +59,12 @@ main_pathways_for <- function(res, pathways, ranks) {
 #' @param both_directions Test both ends of each factor in ORA
 #'   (sign-ambiguous methods).
 #' @return `list(dataset_id, method, fit_key, gsea, fora, local_gsea, local_ora)`
-#'   of fgsea()/fora() results.
+#'   of fgsea()/fora() results: `gsea` is Hallmark, `local_gsea` the other
+#'   collections.
 run_fgsea_job <- function(dataset_id, method, fit_key, loadings_file, pathways_by_source,
                           ensembl_map = NULL, cogaps_marker_genes = NULL, cpus_per_task = 8,
                           both_directions = FALSE) {
-  pathways <- pathways_by_source$HALLMARK
   library(fgsea); library(BiocParallel)
-  bp <- MulticoreParam(cpus_per_task)
-  register(bp)
   t0 <- Sys.time()
   tag <- sprintf("[fgsea] %s/%s %s", dataset_id, method, fit_key)
 
@@ -73,87 +73,73 @@ run_fgsea_job <- function(dataset_id, method, fit_key, loadings_file, pathways_b
   n_factors <- ncol(L_ens)
   message(sprintf("%s: starting -- %d factor(s), %d genes post-remap", tag, n_factors, nrow(L_ens)))
 
-  # Hallmark GSEA: one fgsea() call per factor, dispatched across
-  # `cpus_per_task` workers instead of relying on each individual call's
-  # own (weak, for a 50-pathway collection) internal parallelism.
-  gsea_results <- bplapply(seq_len(n_factors), function(fi) {
-    ranks <- sort(L_ens[, fi], decreasing = TRUE)
-    res <- tryCatch(fgsea(pathways = pathways, stats = ranks, minSize = 10, maxSize = 500,
-                           BPPARAM = SerialParam()),
-                     error = function(e) NULL)
-    list(factor_index = fi, result = res, main_pathways = main_pathways_for(res, pathways, ranks))
-  }, BPPARAM = bp)
-  message(sprintf("%s: Hallmark GSEA done -- %d significant term-hit(s) across %d factor(s)",
-                   tag, n_sig(gsea_results), n_factors))
+  # One task per call (`tasks`): BiocParallel's default splits the list into
+  # one fixed chunk per worker, which leaves workers idle behind a chunk of
+  # large collections. Largest collections first, so the small ones fill in.
+  run_round <- function(items, f) {
+    if (length(items) == 0) return(list())
+    size <- vapply(items, function(it) length(pathways_by_source[[it$src]]), integer(1))
+    ord <- order(-size)
+    out <- bplapply(items[ord], f, BPPARAM = MulticoreParam(cpus_per_task, tasks = length(items)))
+    out[order(ord)]
+  }
+  # both ends of a factor for sign-ambiguous methods (<method>_ingest$sign_ambiguous)
+  dirs <- if (both_directions) c("pos", "neg") else "pos"
+  grid_items <- function(...) {
+    g <- expand.grid(..., stringsAsFactors = FALSE)
+    lapply(seq_len(nrow(g)), function(i) as.list(g[i, , drop = FALSE]))
+  }
 
-  fora_results <- NULL
-  if (method == "cogaps" && !is.null(cogaps_marker_genes)) {
-    fora_results <- bplapply(cogaps_marker_genes, function(genes) {
-      # cogaps_marker_genes come from pattern_markers (R/lib/ingest/
-      # redundancy.R), which is computed against the CogapsResult's OWN
-      # native rownames -- NEVER remapped. Must go through the SAME
-      # ensembl_map as the loadings/universe below, or `genes` and
-      # `universe` are silently in mismatched id spaces (genes would
-      # almost never actually be found in the universe).
+  # ---- GSEA: every factor x collection ---------------------------------------
+  gsea_items <- grid_items(fi = seq_len(n_factors), src = names(pathways_by_source))
+  gsea_out <- run_round(gsea_items, function(it) {
+    ranks <- sort(L_ens[, it$fi], decreasing = TRUE)
+    res <- tryCatch(fgsea(pathways = pathways_by_source[[it$src]], stats = ranks, minSize = 10, maxSize = 500,
+                          BPPARAM = SerialParam()),
+                    error = function(e) NULL)
+    list(factor_index = it$fi, source = it$src, result = res,
+         main_pathways = main_pathways_for(res, pathways_by_source[[it$src]], ranks))
+  })
+  is_hallmark <- vapply(gsea_out, function(x) x$source == "HALLMARK", logical(1))
+  gsea_results <- lapply(gsea_out[is_hallmark], function(x) x[c("factor_index", "result", "main_pathways")])
+  local_gsea_results <- gsea_out[!is_hallmark]
+
+  # ---- ORA: CoGAPS marker genes (Hallmark), each factor's top 100 genes ------
+  markers <- if (method == "cogaps" && !is.null(cogaps_marker_genes)) cogaps_marker_genes else list()
+  ora_items <- c(
+    lapply(seq_along(markers), function(i) list(kind = "markers", i = i, src = "HALLMARK")),
+    lapply(grid_items(fi = seq_len(n_factors), dir_i = dirs, src = names(pathways_by_source)),
+           function(it) c(list(kind = "top"), it)))
+  ora_out <- run_round(ora_items, function(it) {
+    if (it$kind == "markers") {
+      # The marker genes are in the fit's native ids: map them through the
+      # same map as the loadings, or they never meet the universe.
+      genes <- markers[[it$i]]
       genes_ens <- if (!is.null(ensembl_map)) {
         mapped <- ensembl_map[genes]
         unique(mapped[!is.na(mapped) & nzchar(mapped)])
       } else {
         genes
       }
-      tryCatch(fora(pathways = pathways, genes = genes_ens, universe = rownames(L_ens),
-                     minSize = 10, maxSize = 500),
-               error = function(e) NULL)
-    }, BPPARAM = bp)
-    message(sprintf("%s: CoGAPS marker-gene ORA done -- %d significant term-hit(s) across %d pattern(s)",
-                     tag, n_sig(fora_results), length(fora_results)))
-  }
+      return(tryCatch(fora(pathways = pathways_by_source$HALLMARK, genes = genes_ens, universe = rownames(L_ens),
+                           minSize = 10, maxSize = 500),
+                      error = function(e) NULL))
+    }
+    v <- L_ens[, it$fi]
+    genes <- if (it$dir_i == "neg") names(sort(v))[seq_len(min(100, length(v)))]
+             else names(sort(v, decreasing = TRUE))[seq_len(min(100, length(v)))]
+    res <- tryCatch(fora(pathways = pathways_by_source[[it$src]], genes = genes, universe = rownames(L_ens),
+                         minSize = 10, maxSize = 500),
+                    error = function(e) NULL)
+    list(factor_index = it$fi, direction = it$dir_i, source = it$src, n_genes = length(genes), result = res)
+  })
+  is_marker <- vapply(ora_items, function(it) it$kind == "markers", logical(1))
+  fora_results <- if (length(markers)) stats::setNames(ora_out[is_marker], names(markers)) else NULL
+  local_ora_results <- ora_out[!is_marker]
 
-  # ---- local ORA/GSEA replacing gprofiler_grid (see this file's header) ----
-  # Both flattened into ONE combined (factor x source[/direction]) work
-  # list each, dispatched as a single bplapply() across `cpus_per_task`
-  # workers -- this is where most of a fit's wall-clock time goes (up to
-  # n_factors x 5 GSEA calls + n_factors x 2 x 6 ORA calls), so it's where
-  # actually using all requested cores matters most.
-  local_gsea_results <- list()
-  local_ora_results <- list()
-  if (length(pathways_by_source) > 0) {
-    gsea_sources <- setdiff(names(pathways_by_source), "HALLMARK")   # HALLMARK GSEA already covered above
-    # both ends of a factor for sign-ambiguous methods (<method>_ingest$sign_ambiguous)
-    dirs <- if (both_directions) c("pos", "neg") else "pos"
-
-    gsea_jobs <- expand.grid(fi = seq_len(n_factors), src = gsea_sources, stringsAsFactors = FALSE)
-    local_gsea_results <- bplapply(seq_len(nrow(gsea_jobs)), function(i) {
-      fi <- gsea_jobs$fi[i]; src <- gsea_jobs$src[i]
-      ranks <- sort(L_ens[, fi], decreasing = TRUE)
-      res <- tryCatch(fgsea(pathways = pathways_by_source[[src]], stats = ranks, minSize = 10, maxSize = 500,
-                             BPPARAM = SerialParam()),
-                       error = function(e) NULL)
-      list(factor_index = fi, source = src, result = res,
-           main_pathways = main_pathways_for(res, pathways_by_source[[src]], ranks))
-    }, BPPARAM = bp)
-
-    ora_jobs <- expand.grid(fi = seq_len(n_factors), dir_i = dirs, src = names(pathways_by_source),
-                             stringsAsFactors = FALSE)
-    local_ora_results <- bplapply(seq_len(nrow(ora_jobs)), function(i) {
-      fi <- ora_jobs$fi[i]; dir_i <- ora_jobs$dir_i[i]; src <- ora_jobs$src[i]
-      v <- L_ens[, fi]
-      genes <- if (dir_i == "neg") names(sort(v))[seq_len(min(100, length(v)))]
-               else names(sort(v, decreasing = TRUE))[seq_len(min(100, length(v)))]
-      res <- tryCatch(fora(pathways = pathways_by_source[[src]], genes = genes, universe = rownames(L_ens),
-                            minSize = 10, maxSize = 500),
-                       error = function(e) NULL)
-      list(factor_index = fi, direction = dir_i, source = src, n_genes = length(genes), result = res)
-    }, BPPARAM = bp)
-
-    message(sprintf("%s: local GSEA done -- %d source(s) x %d factor(s), %d significant term-hit(s)",
-                     tag, length(gsea_sources), n_factors, n_sig(local_gsea_results)))
-    message(sprintf("%s: local ORA done -- %d source(s) x %d direction(s) x %d factor(s), %d significant term-hit(s)",
-                     tag, length(pathways_by_source), length(dirs), n_factors, n_sig(local_ora_results)))
-  } else {
-    message(sprintf("%s: empty `pathways_by_source` -- skipping local GSEA/ORA", tag))
-  }
-
+  message(sprintf("%s: GSEA done -- %d collection(s) x %d factor(s), %d significant term-hit(s)",
+                  tag, length(pathways_by_source), n_factors, n_sig(gsea_out)))
+  message(sprintf("%s: ORA done -- %d call(s), %d significant term-hit(s)", tag, length(ora_out), n_sig(ora_out)))
   message(sprintf("%s: done in %.1fs", tag, as.numeric(difftime(Sys.time(), t0, units = "secs"))))
 
   list(dataset_id = dataset_id, method = method, fit_key = fit_key,

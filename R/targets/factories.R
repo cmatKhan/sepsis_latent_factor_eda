@@ -460,7 +460,7 @@ tar_dataset_ingest <- function(dataset_id, methods, manifest, pipeline, name, vp
     ),
     targets::tar_target_raw(
       name("ensembl_map"),
-      substitute(build_ensembl_map(META), list(META = sym("meta"))),
+      substitute(build_ensembl_map(META, MAT), list(META = sym("meta"), MAT = sym("mat"))),
       deployment = "main"
     ),
     targets::tar_target_raw(
