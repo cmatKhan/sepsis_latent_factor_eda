@@ -1,0 +1,174 @@
+---
+title: "Datasets"
+---
+
+One entry per dataset configured in `config/` (the public ones; the app links here from its
+Design and model tab, to the entry whose heading is the dataset id in lowercase). Each entry
+records what the dataset is, how it is modelled, and what to know before trusting it. The
+formulas and numbers come from the database (`dataset_design`, `variance_summary`); the
+reasons come from the config comments and the findings in [Methods](methods.qmd). Per-timepoint
+subsets (for example `ANEMONES_DAY1`) have no design of their own: they use their parent's, so
+they link to the parent's entry.
+
+## Reading the models {#reading-the-models}
+
+Every dataset with a `design:` block gets the same two models (`R/lib/design.R`,
+`R/targets/variance.R`).
+
+- **`cell`.** One factor for group × timepoint (time alone, or group alone, when the dataset has
+  only one of them). In the differential expression model the formula is `~0 + cell + ...`, so
+  each coefficient is the mean expression of one cell and every question is a difference of cell
+  means. This handles a group sampled at fewer timepoints than the others without special cases.
+- **Variance model** (variancePartition, ML). Asks how much of each gene's variance each term
+  explains; it tests nothing. Categorical variables are random effects, numeric covariates are
+  fixed and standardized. *Between patients* is the patient term plus person-level variables
+  (group, sex, age); *time* is time plus group × time; *residual* is change within a person that
+  is not shared by time, plus noise. A variable with few levels gives a noisy variance estimate
+  that is often exactly 0: read a 0 as "not distinguishable here", not "no effect".
+- **Differential expression model** (dream, REML). For a time course: each later timepoint
+  against the first, within each group, plus a joint test per group, with a patient random
+  intercept so that samples from one person are not treated as independent. A covariate that is
+  constant within a person (sex) is absorbed by that term; it is not cancelled exactly when
+  people contribute to different cells. Cross-sectional datasets compare groups pairwise.
+- **Technical covariates** (`vp_covariates`, or a control-probe `control_factor`) go into the
+  variance model only.
+
+Shares quoted below are variance-weighted over the genes the factor methods see (about 8,000):
+between patients / time / residual.
+
+## ANEMONES {#anemones}
+
+ANEMONES (GSE236713), array, 447 samples from 194 patients; subsets `ANEMONES_DAY1`, `_DAY2`,
+`_DAY5`, `_DISCHARGE`.
+
+| Cells (samples / patients) | Day 1 | Day 2 | Day 5 | Discharge |
+|---|---|---|---|---|
+| Sepsis | 125 / 124 | 93 / 93 | 69 / 69 | 37 / 37 |
+| SIRS | 39 / 38 | 31 / 31 | 15 / 15 | 8 / 8 |
+| Control | 30 / 30 | - | - | - |
+
+The design is ragged: controls exist only at Day 1. A `disease * timepoint` model would contain
+interaction terms for Control at later days that have no data; the cell-means model has none
+and fits the same means where data exist. Control gets no time contrasts (one timepoint).
+
+- **Variance model:** `~(1|patient_id) + (1|timepoint) + (1|disease) + (1|disease:timepoint) +
+  (1|sex) + control_factor`.
+- **DE model:** `~0 + cell + (1|patient_id) + control_factor`.
+- **`control_factor`** is the first principal component of the array's positive control probes
+  (96 ERCC, 10 Agilent E1A spike-ins and other controls; 72% of their variation). The deposited
+  values have no between-sample normalization, and the sample-mean shift follows these controls
+  (rho 0.92), not leukocyte composition. Shifting each sample by a control offset over-corrected
+  (the controls move about twice as much as genes; sex agreement fell from 0.99 to 0.94), so the
+  PC enters as a covariate instead.
+- **Result:** 34% between patients, 1.7% time, 31% residual, plus a technical share (the control
+  factor). Time effects are real for individual genes (7,134 genes at FDR < 5% for Sepsis, Discharge
+  against Day 1) but small as a share of variance.
+- **Quality:** sex agreement 0.99; 4 subjects have discordant sex annotations and stay in.
+
+## CORTICUS {#corticus}
+
+CORTICUS (GSE106878), array, 94 samples from 47 patients, each sampled at `Pre` and
+`Post(24h)`; subsets `CORTICUS_PRE`, `CORTICUS_POST24H`. No group.
+
+- **Variance model:** patient, timepoint, sex (random), age (fixed). **DE:** `~0 + cell +
+  (1|patient_id)`, one contrast (Post against Pre).
+- `time_order` is required because `Post(24h)` sorts before `Pre`. Treatment, responder and
+  28-day survival are left out of the models because they can mediate the time effect.
+- The array has no control probes; probes the annotation marks as matching no transcript stand in
+  as a technical reference for the composition check.
+- **Result:** 56% between patients, 3.5% time, 40% residual. PC1 tracks the neutrophil-lymphocyte
+  score (rho -0.60).
+
+## EARLI {#earli}
+
+EARLI, RNA-seq, 189 samples, cross-sectional (one per person). Groups: `lca_label`
+(Hyper- or Hypo-inflammatory subphenotype); covariates sex and age.
+
+- No subject or time, so there is no between-patient term: the variance model is group, sex,
+  age and residual, and the DE model compares the two subphenotypes.
+- **Result:** 94% residual. The subphenotype carries about 5% of the variance.
+
+## GSE110487 {#gse110487}
+
+GSE110487, RNA-seq, 62 samples from 31 patients at `T1` and `T2`; subsets `GSE110487_T1`,
+`GSE110487_T2`. No group or covariates (the only other column, response to treatment, is left
+out).
+
+- **Result:** 43% between patients, 1.2% time, 56% residual. PC1 is strongly the
+  neutrophil-lymphocyte axis (rho -0.83), and that score is 61% patient-level: leukocyte
+  composition is largely a stable person trait here.
+
+## GSE13904 {#gse13904}
+
+GSE13904, array, 227 samples from 186 patients at `day1` and `day3`; 41 patients have both,
+145 only one. Subsets `GSE13904_DAY1`, `GSE13904_DAY3`.
+
+- **Group:** `clinical_status`, taken at each subject's **first** timepoint
+  (`group_at_first_time`), because a patient's status changes within person for 17 of the 41
+  sampled twice (for example Septic Shock to SIRS resolved).
+- No sex or age columns. Affymetrix hybridization spike-ins serve as the technical reference.
+- **Result:** 59% between patients, 1.8% time, 39% residual. 98% of the per-gene fits are
+  singular (a variance component estimated at exactly 0), and 145 of the 186 patients have a single
+  sample, so per-gene shares are noisier here than in datasets where everyone is sampled twice.
+
+## GSE273700 {#gse273700}
+
+GSE273700, RNA-seq, 104 samples from 52 patients, each at `Day1` and `Day8`; subsets
+`GSE273700_DAY1`, `GSE273700_DAY8`. No group or covariates.
+
+- **Result:** 39% between patients, 2% time, 59% residual. PC1 is the neutrophil-lymphocyte axis
+  (|rho| 0.90).
+
+## GSE54514 {#gse54514}
+
+GSE54514, array, 163 samples; timepoint `day` 1-5 (modelled as categorical), person id `group_id`
+(for example `HC_1`); group `disease_status` (healthy, sepsis survivor, sepsis nonsurvivor);
+covariates sex and age. Healthy controls are sampled at day 1 and day 5 only; patients across the
+range. Subsets `GSE54514_DAY1` to `_DAY5`.
+
+- **Data quality: this dataset's sample annotations do not match its arrays.** Sex inferred from
+  chrY and XIST genes agrees with the recorded sex for only 50% of samples, and samples of one
+  `group_id` disagree on sex in 35 of 54 subjects. It stays in the pipeline and the app, flagged,
+  but its subject and time results are not interpretable as person-level results.
+- **Result:** 7% between patients, 10% time, 83% residual: the near-absence of a stable
+  between-patient share is consistent with the "subjects" not being real individuals.
+
+## GSE95233 {#gse95233}
+
+GSE95233, array, 102 samples from 51 patients at `D01`, `D02`, `D03` (22 healthy-control
+samples with a missing timepoint are dropped). Covariates sex and age; the recorded sex `H`
+(homme) is recoded to `M` (all four samples show the male XIST/chrY pattern). Subsets
+`GSE95233_D01`, `_D02`, `_D03`.
+
+- **Result:** 38% between patients, 4.2% time (the largest time share among the well-formed
+  designs), 58% residual. Sex agreement 0.98 (one patient discordant).
+
+## MARS {#mars}
+
+MARS (GSE65682), array, 802 samples, cross-sectional. Group `healthy_control` (42 healthy
+against 760 patients); covariates sex and age. There is no subject or time column (the title
+identifiers are not repeated measures). No between-patient term; 75% residual.
+
+## dilgom {#dilgom}
+
+dilgom (E-TABM-1036), array, 518 samples, a healthy reference cohort, cross-sectional. Group
+`age_band` (five levels); covariate sex; one DE contrast (65-74 against 25-34). 97% residual.
+
+## hfgp-500fg {#hfgp-500fg}
+
+hfgp-500fg (GSE134080), RNA-seq, 100 samples, a healthy reference cohort, cross-sectional.
+Group sex, covariate age. It is a positive control: the top sex-differential genes should be on
+chromosome Y. Sex agreement 1.0. Whether a healthy cohort belongs in a sepsis analysis is an
+open scope question recorded in its config.
+
+## SHIP-TREND {#ship-trend}
+
+SHIP-TREND (GSE36382), array, 991 healthy samples. Its phenotype data is access restricted, so
+there is no sample metadata: it gets factor fits but no design, variance or composition analysis.
+It is the largest dataset (8,000 genes × 991 samples) and sizes the controllers' memory.
+
+## gains {#gains}
+
+gains: four pooled ArrayExpress accessions (E-MTAB-4421, 4451, 5273, 5274), array, no timepoint.
+**Not in the pipeline**: its preprocessing script is a stub until it is decided whether to pool
+the four accessions.

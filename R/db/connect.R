@@ -6,7 +6,7 @@
 # relative to the DB's directory.
 
 #' Bump when schema.sql or views.sql changes.
-SCHEMA_VERSION <- 2L
+SCHEMA_VERSION <- 3L
 
 #' Split a schema file into statements
 #'

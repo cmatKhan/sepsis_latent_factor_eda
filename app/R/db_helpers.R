@@ -6,6 +6,15 @@ METRICS <- c("cosine", "pearson", "spearman")
 # Methods in display order. WGCNA has modules, not loadings.
 METHOD_ORDER <- c("pca", "spca", "ica", "nmf", "cogaps", "wgcna")
 
+#' Known methods in METHOD_ORDER, then any other method found in the database
+#' (alphabetical), so a new method appears without an app edit.
+order_methods <- function(m) {
+  m <- unique(m[!is.na(m)])
+  extra <- sort(setdiff(m, METHOD_ORDER))
+  if (length(extra) > 0) note_missing("a display name and colour for method(s)", paste(extra, collapse = ", "))
+  c(METHOD_ORDER[METHOD_ORDER %in% m], extra)
+}
+
 check_metric <- function(metric) {
   if (!metric %in% METRICS) stop("metric must be one of: ", paste(METRICS, collapse = ", "))
   metric
@@ -17,12 +26,12 @@ list_datasets <- function(con) {
   DBI::dbGetQuery(con, "SELECT dataset_id FROM datasets ORDER BY dataset_id")$dataset_id
 }
 
-#' Methods with at least one ok fit for a dataset, in METHOD_ORDER.
+#' Methods with at least one ok fit for a dataset, in METHOD_ORDER then any others.
 methods_for_dataset <- function(con, dataset_id) {
   m <- DBI::dbGetQuery(con,
     "SELECT DISTINCT method FROM fits WHERE dataset_id = ? AND status = 'ok'",
     params = list(dataset_id))$method
-  METHOD_ORDER[METHOD_ORDER %in% m]
+  order_methods(m)
 }
 
 #' Fit counts per method for one dataset (v_ingest_summary).
@@ -186,20 +195,20 @@ optimal_fits <- function(curves, rule = "stable", threshold = 0.9) {
   out[order(match(out$method, METHOD_ORDER)), ]
 }
 
-#' Median out-of-sample R2 (projectR) of each method's optimal fit-family
-#' sources, split by within-/cross-dataset targets. Medians are over every
+#' Median out-of-sample score (relative transfer R2, see projection_scores()) of each
+#' method's fits, split by within-/cross-dataset targets. Medians are over every
 #' projection whose source fit belongs to this dataset and method.
 oos_r2_by_method <- function(con, dataset_id) {
   d <- DBI::dbGetQuery(con,
-    "SELECT f.method, p.projection_type, p.mean_r_squared
+    "SELECT f.method, p.projection_type, p.relative_r2
      FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id
      WHERE f.dataset_id = ?", params = list(dataset_id))
   if (nrow(d) == 0) return(data.frame(method = character(0), oos_r2_within = numeric(0), oos_r2_cross = numeric(0)))
-  agg <- aggregate(mean_r_squared ~ method + projection_type, d, median)
+  agg <- aggregate(relative_r2 ~ method + projection_type, d, median)
   methods <- unique(agg$method)
   pick <- function(type) {
     a <- agg[agg$projection_type == type, ]
-    a$mean_r_squared[match(methods, a$method)]
+    a$relative_r2[match(methods, a$method)]
   }
   data.frame(method = methods, oos_r2_within = pick("within_dataset"), oos_r2_cross = pick("cross_dataset"))
 }
@@ -207,8 +216,8 @@ oos_r2_by_method <- function(con, dataset_id) {
 ## ---- Q4: cross-dataset similarity ----------------------------------------------
 
 #' Long dataset x dataset similarity for one method.
-#'   "r2":         median projectR out-of-sample R2 of source-dataset fits on
-#'                 the target dataset's samples.
+#'   "r2":         median relative transfer R2 (projection_scores()) of source-dataset
+#'                 fits on the target dataset's samples.
 #'   "gene_space": mean |diagonal| of the loadings similarity between the two
 #'                 datasets' representative fits, on shared genes.
 #' Columns: source, target, value, n (projections or matched genes).
@@ -216,9 +225,9 @@ cross_dataset_similarity <- function(con, method, kind = c("r2", "gene_space")) 
   kind <- match.arg(kind)
   if (kind == "r2") {
     d <- DBI::dbGetQuery(con,
-      "SELECT f.dataset_id AS source, p.target_dataset_id AS target, p.mean_r_squared AS value
+      "SELECT f.dataset_id AS source, p.target_dataset_id AS target, p.relative_r2 AS value
        FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id
-       WHERE f.method = ? AND p.mean_r_squared IS NOT NULL", params = list(method))
+       WHERE f.method = ? AND p.relative_r2 IS NOT NULL", params = list(method))
     if (nrow(d) == 0) return(data.frame(source = character(0), target = character(0), value = numeric(0), n = integer(0)))
     agg <- aggregate(value ~ source + target, d, median)
     agg$n <- as.integer(aggregate(value ~ source + target, d, length)$value)
@@ -234,18 +243,6 @@ cross_dataset_similarity <- function(con, method, kind = c("r2", "gene_space")) 
   agg <- aggregate(value ~ source + target, d, mean)
   agg$n <- aggregate(n ~ source + target, d, max)$n
   agg
-}
-
-#' Methods that have any cross-dataset similarity of this kind.
-methods_with_cross_dataset <- function(con, kind = c("r2", "gene_space")) {
-  kind <- match.arg(kind)
-  sql <- if (kind == "r2") {
-    "SELECT DISTINCT f.method FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id"
-  } else {
-    "SELECT DISTINCT f.method FROM gene_space_agreement g JOIN fits f ON f.fit_id = g.source_fit_id"
-  }
-  m <- DBI::dbGetQuery(con, sql)$method
-  METHOD_ORDER[METHOD_ORDER %in% m]
 }
 
 #' Square, symmetrised dataset x dataset matrix from cross_dataset_similarity()

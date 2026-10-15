@@ -135,7 +135,9 @@ mod_variance_ui <- function(id) {
     navset_card_tab(
       nav_panel("Design and model",
         uiOutput(ns("design_text")),
-        vcard("Differential expression contrasts", DT::DTOutput(ns("de")))),
+        vcard("What a cell is", uiOutput(ns("cell_text")), DT::DTOutput(ns("cell_grid"))),
+        vcard("Variance model, term by term", uiOutput(ns("terms_text")), DT::DTOutput(ns("terms_explained"))),
+        vcard("Differential expression model", uiOutput(ns("de_text")), DT::DTOutput(ns("de")))),
       nav_panel("Genes",
         layout_columns(col_widths = c(6, 6), fill = FALSE,
           vcard("Shares by expression and by variance rank", plotOutput(ns("bins"), height = "420px", fill = FALSE)),
@@ -320,10 +322,15 @@ mod_variance_server <- function(id, state, con) {
         labs(x = NULL, y = NULL) + theme_minimal(base_size = 16) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
     })
 
+    design_row <- reactive({ req(has_summary()); design[design$dataset_id == parent(), , drop = FALSE] })
+    has_time <- reactive(!is.na(design_row()$time_col))
+    json_vec <- function(x) if (is.na(x)) character(0) else tryCatch(unlist(jsonlite::fromJSON(x)), error = function(e) character(0))
+
     output$design_text <- renderUI({
-      req(has_summary())
-      d <- design[design$dataset_id == parent(), ]; r <- row()
+      d <- design_row(); r <- row()
+      url <- dataset_docs_url(state$dataset(), parent())
       tagList(
+        if (!is.null(url)) p(tags$a(href = url, target = "_blank", rel = "noopener", "Dataset notes in the documentation \u2197")),
         p(strong(d$n_samples), " samples, ", strong(d$n_subjects), " subjects (", d$n_dropped, " dropped for missing model variables); platform ", d$platform, "."),
         p("Variance model: ", tags$code(gsub("\\s+", " ", d$vp_formula))),
         p("Differential expression model: ", tags$code(gsub("\\s+", " ", d$dream_formula))),
@@ -331,6 +338,57 @@ mod_variance_server <- function(id, state, con) {
           100 * r$share_singular, r$max_colinearity, r$dupcor_consensus)),
         if (!is.na(r$control_factor_fraction)) p(class = "text-muted small", sprintf(
           "Array control probes enter as a covariate (their first PC, %.0f%% of the controls' variance).", 100 * r$control_factor_fraction)))
+    })
+
+    output$cell_text <- renderUI({
+      d <- design_row()
+      if (!has_time()) return(p("This dataset has no timepoints, so a cell is a group (or all samples when there is no group)."))
+      p("A ", tags$code("cell"), " is one group x timepoint combination. In the differential expression model each cell gets its own",
+        " mean (no intercept), so every question is a difference of cell means, and a group that was sampled at fewer",
+        " timepoints needs no special handling. The table gives samples / subjects per cell; a dash is a cell with no data.")
+    })
+    output$cell_grid <- DT::renderDT({
+      d <- design_row()
+      g <- need_data(cell_table(con, parent(), json_vec(d$time_order)), "samples by group and timepoint")
+      DT::datatable(cbind(Group = rownames(g), g), rownames = FALSE, options = list(dom = "t", ordering = FALSE))
+    })
+
+    output$terms_text <- renderUI({
+      p("The variance model asks how much of each gene's variance each term explains; it tests nothing. Categorical variables are",
+        " random effects and numeric covariates are fixed (standardized). Between patients is the patient term plus person-level variables.",
+        tags$br(), span(class = "text-muted small",
+          "A variable with few levels (a group of 3, sex, 4 timepoints) gives a noisy variance estimate that is often exactly 0:",
+          " read a 0 as 'not distinguishable from zero here', not as 'no effect'."))
+    })
+    output$terms_explained <- DT::renderDT({
+      d <- design_row()
+      ft <- need_data(formula_terms(d$vp_formula), "the variance model formula")
+      vt <- need_data(variance_terms_for(con, parent()), "variance_terms")
+      m <- vt[match(ft$variable, vt$term), ]
+      out <- data.frame(Term = ft$variable, Type = ifelse(ft$random, "random", "fixed"),
+                        Category = ifelse(is.na(m$category), "", m$category),
+                        `Median share` = m$median, `Genes > 10%` = m$share_gt10,
+                        Meaning = ifelse(is.na(m$category), "", term_meaning(m$category)), check.names = FALSE)
+      res <- vt[vt$category == "residual", , drop = FALSE]
+      if (nrow(res) > 0) out <- rbind(out, data.frame(Term = "Residual", Type = "", Category = "residual",
+        `Median share` = res$median[1], `Genes > 10%` = res$share_gt10[1], Meaning = term_meaning("residual"), check.names = FALSE))
+      DT::datatable(out, rownames = FALSE, options = list(dom = "t", pageLength = 30, ordering = FALSE)) |>
+        DT::formatPercentage(c("Median share", "Genes > 10%"), 1)
+    })
+
+    output$de_text <- renderUI({
+      d <- design_row()
+      f <- need_data(formula_terms(d$dream_formula), "the differential expression formula")
+      fixed <- setdiff(f$variable[!f$random], "cell")
+      tech <- json_vec(d$technical_covariates)
+      tagList(
+        p(if (has_time()) tagList("Each later timepoint is tested against the first, within each group, and a joint test per group asks whether a gene changes at all over time. ",
+                                  "A group with too few people sampled more than once is fitted but gets no contrasts.")
+          else "Groups are compared pairwise (or by the contrasts the config lists). ",
+          if (any(f$random)) paste0(" The ", paste(f$variable[f$random], collapse = ", "), " random intercept accounts for samples from the same person being correlated, with the correlation estimated per gene.")),
+        if (length(fixed) > 0) p("Fixed covariates here: ", paste(fixed, collapse = ", "), "."),
+        if (length(tech) > 0) p(class = "text-muted small", "In the variance model only (not tested): ", paste(tech, collapse = ", "), "."),
+        p(class = "text-muted small", "A covariate that is constant within a person (such as sex) is absorbed by the person term; it is not cancelled exactly when people contribute to different cells."))
     })
     output$de <- DT::renderDT({
       req(has_summary())

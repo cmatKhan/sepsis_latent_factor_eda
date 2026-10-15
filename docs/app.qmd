@@ -36,7 +36,7 @@ The Compare page has one tab per question.
 | Tab | Question | Source |
 |---|---|---|
 | 1. Optimal hyperparameter | which rank (WGCNA: power) is best for each method on this dataset | representative fits (`v_fits`), `factors.stability_*`, `fit_metrics`, `fit_pairs.ari` |
-| 2. Best method | which method is best and most stable on this dataset | the optimal fits, plus median projectR R² from `projections` |
+| 2. Best method | which method is best and most stable on this dataset | the optimal fits, plus the median relative transfer R² from `projections` |
 | 3. Across methods | how similar are the optimal factors of different methods | computed live from each optimal fit's loadings (WGCNA: module membership) and scores |
 | 4. Across datasets | how similar are a method's factors across datasets | `projections` (sample space) and `gene_space_agreement` (gene space) |
 
@@ -55,8 +55,10 @@ nothing is computed when the page opens. Code: `app/R/mod_variance.R`, `app/R/va
   repeatability (between / (between + residual)), time / (time + residual), the share of genes with
   time above 10%, and flags (sex agreement below 0.9, mostly singular fits, failed genes).
 - **Variance by dataset** has evidence tabs that follow the sidebar dataset (a per-timepoint subset shows its parent):
-  *Design and model* (formulas, samples dropped, singular fits, differential
-  expression contrasts); *Genes* (shares by expression quartile and variance rank, per-term distributions,
+  *Design and model* (formulas, samples dropped, singular fits; what a `cell` is with the
+  group x timepoint grid of samples; each term of the variance model with its category, share and
+  meaning; the differential expression model and its contrasts; a link to the dataset's entry in
+  [Datasets](datasets.qmd) when its config's `hf_collection` is the public collection); *Genes* (shares by expression quartile and variance rank, per-term distributions,
   the genes with the largest time effect); *Within-person change* (each person's
   path over the first three expression PCs with the group mean per timepoint, so group-specific
   trajectories are visible; the share of each person's change from their first sample that lies on one axis, and its correlation
@@ -138,7 +140,7 @@ metadata artifacts are local files under `stability_artifacts/<dataset_id>/`.
 | Page | Shows | Source |
 |---|---|---|
 | Trajectory across time | the focus fit's basis projected onto each per-timepoint sibling dataset of its family; one line per subject across the time course, optionally coloured by a subject-level metadata field. Timepoints are ordered as listed in `config/dataset_families.yml` | within-family `projections`; subject ids from each target's metadata |
-| Projection comparison | for a target dataset: R² by method of every projection; sample-space alignment of two fits' projected weights; gene-space alignment (Fit A's loadings projected by least squares onto Fit B's basis, as projectR does) | `projections` and their artifacts, loadings |
+| Projection comparison | for a target dataset: relative transfer R² by method of every projection; sample-space alignment of two fits' projected weights; gene-space alignment (Fit A's loadings projected by least squares onto Fit B's basis, as projectR does) | `projections` and their artifacts, loadings |
 
 Dataset-by-dataset similarity for one method is on the Compare page, tab 4.
 

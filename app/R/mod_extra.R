@@ -108,7 +108,7 @@ mod_projection_ui <- function(id) {
                    selectInput(ns("fit_b"), "Compare with (Fit B)", choices = NULL), uiOutput(ns("note"))),
     navset_card_tab(
       nav_panel("R² by method",
-        p(class = "text-muted", "How much of the target's variance each method's basis explains when projected in (mean per-sample R²). Grey: every fit; coloured: representative fits. sPCA runs lower by construction: a sparse basis reconstructs new data worse."),
+        p(class = "text-muted", "How much of the target's variation (after removing each gene's mean and each sample's offset) each basis explains, as a fraction of the most any basis of the same size could explain (the target's own top principal components): 1 is as good as the target's own, 0 is no better than chance. Grey: every fit; coloured: representative fits. sPCA runs lower by construction: a sparse basis reconstructs new data worse."),
         plotOutput(ns("r2"), height = "420px")),
       nav_panel("Sample-space alignment",
         p(class = "text-muted", "Correlation between Fit A's and Fit B's projected per-sample weights on the target, samples matched by id."),
@@ -137,11 +137,11 @@ mod_projection_server <- function(id, state, focus, con) {
     output$note <- renderUI(p(class = "mt-4", "Fit A: ", tags$strong(state$dataset(), " / ", focus_label(focus())), " (sidebar). Both fits are from this dataset."))
     output$r2 <- renderPlot({
       d <- pair(); d$m <- factor(method_label(d$method), levels = method_label(METHOD_ORDER))
-      ggplot(d, aes(m, mean_r_squared)) + geom_boxplot(outlier.shape = NA, fill = "grey90") +
+      ggplot(d, aes(m, relative_r2)) + geom_boxplot(outlier.shape = NA, fill = "grey90") +
         geom_jitter(data = d[d$representative != 1, ], width = 0.15, alpha = 0.3, colour = "grey40") +
         geom_jitter(data = d[d$representative == 1, ], aes(colour = method), width = 0.15, size = 2) +
         scale_colour_manual(values = METHOD_COLORS, guide = "none") +
-        labs(x = NULL, y = "mean R²", subtitle = paste(state$dataset(), "→", input$target)) + theme_minimal(base_size = 12)
+        labs(x = NULL, y = "relative transfer R²", subtitle = paste(state$dataset(), "→", input$target)) + theme_minimal(base_size = 12)
     })
     proj_of <- function(id, n = NULL) {
       d <- pair(); p <- d$path[d$source_fit_id == as.integer(id)][1]

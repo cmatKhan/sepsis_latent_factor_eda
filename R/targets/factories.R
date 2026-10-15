@@ -552,7 +552,7 @@ tar_cross_dataset <- function(pipeline, manifest, data_root) {
                             deployment = "main")
   )
   on_projectr <- targets::tar_resources(crew = targets::tar_resources_crew(controller = "projectr"))
-  projection_syms <- list(); gene_space_syms <- list()
+  projection_syms <- list(); score_syms <- list(); gene_space_syms <- list()
   for (id in ids) {
     key <- keys[[id]]
     nm <- function(prefix) paste(prefix, key, sep = "_")
@@ -574,9 +574,16 @@ tar_cross_dataset <- function(pipeline, manifest, data_root) {
           iteration = "list",
           packages = "projectR",
           resources = on_projectr
+        ),
+        targets::tar_target_raw(
+          nm("projection_scores"),
+          substitute(projection_scores(JOBS, ID, ensembl_maps),
+                     list(JOBS = as.symbol(nm("projectr_jobs")), ID = id)),
+          resources = targets::tar_resources(crew = targets::tar_resources_crew(controller = "ingest"))
         )
       ))
       projection_syms <- c(projection_syms, as.symbol(nm("projectr")))
+      score_syms <- c(score_syms, as.symbol(nm("projection_scores")))
     }
     kin <- Filter(function(b) b != id && same_family(families, id, b), ids)
     if (length(kin)) {
@@ -593,9 +600,10 @@ tar_cross_dataset <- function(pipeline, manifest, data_root) {
   }
   c(targets, list(targets::tar_target_raw(
     "db_cross_dataset",
-    substitute(write_cross_dataset_db(DB, WRITTEN, unlist(P, recursive = FALSE), G, VE),
+    substitute(write_cross_dataset_db(DB, WRITTEN, unlist(P, recursive = FALSE), G, VE, SC),
                list(DB = db_path, WRITTEN = named_list("db"),
                     P = as.call(c(quote(list), projection_syms)),
+                    SC = as.call(c(quote(list), score_syms)),
                     G = as.call(c(quote(list), gene_space_syms)),
                     VE = if (length(variance_datasets(pipeline))) quote(variance_explore) else NULL)),
     packages = c("DBI", "RSQLite"),

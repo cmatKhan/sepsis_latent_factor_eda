@@ -575,7 +575,18 @@ timepoint (`within_dataset`) or another cohort (`cross_dataset`).
 
 - The projected matrix is in the file at `path`.
 - **Rows from:** `projectr_<key>`, one branch per (source dataset, target dataset)
-  (`R/targets/projections.R::projection_rows()`, running `R/ingest_jobs/projectr_job.R`).
+  (`R/targets/projections.R::projection_rows()`, running `R/ingest_jobs/projectr_job.R`),
+  joined at write time to `projection_scores_<key>` (`projection_scores()`), the centred scores.
+- **Scores.** projectR's R² is taken against the raw expression, which the mean expression
+  profile alone scores about 0.93 on (a cross-family projection also fits an intercept), so it
+  is not stored; each projection's per-sample values are in the file at `path`. The stored
+  scores are centred: the target is centred by its gene means and sample offsets, the loadings
+  columns are centred, no intercept is fitted, and the R² is pooled over the target
+  (`transfer_r2`). `native_r2` is the most any basis of the same size could explain (the
+  target's own top principal components), `relative_r2 = transfer_r2 / native_r2` is the score
+  to compare across methods and projection types, and `null_r2` is `transfer_r2` with the
+  loadings' genes shuffled (about 0). All loadings columns are used (`n_components`; PCA: its
+  maximum rank).
 
 | Column | Type | Attributes |
 |---|---|---|
@@ -586,12 +597,12 @@ timepoint (`within_dataset`) or another cohort (`cross_dataset`).
 | include_intercept | INTEGER | NN; boolean |
 | n_genes_matched | INTEGER | |
 | n_samples | INTEGER | |
-| mean_r_squared | REAL | |
-| median_r_squared | REAL | |
 | mean_pval | REAL | |
 | median_pval | REAL | |
 | mean_pvar | REAL | |
 | median_pvar | REAL | |
+| n_components | INTEGER | loadings columns used by the centred scores |
+| transfer_r2, native_r2, relative_r2, null_r2 | REAL | centred scores (see above); NULL when fewer than 50 genes match |
 | path | TEXT | NN; relative path of the projection result |
 
 ### `gene_space_agreement`

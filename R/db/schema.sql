@@ -307,12 +307,15 @@ CREATE TABLE projections (
   include_intercept INTEGER NOT NULL CHECK (include_intercept IN (0, 1)),
   n_genes_matched   INTEGER,
   n_samples         INTEGER,
-  mean_r_squared    REAL,
-  median_r_squared  REAL,
   mean_pval         REAL,
   median_pval       REAL,
   mean_pvar         REAL,
   median_pvar       REAL,
+  n_components      INTEGER,
+  transfer_r2       REAL,
+  native_r2         REAL,
+  relative_r2       REAL,
+  null_r2           REAL,
   path              TEXT NOT NULL,
   UNIQUE (source_fit_id, target_dataset_id, include_intercept)
 )

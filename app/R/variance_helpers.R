@@ -139,3 +139,87 @@ composition_markers <- function() {
   note_missing("composition marker list", "config/composition_markers.yml not found")
   NULL
 }
+
+## ---- explaining a dataset's models ---------------------------------------------------------
+
+DOCS_URL <- "https://cmatkhan.github.io/sepsis_latent_factor_eda/"
+PUBLIC_COLLECTION <- "cmatkhan/Sepsis transcriptomics"
+
+# One line per kind of term the variance model can contain (variance_terms.category);
+# an unknown category is shown as its own name.
+TERM_MEANINGS <- c(
+  subject = "stable differences between people",
+  `subject-level` = "differences between people explained by a person-level variable (group, sex, age)",
+  time = "the average change over time that every person shares",
+  `group x time` = "time trajectories that differ between groups",
+  group = "differences between groups",
+  technical = "a technical axis (for example array controls or library size)",
+  covariate = "a further covariate in the model",
+  residual = "everything else: change within a person that is not shared by time, plus measurement noise",
+  derived = "a sum of the terms above")
+
+term_meaning <- function(category) {
+  out <- unname(TERM_MEANINGS[category])
+  ifelse(is.na(out), category, out)
+}
+
+#' The terms of a model formula as written in `dataset_design`, split on top-level `+`
+#' and marked random (`(1 | x)`) or fixed, with the underlying variable name.
+formula_terms <- function(formula_text) {
+  if (is.null(formula_text) || is.na(formula_text)) return(NULL)
+  txt <- gsub("\\s+", " ", trimws(sub("^\\s*~", "", formula_text)))
+  parts <- character(0); depth <- 0; cur <- ""
+  for (ch in strsplit(txt, "")[[1]]) {
+    if (ch == "(") depth <- depth + 1
+    if (ch == ")") depth <- depth - 1
+    if (ch == "+" && depth == 0) { parts <- c(parts, trimws(cur)); cur <- "" } else cur <- paste0(cur, ch)
+  }
+  parts <- c(parts, trimws(cur))
+  parts <- parts[nzchar(parts) & parts != "0" & parts != "1"]
+  random <- grepl("^\\(.*\\|.*\\)$", parts)
+  data.frame(term = parts, random = random,
+             variable = ifelse(random, trimws(sub("^\\(\\s*1\\s*\\|\\s*(.*)\\)$", "\\1", parts)), parts),
+             stringsAsFactors = FALSE)
+}
+
+#' Samples and subjects per group x time cell, in the design's time order (NULL when
+#' the dataset has no time or no samples). Empty cells (a group not sampled then) are kept.
+cell_table <- function(con, dataset_id, time_order = NULL) {
+  s <- samples_for(con, dataset_id)
+  if (is.null(s) || nrow(s) == 0 || all(is.na(s$timepoint))) return(NULL)
+  s$grp <- ifelse(is.na(s$grp), "all samples", s$grp)
+  tp <- unique(s$timepoint)
+  lv <- if (length(time_order)) c(intersect(time_order, tp), setdiff(tp, time_order)) else sort(tp)
+  n <- table(factor(s$grp), factor(s$timepoint, levels = lv))
+  nsub <- tapply(s$subject, list(factor(s$grp), factor(s$timepoint, levels = lv)), function(x) length(unique(x)))
+  nsub[is.na(nsub)] <- 0
+  out <- matrix(sprintf("%d / %d", as.integer(n), as.integer(nsub)), nrow(n), ncol(n), dimnames = dimnames(n))
+  out[n == 0] <- "-"
+  as.data.frame.matrix(out)
+}
+
+#' Map dataset id -> hf_collection from config/*_config.yml (read only; configs aren't named
+#' by id, so each file's declared dataset id is used). Empty when config/ isn't found.
+dataset_collections <- local({
+  cache <- NULL
+  function() {
+    if (!is.null(cache)) return(cache)
+    dir <- Find(dir.exists, c("config", "../config"))
+    if (is.null(dir)) { note_missing("dataset configs", "config/ not found; no documentation links"); cache <<- character(0); return(cache) }
+    files <- list.files(dir, pattern = "_config\\.yml$", full.names = TRUE)
+    out <- character(0)
+    for (f in files) {
+      d <- tryCatch(yaml::read_yaml(f)$dataset, error = function(e) NULL)
+      if (!is.null(d$id) && !is.null(d$hf_collection)) out[[d$id]] <- d$hf_collection
+    }
+    cache <<- out
+    cache
+  }
+})
+
+#' The docs page of a dataset's family, or NULL when its configured collection isn't the public one.
+dataset_docs_url <- function(dataset_id, parent_id = dataset_id) {
+  col <- dataset_collections()
+  if (!isTRUE(unname(col[dataset_id]) == PUBLIC_COLLECTION) && !isTRUE(unname(col[parent_id]) == PUBLIC_COLLECTION)) return(NULL)
+  paste0(DOCS_URL, "datasets.html#", tolower(gsub("[^A-Za-z0-9]+", "-", parent_id)))
+}
