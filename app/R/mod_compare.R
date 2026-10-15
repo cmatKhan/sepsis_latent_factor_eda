@@ -192,12 +192,10 @@ mod_cross_method_server <- function(id, state, con) {
 mod_cross_dataset_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    layout_columns(col_widths = c(4, 8),
-      selectInput(ns("method"), "Method", choices = NULL),
-      radioButtons(ns("kind"), "Similarity", inline = TRUE,
-                   choices = c("Sample space: projectR R²" = "r2", "Gene space: loadings agreement" = "gene_space"))),
+    radioButtons(ns("kind"), "Similarity", inline = TRUE,
+                 choices = c("Sample space: projectR R²" = "r2", "Gene space: loadings agreement" = "gene_space")),
     p(class = "text-muted",
-      "Same method, every pair of datasets, ordered by clustering; the selected dataset is marked \u25b6. R² is how well one dataset's",
+      "The sidebar's method, every pair of datasets, ordered by clustering; the selected dataset is marked \u25b6. R² is how well one dataset's",
       "factors explain the other's samples; gene-space agreement is the mean |matched similarity| between the datasets'",
       "representative loadings on shared genes. Blank cells have no projection or comparison."),
     layout_columns(col_widths = c(7, 5),
@@ -208,7 +206,6 @@ mod_cross_dataset_ui <- function(id) {
 mod_cross_dataset_server <- function(id, state, focus, con) {
   moduleServer(id, function(input, output, session) {
     method <- reactive(focus()$method)
-    output$which <- renderUI(p(tags$strong(method_label(method())), " across all datasets (method set in the sidebar)."))
     long <- reactive({
       validate(need(method() != "wgcna", "WGCNA modules are not projected onto other datasets, so there is no cross-dataset similarity for them. Choose another method in the sidebar."))
       cross_dataset_similarity(con, method(), input$kind)

@@ -44,6 +44,10 @@ factor fits but no design, variance or composition analysis.
    if you want the repeated-measures analysis ([below](#the-design-block)).
 3. Add its `dataset.id` to `datasets:` in `config/pipeline.yml`.
 4. Run the pipeline. Only the new dataset's targets are built.
+5. Optionally record it in [Datasets](datasets.qmd): a section whose heading is the dataset id
+   (anchor `{#<lowercase id>}`). The app's Design and model tab links to that section for datasets
+   whose config says `hf_collection: "cmatkhan/Sepsis transcriptomics"`; nothing in the pipeline
+   reads it.
 
 File names needn't match ids (`ANEMONES_day1_config.yml` declares `ANEMONES_DAY1`); the
 pipeline finds a config by its declared `dataset.id`.

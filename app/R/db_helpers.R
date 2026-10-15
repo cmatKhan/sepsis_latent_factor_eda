@@ -6,6 +6,15 @@ METRICS <- c("cosine", "pearson", "spearman")
 # Methods in display order. WGCNA has modules, not loadings.
 METHOD_ORDER <- c("pca", "spca", "ica", "nmf", "cogaps", "wgcna")
 
+#' Known methods in METHOD_ORDER, then any other method found in the database
+#' (alphabetical), so a new method appears without an app edit.
+order_methods <- function(m) {
+  m <- unique(m[!is.na(m)])
+  extra <- sort(setdiff(m, METHOD_ORDER))
+  if (length(extra) > 0) note_missing("a display name and colour for method(s)", paste(extra, collapse = ", "))
+  c(METHOD_ORDER[METHOD_ORDER %in% m], extra)
+}
+
 check_metric <- function(metric) {
   if (!metric %in% METRICS) stop("metric must be one of: ", paste(METRICS, collapse = ", "))
   metric
@@ -17,12 +26,12 @@ list_datasets <- function(con) {
   DBI::dbGetQuery(con, "SELECT dataset_id FROM datasets ORDER BY dataset_id")$dataset_id
 }
 
-#' Methods with at least one ok fit for a dataset, in METHOD_ORDER.
+#' Methods with at least one ok fit for a dataset, in METHOD_ORDER then any others.
 methods_for_dataset <- function(con, dataset_id) {
   m <- DBI::dbGetQuery(con,
     "SELECT DISTINCT method FROM fits WHERE dataset_id = ? AND status = 'ok'",
     params = list(dataset_id))$method
-  METHOD_ORDER[METHOD_ORDER %in% m]
+  order_methods(m)
 }
 
 #' Fit counts per method for one dataset (v_ingest_summary).
@@ -234,18 +243,6 @@ cross_dataset_similarity <- function(con, method, kind = c("r2", "gene_space")) 
   agg <- aggregate(value ~ source + target, d, mean)
   agg$n <- aggregate(n ~ source + target, d, max)$n
   agg
-}
-
-#' Methods that have any cross-dataset similarity of this kind.
-methods_with_cross_dataset <- function(con, kind = c("r2", "gene_space")) {
-  kind <- match.arg(kind)
-  sql <- if (kind == "r2") {
-    "SELECT DISTINCT f.method FROM projections p JOIN fits f ON f.fit_id = p.source_fit_id"
-  } else {
-    "SELECT DISTINCT f.method FROM gene_space_agreement g JOIN fits f ON f.fit_id = g.source_fit_id"
-  }
-  m <- DBI::dbGetQuery(con, sql)$method
-  METHOD_ORDER[METHOD_ORDER %in% m]
 }
 
 #' Square, symmetrised dataset x dataset matrix from cross_dataset_similarity()

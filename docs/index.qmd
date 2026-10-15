@@ -8,6 +8,7 @@ title: "Latent Factors in Repeat Measure Sepsis Transcriptomics"
 |---|---|
 | [Setup](setup.qmd) | Installation |
 | [Data](data.qmd) | How to store the data and feed it to the project |
+| [Datasets](datasets.qmd) | Each configured dataset: its design, models and quality notes |
 | [Methods](methods.qmd) | Description of the currently implemented variance and latent factor methods |
 | [Running the workflow](workflow.qmd) | running the targets pipeline on a SLURM cluster |
 | [Database](database.qmd) | A description of the database that serves as a backend to the Shiny app |

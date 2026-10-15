@@ -55,8 +55,10 @@ nothing is computed when the page opens. Code: `app/R/mod_variance.R`, `app/R/va
   repeatability (between / (between + residual)), time / (time + residual), the share of genes with
   time above 10%, and flags (sex agreement below 0.9, mostly singular fits, failed genes).
 - **Variance by dataset** has evidence tabs that follow the sidebar dataset (a per-timepoint subset shows its parent):
-  *Design and model* (formulas, samples dropped, singular fits, differential
-  expression contrasts); *Genes* (shares by expression quartile and variance rank, per-term distributions,
+  *Design and model* (formulas, samples dropped, singular fits; what a `cell` is with the
+  group x timepoint grid of samples; each term of the variance model with its category, share and
+  meaning; the differential expression model and its contrasts; a link to the dataset's entry in
+  [Datasets](datasets.qmd) when its config's `hf_collection` is the public collection); *Genes* (shares by expression quartile and variance rank, per-term distributions,
   the genes with the largest time effect); *Within-person change* (each person's
   path over the first three expression PCs with the group mean per timepoint, so group-specific
   trajectories are visible; the share of each person's change from their first sample that lies on one axis, and its correlation

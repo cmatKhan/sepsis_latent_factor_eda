@@ -16,6 +16,8 @@ website:
         text: Setup
       - href: data.qmd
         text: Data
+      - href: datasets.qmd
+        text: Datasets
       - href: methods.qmd
         text: Methods
       - href: workflow.qmd
