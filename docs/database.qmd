@@ -23,8 +23,10 @@ hand and there are no migrations.
 **Schema versioning.** The schema is `R/db/schema.sql` and `R/db/views.sql`; `open_stability_db()`
 (`R/db/connect.R`) creates them on a new file and stamps `PRAGMA user_version` with
 `SCHEMA_VERSION`. It refuses a DB with a different version. After any schema change, bump
-`SCHEMA_VERSION`, delete the DB and its `stability_artifacts/`, and run `tar_make()`; only the
-ingestion and DB targets rerun.
+`SCHEMA_VERSION`, delete the DB file (only the `.sqlite`) and run `tar_make()`; only the DB
+targets rerun. Keep `stability_artifacts/`: most of it is written as a side effect of ingestion
+targets (`ingest_<method>_<dataset>`, `R/targets/ingest.R`), which stay up to date, so a deleted
+file would never be rewritten and the new DB would point at missing loadings and scores.
 
 **What it holds.** The schema-1 build of 30 datasets (2026-10-05) had 7,990 fits in 3.6 GB; the
 largest tables were `match_scores` (8.9 M rows), `gene_modules` (3.3 M), `factor_matches` (3.0 M)

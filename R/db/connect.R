@@ -55,7 +55,8 @@ open_stability_db <- function(db_path, schema_dir = "R/db") {
     if (!identical(as.integer(v), SCHEMA_VERSION)) {
       DBI::dbDisconnect(con)
       stop("Stability DB ", db_path, " has schema version ", v, ", but this code writes version ",
-           SCHEMA_VERSION, ". Delete it (and its stability_artifacts/ directory) and rebuild with ",
+           SCHEMA_VERSION, ". Delete this file (keep stability_artifacts/: ingestion wrote it and won't ",
+           "rewrite it) and rebuild with ",
            "targets::tar_make(); there are no migrations.", call. = FALSE)
     }
   }

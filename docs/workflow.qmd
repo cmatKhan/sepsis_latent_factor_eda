@@ -137,6 +137,61 @@ only the package name, and workers load it. Sourcing `R/` without source referen
 cut the payload about twelvefold; targets hashes functions without them, so neither change
 reruns anything.
 
+### Expected resource use
+
+Measured on the full runs of 2026-10-14/15 (35 datasets, 19-991 samples; matrices are capped at
+8,000 genes, most have 7,000-8,000). Each dataset is one observation: times are fitted as
+`log(seconds) ~ log(samples) + log(genes) [+ log(rank)] [+ para]`, so the exponents below say how
+a step scales. Memory is the SLURM peak (MaxRSS) of worker jobs that did work, or the task's own
+cgroup record on the `vp` controller. Scripts: `logs/dev/resource_analysis.R` and
+`logs/dev/resource_predict.R` (outputs in `logs/dev/resource_analysis/`).
+
+**Factor fits.** Time is per fit; "at 8,000 genes" columns are predictions from the fitted model.
+
+| Method | Fits (run) | Scaling of time (exponent; R²) | Per fit, 200 samples | Per fit, 1,000 samples | Peak memory | CPU use |
+|---|---|---|---|---|---|---|
+| sPCA | 1,260 (889 CPU-h) | genes^2.6, K^1.0, ×2.2 per +0.1 para, samples^0.2; R² 0.94 | at 100 samples: K 5 8-77 min (para 0.2-0.5), K 12 19-191 min | K 5: 12-123 min; K 12: 31-306 min | 1.5-3.0 GB, flat in samples (genes^1.4) | 1 core, ~100% |
+| CoGAPS | 600 (30 CPU-h) | genes^1.1, samples^0.7, rank^0.6; R² 0.75 | 5-7 min | 14-20 min | 9.8-10.3 GB, flat (distributed over 10 sets) | 10 cores, ~88% |
+| NMF | 1,600 (2 CPU-h) | genes^0.9, rank^1.6, samples^0.3; R² 0.82 | 2-15 s | 2-23 s | 0.3 GB | 1 core, ~89% |
+| WGCNA | 525 (5 CPU-h) | genes^0.9, flat in samples; R² 0.73 | ~35 s | ~40 s | 2.5-2.8 GB (genes × genes adjacency/TOM, so bounded by the 8,000-gene cap) | 2 cores, ~44% (mostly single-threaded) |
+| ICA | 3,500 (0.3 CPU-h) | samples^1.4, genes^0.9; R² 0.94 | < 1 s | ~4 s | 0.4-0.9 GB (exceeds 0.5 GB on the larger datasets) | 1 core |
+| PCA | 35 | samples^1.3, genes^1.2 | < 1 s | ~1 s | 0.4-0.55 GB | 1 core |
+
+sPCA dominates: a dataset's sPCA costs a median 20 CPU-h (largest 87 CPU-h). Per-fit time barely
+depends on the number of samples, because `spca()` works on the gene × gene covariance: genes and
+the sparsity `para` drive it. Fits at high K and para on the largest datasets reach the 8 h cap
+(4 fits on 2026-10-14: ANEMONES K 10 para 0.55; MARS K 8-12 para 0.40-0.45), so a run's wall time
+is about two 8-hour stages (scan, then refine) for the slowest dataset, not the total CPU-hours.
+
+**Repeated-measures module** (`vp` controller, 8 cores; cgroup records):
+
+| Step | Time | Memory | Scales with |
+|---|---|---|---|
+| `vp_` (variancePartition) | 1-3 min typical; 13 min for ANEMONES | 2.4-4.1 GB | model genes^2.1 (CPU), not samples (samples^0.2); ~90% of 8 cores |
+| `dream_` | time courses 2-13 min (ANEMONES largest); cross-sectional datasets ~10 s | 3.7-7.5 GB time courses, 0.6-0.9 GB cross-sectional | model genes (^3.7), and whether there is a subject random effect |
+| `norm_` (RNA-seq voom weights) | ≤ 1 min | 3-3.7 GB | |
+| `dupcor_`, `factor_vp_*`, composition, QC | ≤ 8 min, mostly < 1 min | < 2 GB | |
+
+"Model genes" are the genes after collapsing probes or `filterByExpr()` (6,700-32,000), not the
+8,000-gene factor matrix.
+
+**Ingestion and cross-dataset steps.**
+
+| Step | Time | Memory | Notes |
+|---|---|---|---|
+| `fgsea_` (enrichment, per representative fit) | branch median 2 min, max 16 min; per dataset and method up to 84 min | 2.6-3.9 GB, flat in dataset size | ~2.5 of the 8 requested cores used |
+| `wgcna_ora_` | ~0.1-3 min | 0.3-3.7 GB | |
+| `projectr_` (per source × target dataset) | branch median 2 min, p95 18 min, max 112 min; 193 CPU-h in total | 1.2-2.1 GB | scales with the number of target datasets (35² pairs) more than size |
+| `projection_scores_` | ~12 min per source dataset | | |
+| `drivers_` (pattern drivers) | median 3 min, up to 65 min | within the `ingest` request | |
+| `ingest_`, `pairs_`, `redundancy_`, `factor_vp_` | seconds to 2 min | ≤ 2.3 GB | |
+| `db_<dataset>` | ~1 min (max 4 min) | | writes are serialized on one SQLite file |
+
+**Whole runs.** Main process (`tar_make()`): 12-17.7 GB peak (see "Main-process memory").
+Without sPCA the full pipeline took 1 h 20 min (2026-10-14); with sPCA 12.5 h, nearly all of
+it the two sPCA stages of the largest datasets. A rebuild of only the DB and projections takes
+about 1-1.5 h (the projectR branches).
+
 ### Tuning
 
 Aim for about 75% average memory and CPU use, never below 50%, and err on the high side. Size
@@ -153,8 +208,10 @@ memory for the largest dataset (SHIP-TREND: 8,000 genes × 991 samples), not EAR
 cgroup peak memory and CPU seconds in their result (`$resources`, `job_resources()` in
 `R/targets/variance.R`), and `vp_summary_<key>` reports them. That was needed when these tasks
 used socket (`SnowParam`) workers, which left the job's process tree so `seff` missed them;
-since 2026-10-14 they use forked (`MulticoreParam`) workers, which use no ports and which `seff`
-should count. Compare the two on the next run.
+since 2026-10-14 they use forked (`MulticoreParam`) workers, which use no ports. `seff` still
+misses them: on the 2026-10-14/15 runs SLURM reported a median CPU efficiency of 0.02 for `vp`
+jobs, while the cgroup records show about 90% of 8 cores (e.g. `vp_ANEMONES`: 5,829 CPU-seconds
+in 795 s). Use `$resources` for this controller.
 
 The current values and the measurements behind them are in `config/pipeline.yml`'s comments.
 
@@ -214,5 +271,6 @@ run continues (`error = "continue"`).
 targets::tar_invalidate(starts_with("db_")); targets::tar_make()
 ```
 
-After a schema change, delete the DB and its `stability_artifacts/` first (the schema is
-versioned and an old DB is refused). Nothing upstream reruns.
+After a schema change, delete the DB file first (only the `.sqlite`: the schema is versioned
+and an old DB is refused). Keep `stability_artifacts/`, which ingestion wrote and won't rewrite.
+Nothing upstream reruns.

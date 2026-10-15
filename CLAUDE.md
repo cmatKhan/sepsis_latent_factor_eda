@@ -56,8 +56,10 @@ rather than relying on memory, and keep it current when behavior changes.
 - **The `vp` controller's tasks record their job's cgroup peak memory and CPU seconds** in
   `$resources` (`job_resources()`). `seff` missed the earlier BiocParallel `SnowParam` workers
   (they left the process tree); the workers are now forked (`MulticoreParam`, because
-  SnowParam's ports collided between tasks starting together on a node), so check whether
-  `seff` agrees with `$resources`.
+  SnowParam's ports collided between tasks starting together on a node), and `seff` still
+  misses them (median 0.02 CPU efficiency vs ~90% in `$resources`, 2026-10-14). Use
+  `$resources`. Measured resource use per step and its scaling with dataset size is in
+  `docs/workflow.qmd` ("Expected resource use").
 - **No worker caps just to limit submissions.** SLURM's scheduler and per-user limits (200
   running jobs) handle queuing. A `workers:` cap needs another reason, stated in a comment
   (pca/nmf/ica: tasks shorter than a worker's ~30 s start-up).
@@ -97,8 +99,11 @@ Rules:
 ## The database
 
 - A derived output of the targets store, with no migrations. Changing `R/db/schema.sql` or
-  `views.sql` means bumping `SCHEMA_VERSION` (`R/db/connect.R`), deleting the DB and its
-  `stability_artifacts/`, and rerunning `tar_make()` (only ingestion reruns).
+  `views.sql` means bumping `SCHEMA_VERSION` (`R/db/connect.R`), deleting the DB file (only the
+  `.sqlite`), and rerunning `tar_make()` (only the `db_` writes rerun). **Keep
+  `stability_artifacts/`:** most of it (loadings, scores, diagnostics, projections) is written
+  as a side effect of ingestion targets that stay up to date, so deleted files are never
+  rewritten (see the skip-methods lesson below).
 - Those two SQL files are a file target, so even a comment edit reruns every dataset's DB write
   (about an hour).
 - Schema 2 (2026-10-13): repeated-measures tables, enrichment gene lists and pattern markers as

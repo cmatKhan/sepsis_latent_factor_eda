@@ -37,3 +37,27 @@
    invalidates fits (CLAUDE.md, "Don't refit by accident"), and `worker_script_lines()` sits
    beside the controller code. Run `targets::tar_outdated()` afterwards and confirm no
    `fit_` or `grid_` target is outdated before launching anything.
+
+2. **Adjust controller resources in `config/pipeline.yml` (and `run_pipeline.sbatch`) to what
+   the 2026-10-14/15 full runs used.** Measurements and their scaling with dataset size are in
+   `docs/workflow.qmd` ("Expected resource use"); the scripts are
+   `logs/dev/resource_analysis.R` and `logs/dev/resource_predict.R`. Target: ~75% of the
+   request at the largest observed peak.
+
+   | Controller | Now | Observed peak | Change to | What changing it reruns |
+   |---|---|---|---|---|
+   | `fgsea` | 32 GB, 8 CPUs | 3.9 GB; ~2.5 cores used (31% of 8) | 6 GB, 3 CPUs | memory: nothing. CPUs: every `fgsea_` target and what follows (enrichment, `db_`), because `cpus_per_task` is passed into the fgsea commands (`fgsea_cpus`, `R/targets/factories.R`); no fits |
+   | `cogaps` | 18 GB | 10.3 GB | 14 GB | nothing (do **not** change `cpus_per_task`: it is CoGAPS's nSets and changes the grid, refitting CoGAPS) |
+   | `wgcna` | 6 GB | 2.8 GB (bounded: the gene × gene matrices at the 8,000-gene cap) | 4 GB | nothing |
+   | `ingest` | 8 GB | 2.3 GB | 3 GB | nothing |
+   | `projectr` | 4 GB, `time_minutes: 120` | 2.1 GB; a branch took 112 min, and two workers were retried on the backup (a late-starting long branch overran the 2 h limit) | 3 GB, `time_minutes: 240` | nothing |
+   | `ica` | 0.5 GB | 0.9 GB (12 retries on `ica_backup`) | 1 GB | nothing |
+   | `pca` | 0.5 GB | 0.55 GB (1 retry on `pca_backup`) | 1 GB | nothing |
+   | `spca`, `nmf`, `vp`, `prep` | 4 / 0.5 / 12 / 6 GB | 3.0 / 0.3 / 8.6 / 3.4 GB | keep | |
+   | main process (`run_pipeline.sbatch --mem`) | 64 GB | 17.7 GB (2026-10-14 opening burst) | 24 GB | nothing (not a target) |
+
+   Memory, `time_minutes` and `workers` are not hashed by targets; `batch_size` and
+   `cpus_per_task` are (they reach the grids and some commands), so leave those alone unless
+   the rerun is intended. Run `targets::tar_outdated()` after the edit and confirm only what the
+   table says (nothing, or the fgsea chain) is outdated. Update the measurement comments in
+   `pipeline.yml` (several still quote EARLI-only numbers from 2026-10-02/04) at the same time.
